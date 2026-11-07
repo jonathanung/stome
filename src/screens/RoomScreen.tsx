@@ -2,10 +2,10 @@ import { randomUUID } from 'expo-crypto';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
 import {
   ActivityIndicator, FlatList, KeyboardAvoidingView, Platform,
-  Text, View,
+  Text, TextInput, View,
 } from 'react-native';
 
 import { Button, Screen, useStoneTheme } from '../../design-theme/src/primitives';
@@ -18,11 +18,10 @@ import { AnchoredChunkText, PinnedAnswer } from '../features/ask/AnchoredChunkTe
 import type { ChunkFocus } from '../features/ask/citations';
 import { ChunkEditor, type EditResult } from '../features/chunks/ChunkEditor';
 import { pastedParagraphs } from '../features/chunks/paste';
-import { ReviewEntry } from '../features/review/ReviewEntry';
 import { Icon } from '../ui/Icon';
-import { StageGlyph, stageName } from '../ui/StageGlyph';
-import { BackButton, EmptyState, Field, Notice, SectionTitle, useColumn } from '../ui/kit';
+import { EmptyState, Field, Notice, SectionTitle, useColumn } from '../ui/kit';
 import { HarnessPanel } from './HarnessPanel';
+import { RoomHeader } from './RoomHeader';
 
 function readable(error: CommitError): string {
   if (error.code === 'stale_revision') return 'This chunk was changed somewhere else. Reload to see the latest.';
@@ -98,6 +97,7 @@ export function RoomScreen() {
   const column = useColumn();
   const listRef = useRef<FlatList<ChunkWithAnnotations>>(null);
   const scrollY = useRef(0);
+  const composerRef = useRef<ComponentRef<typeof TextInput>>(null);
   const [focus, setFocus] = useState<ChunkFocus | null>(null);
   const [room, setRoom] = useState<Room | null>(null);
   const [chunks, setChunks] = useState<ChunkWithAnnotations[]>([]);
@@ -228,25 +228,16 @@ export function RoomScreen() {
         }}
         contentContainerStyle={[column, { paddingTop: theme.space.md, paddingBottom: 120, gap: theme.space.xl }]}
         ListHeaderComponent={<View style={{ gap: theme.space.section, marginBottom: theme.space.base }}>
-          <View style={{ gap: theme.space.xs }}>
-            <BackButton label="Rooms" accessibilityLabel="All rooms" onPress={() => router.replace('/')} />
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.base }}>
-              <StageGlyph stage={room.stage} size={56} onCanvas />
-              <View style={{ flex: 1, gap: theme.space.xxs }}>
-                <Text accessibilityRole="header" style={[theme.text('screenTitle'), { color: theme.color.text.primary }]}>{room.name}</Text>
-                <Text style={[theme.text('bodySmall'), { color: theme.color.text.tertiary }]}>
-                  {`${stageName(room.stage)} · ${chunks.length} ${chunks.length === 1 ? 'chunk' : 'chunks'}`}
-                </Text>
-              </View>
-            </View>
-          </View>
-          <ReviewEntry roomId={room.id} />
+          <RoomHeader room={room} chunkCount={chunks.length}
+            onBack={() => router.replace('/')}
+            onAsk={() => listRef.current?.scrollToEnd({ animated: true })}
+            onNewNote={() => { listRef.current?.scrollToOffset({ offset: 0, animated: true }); composerRef.current?.focus(); }} />
           <View style={{ gap: theme.space.xl, backgroundColor: theme.color.bg.surface, borderRadius: theme.radius.float, borderWidth: 1, borderColor: theme.color.border.hairline, padding: theme.space.base, ...theme.shadow.card }}>
             <SectionTitle>New note</SectionTitle>
-            <Field accessibilityLabel="Note content" placeholder="Write a note chunk"
+            <Field ref={composerRef} accessibilityLabel="Note content" placeholder="Write a note chunk"
               multiline value={content} onChangeText={onContentChange} style={{ minHeight: 112 }} />
             <Text style={[theme.text('label'), { color: pasteNotice ? theme.color.status.success.text : theme.color.text.tertiary }]}>
-              {pasteNotice ?? 'Paste paragraphs separated by a blank line to add one chunk per paragraph.'}
+              {pasteNotice ?? 'add a note chunk · or paste, it splits on blank lines'}
             </Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.space.md }}>
               <View style={{ flexGrow: 1, flexBasis: 200 }}>
