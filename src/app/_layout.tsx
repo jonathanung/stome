@@ -73,12 +73,11 @@ function AppStack() {
   return (
     <Stack screenOptions={stackHeaderOptions(theme)}>
       <Stack.Screen name="index" options={{ headerShown: false }} />
-      <Stack.Screen name="whiteboard" options={{ headerShown: false }} />
       <Stack.Screen name="today" options={{ headerShown: false }} />
       <Stack.Screen name="rooms/[id]" options={{ headerShown: false }} />
-      <Stack.Screen name="rooms/[id]/board" options={{ headerShown: false }} />
       <Stack.Screen name="recent" options={{ headerShown: false }} />
       <Stack.Screen name="rooms/[id]/review" options={{ headerShown: false }} />
+      <Stack.Screen name="stone" options={{ headerShown: false }} />
     </Stack>
   );
 }
@@ -103,6 +102,7 @@ export default function RootLayout() {
     Outfit_800ExtraBold,
     Outfit_900Black,
   });
+  // A font that fails to load falls back to the system face rather than blocking the app.
   const ready = loaded || Boolean(error);
   if (!ready) {
     return (
