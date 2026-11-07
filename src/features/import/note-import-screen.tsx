@@ -9,6 +9,7 @@ import type { Room } from '../../data/models';
 import { listChunks, listRooms } from '../../data/queries';
 import { expoDriver } from '../../db/expo-driver';
 import { sourceIdentity } from '../../import/markdown';
+import { onenotePathSubjects, onenoteSourceIdentity } from '../../import/onenote/parse';
 import { pickNotes, type PickedNote } from '../../import/pick-notes';
 import { changeSourcePath, changeSubjects, createSubjectReview, type SubjectReview } from '../../import/review-draft';
 
@@ -19,6 +20,11 @@ interface Draft extends SubjectReview {
   name: string;
   result?: string;
   done?: boolean;
+}
+
+function applyOnenoteFolders<T extends SubjectReview>(note: PickedNote, draft: T): T {
+  if (!note.exportFormat || note.exportFormat === 'markdown' || draft.subjectsEdited) return draft;
+  return { ...draft, ...onenotePathSubjects(draft.fileSubjects, draft.path) };
 }
 
 function Action({ label, onPress, disabled = false }: { label: string; onPress(): void; disabled?: boolean }) {
@@ -59,7 +65,7 @@ export default function NoteImportScreen() {
       const result = await pickNotes();
       if (result) {
         setErrors(result.errors);
-        setDrafts(result.notes.map((note) => ({ id: randomUUID(), note, ...createSubjectReview(note.path, note.subjects), roomId: null, name: note.title.slice(0, 80) })));
+        setDrafts(result.notes.map((note) => ({ id: randomUUID(), note, ...applyOnenoteFolders(note, createSubjectReview(note.path, note.subjects)), roomId: null, name: note.title.slice(0, 80) })));
       }
     } catch (error) { setErrors([String(error)]); }
     finally { busyRef.current = false; setBusy(false); }
@@ -70,7 +76,7 @@ export default function NoteImportScreen() {
     busyRef.current = true;
     setBusy(true);
     try {
-      const sourceId = sourceIdentity(collection, draft.path);
+      const sourceId = draft.note.exportFormat && draft.note.exportFormat !== 'markdown' ? onenoteSourceIdentity(collection, draft.path) : sourceIdentity(collection, draft.path);
       const result = await commit({
         opId: randomUUID(), kind: 'import.note', source: 'import', confirmed: true,
         payload: { sourceId, fingerprint: draft.note.fingerprint, bodies: draft.note.bodies, subjects: draft.subjects.split(','), destination: draft.roomId ? { roomId: draft.roomId } : { name: draft.name } },
@@ -97,10 +103,10 @@ export default function NoteImportScreen() {
           data={drafts} keyExtractor={(item) => item.id} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.page}
           ListHeaderComponent={<View style={styles.section}>
             <Text style={styles.title}>Bring your notes</Text>
-            <Text style={styles.text}>Import Markdown from Obsidian or another app. Choose up to 20 .md files, 1 MiB each. PDF and native notebook files are not supported yet.</Text>
+            <Text style={styles.text}>Import Markdown, or an HTML, MHTML, or DOCX file exported from OneNote. Choose up to 20 files, 1 MiB each. PDF, native .one files, images, and ink are not imported.</Text>
             <Field label="Source collection" value={collection} onChangeText={setCollection} disabled={busy} />
             <Text style={styles.hint}>Use the same collection and source paths when re-importing. Review each note before confirming.</Text>
-            <Action label={drafts.length ? 'Choose another batch' : 'Choose Markdown files'} onPress={choose} disabled={busy} />
+            <Action label={drafts.length ? 'Choose another batch' : 'Choose Markdown or OneNote exports'} onPress={choose} disabled={busy} />
             {busy ? <ActivityIndicator accessibilityLabel="Working on notes" /> : null}
             {errors.map((error, i) => <Text key={i} accessibilityRole="alert" style={styles.error}>{error}</Text>)}
           </View>}
@@ -110,7 +116,7 @@ export default function NoteImportScreen() {
             {item.note.warnings.map((warning) => <Text key={warning} style={styles.hint}>{warning}</Text>)}
             {item.folderWarning ? <Text style={styles.hint}>{item.folderWarning}</Text> : null}
             <Action label={`Preview ${item.note.title}`} onPress={() => setPreview({ title: item.note.title, bodies: item.note.bodies })} />
-            <Field label={`Source path for ${item.note.title}`} value={item.path} disabled={busy || item.done} onChangeText={(path) => changeReview(item.id, (draft) => changeSourcePath(draft, path))} />
+            <Field label={`Source path for ${item.note.title}`} value={item.path} disabled={busy || item.done} onChangeText={(path) => changeReview(item.id, (draft) => applyOnenoteFolders(draft.note, changeSourcePath(draft, path)))} />
             <Text style={styles.hint}>Include its original folder if another note has the same filename. Folders suggest subjects until you edit subjects.</Text>
             <Field label={`Subjects for ${item.note.title} (comma separated)`} value={item.subjects} disabled={busy || item.done} onChangeText={(subjects) => changeReview(item.id, (draft) => changeSubjects(draft, subjects))} />
             <Action label={item.roomId ? `Room: ${rooms.find((room) => room.id === item.roomId)?.name ?? 'unavailable'}` : 'Destination: new room'} disabled={busy || item.done} onPress={() => setRoomPicker(item.id)} />
