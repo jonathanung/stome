@@ -34,6 +34,10 @@ class DatabaseBoundary extends Component<{ children: ReactNode }, BoundaryState>
     return { error, retrying: false };
   }
 
+  componentDidCatch(error: Error, info: { componentStack?: string | null }) {
+    console.error('DatabaseBoundary caught', error, info.componentStack);
+  }
+
   retry = () => {
     const error = this.state.error;
     if (!error || this.state.retrying || Platform.OS !== 'web') return;
