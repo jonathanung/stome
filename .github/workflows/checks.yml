@@ -44,15 +44,12 @@ jobs:
         run: npm run check
 
   # Metro production export of the laptop web target. Not a native compile,
-  # EAS build, or deploy. actions:write is only for the artifact upload.
+  # EAS build, or deploy.
   build:
     name: Web production export
     needs: check
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    permissions:
-      contents: read
-      actions: write
     env:
       EXPO_NO_TELEMETRY: "1"
     steps:

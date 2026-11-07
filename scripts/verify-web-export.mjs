@@ -31,16 +31,18 @@ try {
 }
 
 const htmlPath = path.join(root, 'index.html');
+let htmlRead = false;
 let html = '';
 try {
   html = readFileSync(htmlPath, 'utf8');
+  htmlRead = true;
 } catch {
   failures.push('index.html is missing');
 }
-if (html && html.trim().length === 0) failures.push('index.html is empty');
+if (htmlRead && html.trim().length === 0) failures.push('index.html is empty');
 
-const scriptSrcs = html ? [...html.matchAll(/<script\b[^>]*\ssrc="([^"]+)"/g)].map((match) => match[1]) : [];
-if (html && scriptSrcs.length === 0) failures.push('index.html has no script src');
+const scriptSrcs = htmlRead ? [...html.matchAll(/<script\b[^>]*\ssrc="([^"]+)"/g)].map((match) => match[1]) : [];
+if (htmlRead && scriptSrcs.length === 0) failures.push('index.html has no script src');
 
 let bundleCount = 0;
 for (const src of scriptSrcs) {
