@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 
 import { createCommit, type CommitDeps } from '../src/data/commit.ts';
@@ -304,4 +307,48 @@ test('concurrent commits are serialized, never interleaved', async () => {
   assert.ok(results.every((r) => r.ok));
   const positions = (await listChunks(s.db, roomId)).map((c) => c.position);
   assert.deepEqual(positions, Array.from({ length: 20 }, (_, i) => i));
+});
+
+
+test('a local room and its ordered notes survive reopen, then confirmed deletion persists', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'stome-rooms-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const path = join(directory, 'rooms.db');
+  const first = nodeDb(path);
+  await migrateDb(first);
+  const deps = testDeps();
+  const commit = createCommit(first, deps);
+  const create = await commit({ opId: 'create-room', kind: 'room.create', source: 'human', confirmed: false, payload: { name: 'Biology' } });
+  assert.ok(create.ok);
+  const roomId = create.value.roomId;
+  const chunks = await commit({ opId: 'create-chunks', kind: 'chunk.create', source: 'human', confirmed: false, payload: { roomId, bodies: ['Cells', 'Mitosis'], subjects: ['biology'], sourceLink: 'vault/biology.md' } });
+  assert.ok(chunks.ok);
+  const annotated = await commit({ opId: 'annotate', kind: 'annotation.create', source: 'human', confirmed: false, payload: { chunkId: chunks.value.chunkIds[0], type: 'highlight', anchor: { start: 0, end: 5 }, payload: { note: 'review' } } });
+  assert.ok(annotated.ok);
+  const renamed = await commit({ opId: 'rename-room', kind: 'room.rename', source: 'human', confirmed: false, expectedRevision: 1, payload: { roomId, name: 'Cell biology' } });
+  assert.ok(renamed.ok);
+  first.close();
+
+  const reopened = nodeDb(path);
+  await migrateDb(reopened);
+  const savedRoom = await getRoom(reopened, roomId);
+  assert.equal(savedRoom?.name, 'Cell biology');
+  assert.equal(savedRoom.stage, 'stonehenge');
+  assert.equal(savedRoom.revision, 2);
+  const savedChunks = await listChunks(reopened, roomId);
+  assert.deepEqual(savedChunks.map((chunk) => [chunk.position, chunk.body, chunk.subjects, chunk.sourceLink]), [
+    [0, 'Cells', ['biology'], 'vault/biology.md'],
+    [1, 'Mitosis', ['biology'], 'vault/biology.md'],
+  ]);
+  assert.deepEqual((await listAnnotations(reopened, savedChunks[0].id))[0]?.payload, { note: 'review' });
+  const deleted = await createCommit(reopened, deps)({ opId: 'delete-room', kind: 'room.delete', source: 'human', confirmed: true, expectedRevision: savedRoom.revision, payload: { roomId } });
+  assert.ok(deleted.ok);
+  reopened.close();
+
+  const afterDelete = nodeDb(path);
+  await migrateDb(afterDelete);
+  assert.equal(await getRoom(afterDelete, roomId), null);
+  assert.deepEqual(await listChunks(afterDelete, roomId), []);
+  assert.equal(await count(afterDelete, 'annotations'), 0);
+  afterDelete.close();
 });
