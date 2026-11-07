@@ -126,7 +126,7 @@ export function isEditProposal(proposal: StoredProposal): proposal is EditPropos
   return proposal.tool === EDIT_TOOL_NAME;
 }
 
-/** Shape the harness will hand to FND.2. The stub is the only writer today. */
+/** Shape the harness hands to FND.2, the only writer for annotations. */
 export type FoundationAnnotationRequest = {
   opId: string;
   kind: 'annotation.create';
