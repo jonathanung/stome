@@ -1,7 +1,8 @@
 /** Read-only queries. Writes go through `commit.ts` only. */
 
 import type { Db } from '../db/driver.ts';
-import type { Annotation, Chunk, RecentChunk, Room, RoomStage } from './models.ts';
+import type { ReviewState } from '../db/schema.ts';
+import type { Annotation, Chunk, DueChunk, RecentChunk, ReviewMark, Room, RoomStage } from './models.ts';
 
 interface RoomRow {
   id: string;
@@ -105,6 +106,60 @@ const toAnnotation = (row: AnnotationRow): Annotation => ({
 export async function listAnnotations(db: Db, chunkId: string): Promise<Annotation[]> {
   const rows = await db.all<AnnotationRow>('SELECT * FROM annotations WHERE chunk_id = ? ORDER BY created_at, id', [chunkId]);
   return rows.map(toAnnotation);
+}
+
+interface ReviewRow {
+  chunk_id: string;
+  state: ReviewState;
+  local_day: string;
+  marked_at: number;
+  due_at: number;
+  time_zone: string;
+}
+
+const toReview = (row: ReviewRow): ReviewMark => ({
+  chunkId: row.chunk_id,
+  state: row.state,
+  localDay: row.local_day,
+  markedAt: row.marked_at,
+  dueAt: row.due_at,
+  timeZone: row.time_zone,
+});
+
+/** The mark that currently sets this chunk's due time, if it has been reviewed. */
+export async function latestReviewMark(db: Db, chunkId: string): Promise<ReviewMark | null> {
+  const row = await db.get<ReviewRow>(
+    `SELECT chunk_id, state, local_day, marked_at, due_at, time_zone
+       FROM review_marks
+      WHERE chunk_id = ?
+      ORDER BY marked_at DESC, local_day DESC
+      LIMIT 1`,
+    [chunkId],
+  );
+  return row ? toReview(row) : null;
+}
+
+/**
+ * Chunks whose latest mark is due at `now`. An older mark does not count
+ * once a newer one has moved the due time.
+ */
+export async function listDueChunks(db: Db, now: number): Promise<DueChunk[]> {
+  const rows = await db.all<ChunkRow & ReviewRow>(
+    `SELECT ${CHUNK_COLUMNS},
+            m.chunk_id, m.state, m.local_day, m.marked_at, m.due_at, m.time_zone
+       FROM review_marks m
+       JOIN chunks c ON c.id = m.chunk_id
+      WHERE m.due_at <= ?
+        AND NOT EXISTS (
+          SELECT 1 FROM review_marks newer
+           WHERE newer.chunk_id = m.chunk_id
+             AND (newer.marked_at > m.marked_at
+                  OR (newer.marked_at = m.marked_at AND newer.local_day > m.local_day))
+        )
+      ORDER BY m.due_at, c.id`,
+    [now],
+  );
+  return rows.map((row) => ({ chunk: toChunk(row), mark: toReview(row) }));
 }
 
 /** Loads annotations for all chunks in one room without one query per chunk. */

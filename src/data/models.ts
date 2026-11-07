@@ -4,7 +4,7 @@
  * Timestamps are Unix epoch milliseconds.
  */
 
-import type { AnnotationType, RoomStage } from '../db/schema.ts';
+import type { AnnotationType, ReviewState, RoomStage } from '../db/schema.ts';
 
 export type { AnnotationType, RoomStage } from '../db/schema.ts';
 
@@ -59,4 +59,20 @@ export interface Annotation<T extends AnnotationType = AnnotationType> {
 /** A chunk in the recent list, with the name of the room it lives in. */
 export interface RecentChunk extends Chunk {
   roomName: string;
+}
+
+/** The latest human review stored for one chunk on one local calendar day. */
+export interface ReviewMark {
+  chunkId: string;
+  state: ReviewState;
+  localDay: string;
+  markedAt: number;
+  dueAt: number;
+  timeZone: string;
+}
+
+/** A chunk whose latest review mark is due at the queried time. */
+export interface DueChunk {
+  chunk: Chunk;
+  mark: ReviewMark;
 }

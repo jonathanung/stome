@@ -24,7 +24,7 @@ test('a fresh database migrates to the latest version, and running again does no
   await migrateDb(db);
   assert.equal(await version(db), SUPPORTED_VERSION);
   const before = await tables(db);
-  assert.deepEqual(before, ['annotations', 'applied_ops', 'chunk_subjects', 'chunks', 'import_sources', 'notes', 'rooms']);
+  assert.deepEqual(before, ['annotations', 'applied_ops', 'chunk_subjects', 'chunks', 'import_sources', 'notes', 'review_marks', 'rooms']);
 
   await migrateDb(db);
   assert.equal(await version(db), SUPPORTED_VERSION);
