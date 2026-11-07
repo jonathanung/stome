@@ -12,6 +12,8 @@ import {
   type StoredProposal,
 } from '../harness/contract';
 import { harnessExecutor, openHarnessDatabase } from '../harness/expoDb';
+import { AnswerCitations } from '../features/ask/AnswerCitations';
+import { visiblePinError, type ChunkFocus } from '../features/ask/citations';
 import {
   beginQuestion,
   confirmFoundationQuestion,
@@ -34,13 +36,14 @@ type HarnessPanelProps = {
   chunks: readonly ChunkTarget[];
   appDb: SQLiteDatabase;
   onSaved: () => void;
+  onOpenCitation: (focus: ChunkFocus) => void;
 };
 
 type Activity = 'idle' | 'asking' | 'confirming' | 'discarding';
 
 const DEFAULT_COMPANION_URL = 'http://127.0.0.1:8787';
 
-export function HarnessPanel({ roomId, chunks, appDb, onSaved }: HarnessPanelProps) {
+export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }: HarnessPanelProps) {
   const [database, setDatabase] = useState<SQLiteDatabase | null>(null);
   const [databaseError, setDatabaseError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -57,6 +60,7 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved }: HarnessPanelPro
   const activityRef = useRef<Activity>('idle');
   const runRef = useRef<PreparedRun | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const askGeneration = useRef(0);
 
   function setActivity(next: Activity) {
     activityRef.current = next;
@@ -134,6 +138,7 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved }: HarnessPanelPro
     if (activityRef.current !== 'idle') {
       return;
     }
+    const generation = ++askGeneration.current;
     setActivity('asking');
     setError(null);
     setProposal(null);
@@ -156,6 +161,7 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved }: HarnessPanelPro
         provider: companionProvider({ baseUrl: companionUrl.trim(), token: token.trim() }),
         signal: controller.signal,
       });
+      if (generation !== askGeneration.current) return;
       setSession(outcome.session);
       setStatus(outcome.session?.state ?? outcome.status);
       if (outcome.status === 'proposal' && outcome.proposal && outcome.session?.state === 'completed') {
@@ -166,26 +172,32 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved }: HarnessPanelPro
         setError(outcome.errorMessage);
       }
     } catch (caught: unknown) {
+      if (generation !== askGeneration.current) return;
       setStatus('failed');
       setError(caught instanceof Error ? caught.message : 'Could not ask the companion');
     } finally {
-      setActivity('idle');
-      abortRef.current = null;
+      if (generation === askGeneration.current) {
+        setActivity('idle');
+        abortRef.current = null;
+      }
     }
   }
 
   async function onCancel() {
+    const generation = ++askGeneration.current;
     const prepared = runRef.current;
     abortRef.current?.abort();
-    if (!database || !prepared) {
-      setStatus('cancelled');
-      return;
-    }
+    setActivity('idle');
+    setProposal(null);
+    setStatus('cancelled');
+    setError('You cancelled this question. Saved chunks were not changed.');
+    if (!database || !prepared) return;
     await cancelRun(harnessExecutor(database), {
       sessionId: prepared.sessionId,
       runToken: prepared.runToken,
       now: Date.now(),
     });
+    if (askGeneration.current !== generation) return;
     setProposal(null);
     setStatus('cancelled');
     setError('You cancelled this question. Saved chunks were not changed.');
@@ -208,7 +220,8 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved }: HarnessPanelPro
       setError(null);
       onSaved();
     } catch (caught: unknown) {
-      setError(caught instanceof Error ? caught.message : 'Could not save the answer');
+      setError(visiblePinError(caught));
+      onSaved();
     } finally {
       setActivity('idle');
     }
@@ -223,7 +236,7 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved }: HarnessPanelPro
       await discardQuestion(harnessExecutor(database), session.id);
       setProposal(null);
       setStatus('completed');
-      setError('Discarded the proposal. Saved chunks were not changed.');
+      setError(proposal && isEditProposal(proposal) ? 'Discarded the proposal. Saved chunks were not changed.' : 'Declined. Nothing was written.');
     } catch (caught: unknown) {
       setError(caught instanceof Error ? caught.message : 'Could not discard the proposal');
     } finally {
@@ -391,7 +404,13 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved }: HarnessPanelPro
             <>
               <Text style={styles.proposalTitle}>Proposed AI answer</Text>
               <Text testID="proposal-body">{proposal.body}</Text>
-              <Text style={styles.help}>{`Anchored to revision ${proposal.chunkRevision}. Nothing is saved until you confirm.`}</Text>
+              <AnswerCitations
+                chunks={chunks}
+                onOpen={onOpenCitation}
+                proposal={proposal}
+                selectedChunkIds={session?.selectedChunkIds ?? []}
+              />
+              <Text style={styles.help}>Decline writes nothing. Confirm pins this answer on the cited passage.</Text>
             </>
           )}
           <View style={styles.actions}>
@@ -405,10 +424,11 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved }: HarnessPanelPro
               style={[styles.button, confirmDisabled ? styles.buttonDisabled : null]}
               testID="confirm-button"
             >
-              <Text style={styles.buttonText}>Confirm and save</Text>
+              <Text style={styles.buttonText}>{isEditProposal(proposal) ? 'Confirm and save' : 'Confirm and pin'}</Text>
             </Pressable>
             <Pressable
               accessibilityRole="button"
+              accessibilityLabel={isEditProposal(proposal) ? 'Discard the edit' : 'Decline without writing'}
               accessibilityState={{ disabled: busy }}
               disabled={busy}
               onPress={() => {
@@ -417,7 +437,7 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved }: HarnessPanelPro
               style={[styles.secondary, busy ? styles.buttonDisabled : null]}
               testID="discard-button"
             >
-              <Text style={styles.secondaryText}>Discard</Text>
+              <Text style={styles.secondaryText}>{isEditProposal(proposal) ? 'Discard' : 'Decline'}</Text>
             </Pressable>
           </View>
         </View>
