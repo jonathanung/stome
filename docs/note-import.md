@@ -51,8 +51,14 @@ Picker → bounded UTF-8 read → pure Markdown parser → review → `import.no
 operation → existing validate-and-commit boundary → SQLite. The parser takes
 `{path, text}` and returns ordered `bodies`, inferred `subjects`, and warnings.
 Other parsers can implement this same interface later; binary formats are
-rejected by extension instead of guessed. No imported text is executed or
-sent to an AI provider. #31 remains a separate, unimplemented prototype.
+rejected by extension instead of guessed. No imported text is executed. The
+parser never sends text to an AI provider. Only when a paired person presses
+**Suggest rooms** on the room-mapping step does the app send each note's title
+and an excerpt of at most 500 characters to the companion
+(`import.suggestRooms`). In live mode the companion forwards that to Anthropic.
+Suggestions change nothing until the person applies them, and the import
+confirm stays the only writer. The full LLM-orchestrated import (#31) is still
+a separate, unimplemented prototype.
 
 ATX headings outside fenced code start chunks. Long sections split at the
 Foundation body limit, without splitting UTF-16 surrogate pairs. Empty chunks
