@@ -1,10 +1,10 @@
 import Constants from 'expo-constants';
 import { CryptoDigestAlgorithm, digestStringAsync } from 'expo-crypto';
 import { getDocumentAsync } from 'expo-document-picker';
-import { File } from 'expo-file-system';
+import { File, FileMode } from 'expo-file-system';
 import { Platform } from 'react-native';
 
-import { collectPickedNotes, documentPickerCopiesToCache, type PickedNote } from './picked-notes';
+import { collectPickedNotes, documentPickerCopiesToCache, type BoundedByteSource, type PickedNote } from './picked-notes';
 
 export type { PickedNote };
 
@@ -26,7 +26,21 @@ export async function pickNotes(): Promise<{ notes: PickedNote[]; errors: string
       const size = file.size as number | null | undefined;
       return { exists: Boolean(file.exists), size: typeof size === 'number' && Number.isFinite(size) ? size : null };
     },
-    read: async (uri) => new File(uri).text(),
+    // FileHandle.readBytes allocates at most the requested length. ReadOnly is required for content:// URIs.
+    open: (uri) => openBounded(uri),
     fingerprint: (text) => digestStringAsync(CryptoDigestAlgorithm.SHA256, text),
   });
+}
+
+function openBounded(uri: string): BoundedByteSource {
+  const handle = new File(uri).open(FileMode.ReadOnly);
+  let closed = false;
+  return {
+    read: (maxBytes) => handle.readBytes(maxBytes),
+    close() {
+      if (closed) return;
+      closed = true;
+      handle.close();
+    },
+  };
 }
