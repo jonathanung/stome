@@ -3,7 +3,21 @@
 Research date: 2026-11-07. Parent: [note import #17](https://github.com/jonathanung/stome/issues/17).
 This is research, not a production parser or a claim that GoodNotes is supported.
 
-## Finding and v1 recommendation
+## Expanded-scope decision (2026-11-07)
+
+The new user direction selects a shared generic PDF route for #24: per-page
+available text plus retained visual pages/original references, including
+image-only and mixed-content PDFs. See the [expanded plan](../note-import.md#expanded-implementation-scope-2026-11-07).
+This supersedes the original deferral recommendation below. It does not claim
+that the engine is implemented or that authentic GoodNotes exports were tested.
+**#19 remains open** for the missing typed/handwritten sample evidence; that
+source-validation gap no longer gates engineering the generic PDF route.
+The user has deferred handwriting recognition, so OCR is not selected and must
+not be advertised as supported. PDFs without usable selectable text need a clear
+message or an explicit original-reference route, not invented extracted notes. Native `.goodnotes`
+parsing remains outside the selected scope.
+
+## Original finding and v1 recommendation (superseded scope)
 
 GoodNotes PDF import is technically plausible for pages containing usable text,
 but **not sufficiently verified to select for v1**. Keep the existing Markdown
@@ -86,7 +100,7 @@ GoodNotes fixture. See [the inspection report](goodnotes-sample-report.md).
 | Test typed and handwritten GoodNotes exports | **Open:** verified exports and export settings are missing. The unrelated/inconclusive candidate does not satisfy this. |
 | Assess OCR/handwriting recognition needs | Documented above; accuracy testing remains unperformed. |
 | Effort/risk rating | Recorded as conditional engineering estimates above. |
-| Recommendation feeds #28 | Keep Markdown v1; defer #24 until the sample gap and extraction spike are resolved. |
+| Recommendation feeds #28 | The original finding recommended deferral; the user-authorized expanded plan above now selects generic PDF engineering with the sample gap retained as validation work. |
 
 To finish the missing sample work, obtain a small typed notebook and a small
 handwritten notebook with known page text (including a page mixing both), plus
@@ -97,6 +111,7 @@ ground truth and check missing annotations, ordering, page boundaries, symbols
 and recognition errors. Also test a scanned/image-only page and an intentionally
 empty page so the importer can distinguish omission from blank content.
 
-Do not gate a production parser solely on this document. #19 remains open, #24
-remains deferred, and #28's explicit dependency on completed feasibility work
-must retain this unresolved acceptance item.
+The original Markdown-only recommendation did not authorize a production PDF
+parser. The expanded plan now does, with explicit text/visual-reference limits.
+#19 still remains open; neither that scope revision nor generic PDF tests can
+satisfy the unresolved authentic-sample acceptance item.

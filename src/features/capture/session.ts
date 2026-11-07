@@ -46,7 +46,21 @@ export type CaptureStorage = {
   removeItem(key: string): void;
 };
 
-export type SaveResult = { ok: true; duplicate: boolean } | { ok: false; message: string };
+/** Storage that lives as long as the JS runtime. Native has no page reload, so this matches sessionStorage there. */
+export function createMemoryStorage(): CaptureStorage {
+  const items = new Map<string, string>();
+  return {
+    getItem: (key) => items.get(key) ?? null,
+    setItem: (key, value) => {
+      items.set(key, value);
+    },
+    removeItem: (key) => {
+      items.delete(key);
+    },
+  };
+}
+
+export type SaveResult ={ ok: true; duplicate: boolean } | { ok: false; message: string };
 
 export function readStorageItem(
   storage: CaptureStorage | null,

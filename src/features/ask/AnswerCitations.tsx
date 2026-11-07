@@ -21,9 +21,9 @@ export function AnswerCitations({ selectedChunkIds, chunks, proposal, onOpen }: 
   const colors = harnessColors(theme.color);
   const { citations, problems } = citationsForProposal(selectedChunkIds, chunks, proposal);
   return (
-    <View style={{ gap: 8, marginTop: 8 }}>
-      <Text style={[theme.text('label'), { color: colors.sourceLabel }]}>Sources</Text>
-      {citations.map((citation) => {
+    <View style={{ gap: 6 }}>
+      <Text style={[theme.text('eyebrow'), { color: colors.sourceLabel }]}>SOURCES</Text>
+      {citations.map((citation, index) => {
         const label = citation.anchored
           ? `Show cited passage in ${citation.label}`
           : `Show source chunk ${citation.label}`;
@@ -39,23 +39,41 @@ export function AnswerCitations({ selectedChunkIds, chunks, proposal, onOpen }: 
             })}
             style={{
               minHeight: theme.layout.control,
-              justifyContent: 'center',
-              borderColor: theme.color.border.strong,
+              flexDirection: 'row',
+              alignItems: 'flex-start',
+              gap: 10,
+              backgroundColor: theme.color.bg.surface,
               borderRadius: theme.radius.control,
-              borderWidth: 1,
               paddingHorizontal: 12,
-              paddingVertical: 8,
+              paddingVertical: 10,
             }}
             testID={`citation-${citation.chunkId}`}
           >
-            <Text style={[theme.text('bodySmall'), { color: colors.citationLabel }]}>{citation.label}</Text>
-            {citation.anchored ? (
-              <Text style={[theme.text('bodySmall'), { color: colors.citationQuote }]} testID={`citation-quote-${citation.chunkId}`}>
-                {`Cited passage: ${citation.quote}`}
+            <View
+              style={{
+                minWidth: 18,
+                height: 18,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: 5,
+                backgroundColor: theme.color.status.success.fill,
+              }}
+            >
+              <Text style={{ color: theme.color.text.onFill, fontSize: 11, fontWeight: '700', lineHeight: 14 }}>{index + 1}</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[theme.text('label'), { color: colors.citationLabel, fontWeight: '400', lineHeight: 18 }]}>
+                <Text style={{ fontWeight: '600' }}>{`chunk ${index + 1}`}</Text>
+                {` · ${citation.label}`}
               </Text>
-            ) : (
-              <Text style={[theme.text('bodySmall'), { color: colors.citationQuote }]}>Included in this question</Text>
-            )}
+              {citation.anchored ? (
+                <Text style={[theme.text('label'), { color: colors.citationQuote, fontWeight: '400', lineHeight: 18 }]} testID={`citation-quote-${citation.chunkId}`}>
+                  {`Cited passage: ${citation.quote}`}
+                </Text>
+              ) : (
+                <Text style={[theme.text('label'), { color: colors.citationQuote, fontWeight: '400', lineHeight: 18 }]}>Included in this question</Text>
+              )}
+            </View>
           </Pressable>
         );
       })}

@@ -133,7 +133,13 @@ and invalid paths, duplicate subjects, subject limits, warning transitions and
 preservation of manual overrides and unrelated draft state. This follow-up
 does not resolve #23/#28's research gates or add a binary importer.
 
-## #28 and parser readiness
+## Original #28 readiness assessment (superseded scope)
+
+The assessment below records the original Markdown-only gate. The new user
+request supersedes it with the [expanded export-route plan](../note-import.md#expanded-implementation-scope-2026-11-07):
+#19's authentic GoodNotes samples remain unresolved validation work, while generic
+PDF engineering may proceed under the revised #28 decision. A scope decision
+does not mean #23–26 implementations or their source-fidelity tests are complete.
 
 #28 requires the feasibility outcomes from #18–21 and a decision recorded on
 the parent epic. The merged document currently records a **conservative

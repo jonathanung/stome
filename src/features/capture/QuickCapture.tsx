@@ -8,7 +8,7 @@ import { useStoneTheme } from '../../../design-theme/src/primitives';
 import { createCommit } from '../../data/commit';
 import { Icon } from '../../ui/Icon';
 import { Field, Notice } from '../../ui/kit';
-import { listRooms } from '../../data/queries';
+import { getRoom, listRooms } from '../../data/queries';
 import { expoDriver } from '../../db/expo-driver';
 import { LAST_ROOM_KEY, canSubmit } from './draft';
 import { captureLayerGeometry } from './geometry';
@@ -17,17 +17,23 @@ import {
   CLEANUP_FAILED_MESSAGE,
   STORAGE_DEGRADED_MESSAGE,
   createCaptureController,
+  createMemoryStorage,
   loadCaptureState,
   readStorageItem,
   writeStorageItem,
   type CaptureSession,
   type CaptureStorage,
 } from './session';
+import { CAPTURE_SHEET_MAX_WIDTH, QuickCaptureSheet } from './QuickCaptureSheet';
 import { chooseCaptureRoom, roomIdFromPath } from './target';
 
+const nativeStorage = { local: createMemoryStorage(), session: createMemoryStorage() };
+
 // React Native defines `window` as the global object without DOM APIs, so gate on web, not on `window`.
+// Native gets in-memory storage: null would read as a storage failure and show the degraded warning on every launch.
 function browserStorage(kind: 'local' | 'session'): CaptureStorage | null {
-  if (Platform.OS !== 'web' || typeof window === 'undefined') return null;
+  if (Platform.OS !== 'web') return nativeStorage[kind];
+  if (typeof window === 'undefined') return null;
   try {
     return kind === 'local' ? window.localStorage : window.sessionStorage;
   } catch {
@@ -44,6 +50,8 @@ export function QuickCapture() {
   const inputRef = useRef<ComponentRef<typeof TextInput>>(null);
   const pathRoom = roomIdFromPath(pathname);
   const [open, setOpen] = useState(false);
+  const phone = useWindowDimensions().width < CAPTURE_SHEET_MAX_WIDTH;
+  const [roomName, setRoomName] = useState<string | null>(null);
   const [session, setSession] = useState<CaptureSession>(() => loadCaptureState(browserStorage('session'), randomUUID));
   const [controller] = useState(() => createCaptureController({
     storage: browserStorage('session'),
@@ -110,6 +118,13 @@ export function QuickCapture() {
   }, []);
 
   useEffect(() => {
+    if (!open || !phone || !pathRoom) return;
+    let live = true;
+    getRoom(db, pathRoom).then((room) => { if (live) setRoomName(room?.name ?? null); }, () => { if (live) setRoomName(null); });
+    return () => { live = false; };
+  }, [db, open, phone, pathRoom]);
+
+  useEffect(() => {
     if (open) inputRef.current?.focus();
   }, [open]);
 
@@ -146,9 +161,32 @@ export function QuickCapture() {
     gap: theme.space.md,
   };
 
+  const createRoomLink = needsRoom ? (
+    <Link href="/" style={[theme.text('bodySmall'), { color: theme.color.text.primary, textDecorationLine: 'underline' }]} testID="quick-capture-create-room">
+      Create a room
+    </Link>
+  ) : null;
+
   return (
+    <>
+    {open && phone ? (
+      <QuickCaptureSheet
+        createRoomLink={createRoomLink}
+        error={error}
+        failed={failed}
+        inputRef={inputRef}
+        needsRoom={needsRoom}
+        onChangeText={(text) => controller.edit(text)}
+        onClose={() => setOpen(false)}
+        onSave={() => { void save(); }}
+        ready={ready}
+        roomName={pathRoom ? roomName : null}
+        text={session.draft.text}
+        warning={warning}
+      />
+    ) : null}
     <View pointerEvents="box-none" style={layer} testID="quick-capture">
-      {open ? (
+      {open && !phone ? (
         <View
           style={{
             backgroundColor: theme.color.bg.surface,
@@ -238,5 +276,6 @@ export function QuickCapture() {
         <Text style={[theme.text('buttonCompact'), { color: theme.color.accent.fg }]}>Capture</Text>
       </Pressable>
     </View>
+    </>
   );
 }
