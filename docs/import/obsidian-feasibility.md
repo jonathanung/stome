@@ -16,6 +16,14 @@ delivery promises.
 
 ## Format and edge cases
 
+A vault is an ordinary local folder containing Markdown notes and subfolders;
+Obsidian's root `.obsidian` directory holds vault preferences/plugins rather than
+study notes. Attachments are ordinary files, with configurable storage at the
+root or beside/under notes. A future folder importer should retain those relative
+paths and skip configuration/plugin content instead of executing it.
+[Vault storage](https://help.obsidian.md/Files+and+folders/How+Obsidian+stores+data),
+[attachments](https://help.obsidian.md/attachments).
+
 | Feature | Source format | v1 behavior and consequence |
 | --- | --- | --- |
 | Notes and folders | The reviewed parser accepts a relative `.md` path and UTF-8 text. | The picker supplies filenames, not a dependable vault-root hierarchy. Users supply a collection and may edit the source path. Two `Cells.md` files in different folders need distinct reviewed paths. |
