@@ -18,7 +18,8 @@ import { AnchoredChunkText, PinnedAnswer } from '../features/ask/AnchoredChunkTe
 import type { ChunkFocus } from '../features/ask/citations';
 import { ChunkEditor, type EditResult } from '../features/chunks/ChunkEditor';
 import { pastedParagraphs } from '../features/chunks/paste';
-import { PencilToolbar } from '../features/ask/PencilToolbar';
+import { InkLassoActions } from '../features/ask/InkLassoActions';
+import { PencilToolbar, type PencilTool } from '../features/ask/PencilToolbar';
 import { RoomAskPanel, type AskMessage } from '../features/ask/RoomAskPanel';
 import { RoomSidePanel } from '../features/room/RoomSidePanel';
 import { PhoneRoomActions, PhoneRoomHeader, RoomTabs, SubjectChips, roomSubjects, type RoomTab } from '../features/room/PhoneRoomChrome';
@@ -122,6 +123,8 @@ export function RoomScreen() {
   const [dueToday, setDueToday] = useState(0);
   const [askOpen, setAskOpen] = useState(true);
   const [askMessages, setAskMessages] = useState<AskMessage[]>([]);
+  const [penTool, setPenTool] = useState<PencilTool>('pen');
+  const [inkSelected, setInkSelected] = useState(true);
   const [tab, setTab] = useState<RoomTab>('notes');
   const [subject, setSubject] = useState<string | null>(null);
   const subjects = useMemo(() => roomSubjects(chunks), [chunks]);
@@ -353,7 +356,10 @@ export function RoomScreen() {
   return <View style={{ flex: 1, flexDirection: 'row' }} testID="room-split-view">
     <View style={{ flex: 1, minWidth: 0 }}>
       {roomList}
-      <PencilToolbar />
+      {penTool === 'lasso' && inkSelected ? <InkLassoActions
+        onAsk={() => { setAskOpen(true); setAskMessages((prev) => [...prev, { id: randomUUID(), text: 'ask about this ink', note: 'from your ink' }]); setInkSelected(false); }}
+        onConvert={() => setInkSelected(false)} /> : null}
+      <PencilToolbar onChange={(tool) => { setPenTool(tool); if (tool === 'lasso') setInkSelected(true); }} />
     </View>
     {askOpen ? <RoomAskPanel
       subtitle={`your ink + ${chunks.length} ${chunks.length === 1 ? 'chunk' : 'chunks'}`}
