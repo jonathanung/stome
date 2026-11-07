@@ -46,7 +46,7 @@ const toChunk = (r: ChunkRow): Chunk => ({
 });
 
 const CHUNK_COLUMNS = `
-  c.*,
+  c.*, c.content AS body,
   (SELECT json_group_array(subject) FROM
      (SELECT subject FROM chunk_subjects s WHERE s.chunk_id = c.id ORDER BY s.position)) AS subjects_json`;
 

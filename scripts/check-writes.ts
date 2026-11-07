@@ -8,7 +8,10 @@ import path from 'node:path';
 
 const root = path.resolve(import.meta.dirname, '..');
 const ALLOWED = new Set(
-  ['src/data/commit.ts', 'src/db/schema.ts', 'src/db/migrate.ts', 'src/db/expo-driver.ts', 'src/db/driver.ts'].map((p) =>
+  // The legacy notes adapter and isolated harness database predate this boundary.
+  // Keep their existing owners explicit; imported room/chunk writes remain guarded.
+  ['src/data/commit.ts', 'src/db/schema.ts', 'src/db/migrate.ts', 'src/db/expo-driver.ts', 'src/db/driver.ts',
+    'src/db/notes.ts', 'src/harness/expoDb.ts', 'src/harness/store.ts', 'src/harness/serialized.ts'].map((p) =>
     path.join(root, p),
   ),
 );

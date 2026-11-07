@@ -238,13 +238,13 @@ async function apply(db: Db, op: Operation, n: Normalized, deps: CommitDeps): Pr
         if (!await db.get('SELECT 1 FROM rooms WHERE id = ?', [roomId])) reject('not_found', 'the destination room no longer exists');
       } else {
         roomId = deps.newId();
-        await run('INSERT INTO rooms (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)', [roomId, destination.name, now, now]);
+        await run('INSERT INTO rooms (id, name, stage, created_at, updated_at) VALUES (?, ?, \'stonehenge\', ?, ?)', [roomId, destination.name, now, now]);
       }
       const start = (await db.get<{ n: number }>('SELECT COUNT(*) AS n FROM chunks WHERE room_id = ?', [roomId]))!.n;
       const chunkIds = bodies.map(() => deps.newId());
       for (let i = 0; i < bodies.length; i++) {
-        await run('INSERT INTO chunks (id, room_id, position, body, source_link, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [chunkIds[i], roomId, start + i, bodies[i], sourceId, now, now]);
+        await run('INSERT INTO chunks (id, room_id, position, content, source_link, subject_tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [chunkIds[i], roomId, start + i, bodies[i], sourceId, JSON.stringify(subjects), now, now]);
         for (let s = 0; s < subjects.length; s++) {
           await run('INSERT INTO chunk_subjects (chunk_id, subject, position) VALUES (?, ?, ?)', [chunkIds[i], subjects[s], s]);
         }
@@ -256,7 +256,7 @@ async function apply(db: Db, op: Operation, n: Normalized, deps: CommitDeps): Pr
     case 'room.create': {
       const roomId = n.payload.roomId ?? deps.newId();
       if (await db.get('SELECT 1 FROM rooms WHERE id = ?', [roomId])) reject('conflict', 'a room with that id already exists');
-      await run('INSERT INTO rooms (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)', [roomId, n.payload.name, now, now]);
+      await run('INSERT INTO rooms (id, name, stage, created_at, updated_at) VALUES (?, ?, \'stonehenge\', ?, ?)', [roomId, n.payload.name, now, now]);
       return { roomId, revision: 1 };
     }
     case 'room.rename': {
@@ -285,8 +285,8 @@ async function apply(db: Db, op: Operation, n: Normalized, deps: CommitDeps): Pr
       }
       for (let i = 0; i < bodies.length; i += 1) {
         await run(
-          'INSERT INTO chunks (id, room_id, position, body, source_link, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [chunkIds[i], roomId, index + i, bodies[i], sourceLink, now, now],
+          'INSERT INTO chunks (id, room_id, position, content, source_link, subject_tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [chunkIds[i], roomId, index + i, bodies[i], sourceLink, JSON.stringify(subjects), now, now],
         );
         for (let s = 0; s < subjects.length; s += 1) {
           await run('INSERT INTO chunk_subjects (chunk_id, subject, position) VALUES (?, ?, ?)', [chunkIds[i], subjects[s], s]);
@@ -298,9 +298,10 @@ async function apply(db: Db, op: Operation, n: Normalized, deps: CommitDeps): Pr
       const { chunkId, body, subjects } = n.payload;
       await expectRevision(await db.get<RevisionRow>('SELECT revision FROM chunks WHERE id = ?', [chunkId]), op.expectedRevision, 'chunk');
       if (body !== undefined) {
-        await run('UPDATE chunks SET body = ? WHERE id = ?', [body, chunkId]);
+        await run('UPDATE chunks SET content = ? WHERE id = ?', [body, chunkId]);
       }
       if (subjects !== undefined) {
+        await run('UPDATE chunks SET subject_tags = ? WHERE id = ?', [JSON.stringify(subjects), chunkId]);
         await run('DELETE FROM chunk_subjects WHERE chunk_id = ?', [chunkId]);
         for (let s = 0; s < subjects.length; s += 1) {
           await run('INSERT INTO chunk_subjects (chunk_id, subject, position) VALUES (?, ?, ?)', [chunkId, subjects[s], s]);
@@ -336,7 +337,7 @@ async function apply(db: Db, op: Operation, n: Normalized, deps: CommitDeps): Pr
     }
     case 'annotation.create': {
       const { chunkId, type, anchor, payload = {} } = n.payload;
-      const chunk = await db.get<RevisionRow & { body: string }>('SELECT revision, body FROM chunks WHERE id = ?', [chunkId]);
+      const chunk = await db.get<RevisionRow & { body: string }>('SELECT revision, content AS body FROM chunks WHERE id = ?', [chunkId]);
       await expectRevision(chunk, op.expectedRevision, 'chunk');
       checkAnchor(type, anchor as unknown as Record<string, unknown>, chunk!.body);
       const annotationId = n.payload.annotationId ?? deps.newId();

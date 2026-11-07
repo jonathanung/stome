@@ -93,7 +93,8 @@ COOP/COEP hosting headers. Real export fixtures and vault/ZIP import remain open
 
 Validation on this branch (2026-11-07):
 
-- `npm run check`: typecheck, lint, all 35 Node tests, write isolation passed.
+- `npm run check`: typecheck, lint, schema checks, all 36 application tests,
+  all 15 harness tests and write isolation passed after integrating current main.
 - `npx expo export --platform web`: passed, including SQLite WASM/worker assets.
 - `npx expo export --platform android --platform ios --output-dir dist/native`:
   both Hermes bundles passed.
@@ -105,7 +106,14 @@ Validation on this branch (2026-11-07):
 - Local Node was 26.7.0; CI pins the repository's declared Node 22.23.4. Node 22
   validation was not performed locally.
 
-The feature branch was built in a separate worktree from committed Foundation
-code. Its minimal Router entry replaces the old placeholder screen. When merging
-with the in-progress capture UI, retain that UI's layout/provider and expose
-`NoteImportScreen` through a route; the importer core does not depend on its store.
+The feature branch was built in a separate worktree and integrated with current
+main before opening its PR. The Router home preserves main's notes/harness
+screen; `/import` exposes `NoteImportScreen`. The importer core does not depend
+on the in-progress capture UI's store. Main's shipped v1/v2 SQL migrations are
+unchanged: v3 adds revisions, anchors, normalized subjects and operation records;
+v4 adds import provenance. Existing `content` and `subject_tags` columns are kept.
+Legacy notes remain usable by the harness; existing notes are also snapshotted
+once into the room workspace during upgrade. Subsequent legacy note edits and
+room chunk edits are independent. Tests cover upgrading an existing v2 database
+with rooms, tags, annotations and notes. The write guard explicitly allows the
+pre-existing notes adapter and the separate harness database's existing owners.
