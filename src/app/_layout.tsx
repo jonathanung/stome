@@ -4,13 +4,14 @@ import { StatusBar } from 'expo-status-bar';
 import { Component, Suspense, type ReactNode } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 
-import { ThemeProvider } from '../../design-theme/src/primitives';
+import { ThemeProvider, useStoneTheme } from '../../design-theme/src/primitives';
 import { expoDriver } from '../db/expo-driver';
 import { migrateDb } from '../db/migrate';
 import { DATABASE_NAME } from '../db/schema';
 import { classifyStorageFailure, createStorageRetryGate, finishStartup } from '../db/storage-startup';
 import { QuickCapture } from '../features/capture/QuickCapture';
 import { StorageOpening, StorageStartupScreen } from '../screens/StorageStartup';
+import { stackHeaderOptions } from '../theme/stack-header';
 
 function prepareDatabase(db: SQLiteDatabase): Promise<void> {
   return finishStartup(
@@ -59,32 +60,43 @@ class DatabaseBoundary extends Component<{ children: ReactNode }, BoundaryState>
   }
 }
 
+function AppStack() {
+  const theme = useStoneTheme();
+  return (
+    <Stack screenOptions={stackHeaderOptions(theme)}>
+      <Stack.Screen name="index" options={{ headerShown: false }} />
+      <Stack.Screen name="rooms/[id]" options={{ headerShown: false }} />
+      <Stack.Screen name="recent" options={{ headerShown: false }} />
+      <Stack.Screen name="rooms/[id]/review" options={{ headerShown: false }} />
+    </Stack>
+  );
+}
+
+function ThemedRoot({ children }: { children: ReactNode }) {
+  const theme = useStoneTheme();
+  return <View style={[styles.root, { backgroundColor: theme.color.bg.canvas }]}>{children}</View>;
+}
+
 export default function RootLayout() {
   return (
     <ThemeProvider>
-      <View style={styles.root}>
+      <ThemedRoot>
         <StatusBar style="auto" />
         <DatabaseBoundary>
           <Suspense fallback={<StorageOpening />}>
             <SQLiteProvider databaseName={DATABASE_NAME} onInit={prepareDatabase} useSuspense>
-              <Stack screenOptions={{ headerTitle: 'stome', headerStyle: { backgroundColor: '#f6f4ee' }, headerTintColor: '#292820' }}>
-                <Stack.Screen name="index" options={{ headerShown: false }} />
-                <Stack.Screen name="rooms/[id]" options={{ headerShown: false }} />
-                <Stack.Screen name="recent" options={{ headerShown: false }} />
-                <Stack.Screen name="rooms/[id]/review" options={{ headerShown: false }} />
-              </Stack>
+              <AppStack />
               <QuickCapture />
             </SQLiteProvider>
           </Suspense>
         </DatabaseBoundary>
-      </View>
+      </ThemedRoot>
     </ThemeProvider>
   );
 }
 
 const styles = StyleSheet.create({
   root: {
-    backgroundColor: '#ffffff',
     flex: 1,
   },
 });
