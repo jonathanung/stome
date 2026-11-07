@@ -3,6 +3,7 @@ export type Tool =
   | 'hand'
   | 'freedraw'
   | 'rectangle'
+  | 'diamond'
   | 'ellipse'
   | 'line'
   | 'arrow'
@@ -35,6 +36,12 @@ export type RectangleElement = ElementBase & {
   height: number;
 };
 
+export type DiamondElement = ElementBase & {
+  type: 'diamond';
+  width: number;
+  height: number;
+};
+
 export type EllipseElement = ElementBase & {
   type: 'ellipse';
   width: number;
@@ -62,6 +69,7 @@ export type TextElement = ElementBase & {
 export type WhiteboardElement =
   | FreedrawElement
   | RectangleElement
+  | DiamondElement
   | EllipseElement
   | LineElement
   | ArrowElement

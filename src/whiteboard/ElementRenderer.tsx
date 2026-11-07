@@ -9,9 +9,16 @@ import {
   Text as SvgText,
 } from 'react-native-svg';
 
-import { arrowHeadPoints, smoothPath } from './geometry';
+import {
+  arrowHeadPoints,
+  curvedArrowPath,
+  diamondPoints,
+  elementBounds,
+  smoothPath,
+} from './geometry';
 import type {
   ArrowElement,
+  DiamondElement,
   EllipseElement,
   FreedrawElement,
   LineElement,
@@ -29,10 +36,9 @@ function strokeDasharray(style: string, width: number): string | undefined {
 function RenderFreedraw({ el }: { el: FreedrawElement }) {
   if (el.points.length === 0) return null;
   const absolute: [number, number][] = el.points.map(([px, py]) => [el.x + px, el.y + py]);
-  const d = smoothPath(absolute);
   return (
     <Path
-      d={d}
+      d={smoothPath(absolute)}
       fill="none"
       stroke={el.strokeColor}
       strokeWidth={el.strokeWidth}
@@ -63,6 +69,20 @@ function RenderRectangle({ el }: { el: RectangleElement }) {
       strokeDasharray={strokeDasharray(el.strokeStyle, el.strokeWidth)}
       opacity={el.opacity}
       rx={2}
+    />
+  );
+}
+
+function RenderDiamond({ el }: { el: DiamondElement }) {
+  return (
+    <Polygon
+      points={diamondPoints(el.x, el.y, el.width, el.height)}
+      fill={el.backgroundColor === 'transparent' ? 'none' : el.backgroundColor}
+      stroke={el.strokeColor}
+      strokeWidth={el.strokeWidth}
+      strokeLinejoin="round"
+      strokeDasharray={strokeDasharray(el.strokeStyle, el.strokeWidth)}
+      opacity={el.opacity}
     />
   );
 }
@@ -116,21 +136,27 @@ function RenderArrow({ el }: { el: ArrowElement }) {
     el.x + el.points[el.points.length - 1][0],
     el.y + el.points[el.points.length - 1][1],
   ];
-  const headPoints = arrowHeadPoints(from, to, el.strokeWidth * 5 + 4);
+  const headSize = el.strokeWidth * 5 + 4;
+  // Shorten the tip slightly so the arrowhead sits on top cleanly
+  const dx = to[0] - from[0];
+  const dy = to[1] - from[1];
+  const len = Math.sqrt(dx * dx + dy * dy);
+  const tip: [number, number] = len > headSize
+    ? [to[0] - (dx / len) * (headSize * 0.4), to[1] - (dy / len) * (headSize * 0.4)]
+    : to;
+
   return (
     <G opacity={el.opacity}>
-      <Line
-        x1={from[0]}
-        y1={from[1]}
-        x2={to[0]}
-        y2={to[1]}
+      <Path
+        d={curvedArrowPath(from, tip)}
+        fill="none"
         stroke={el.strokeColor}
         strokeWidth={el.strokeWidth}
         strokeLinecap="round"
         strokeDasharray={strokeDasharray(el.strokeStyle, el.strokeWidth)}
       />
       <Polygon
-        points={headPoints}
+        points={arrowHeadPoints(from, to, headSize)}
         fill={el.strokeColor}
         stroke={el.strokeColor}
         strokeWidth={1}
@@ -155,6 +181,34 @@ function RenderText({ el }: { el: TextElement }) {
   );
 }
 
+function SelectionBox({ el }: { el: WhiteboardElement }) {
+  const pad = 6;
+  const b = elementBounds(el);
+  const sx = b.x - pad;
+  const sy = b.y - pad;
+  const sw = b.w + pad * 2;
+  const sh = b.h + pad * 2;
+  return (
+    <G>
+      <Rect
+        x={sx}
+        y={sy}
+        width={sw}
+        height={sh}
+        fill="none"
+        stroke="#4dabf7"
+        strokeWidth={1.5}
+        strokeDasharray="4,3"
+        rx={3}
+      />
+      <Circle cx={sx} cy={sy} r={4} fill="#4dabf7" />
+      <Circle cx={sx + sw} cy={sy} r={4} fill="#4dabf7" />
+      <Circle cx={sx} cy={sy + sh} r={4} fill="#4dabf7" />
+      <Circle cx={sx + sw} cy={sy + sh} r={4} fill="#4dabf7" />
+    </G>
+  );
+}
+
 type Props = {
   element: WhiteboardElement;
   selected: boolean;
@@ -164,76 +218,22 @@ export function ElementRenderer({ element, selected }: Props) {
   let rendered: React.ReactElement | null = null;
 
   switch (element.type) {
-    case 'freedraw':
-      rendered = <RenderFreedraw el={element} />;
-      break;
-    case 'rectangle':
-      rendered = <RenderRectangle el={element} />;
-      break;
-    case 'ellipse':
-      rendered = <RenderEllipse el={element} />;
-      break;
-    case 'line':
-      rendered = <RenderLine el={element} />;
-      break;
-    case 'arrow':
-      rendered = <RenderArrow el={element} />;
-      break;
-    case 'text':
-      rendered = <RenderText el={element} />;
-      break;
+    case 'freedraw': rendered = <RenderFreedraw el={element} />; break;
+    case 'rectangle': rendered = <RenderRectangle el={element} />; break;
+    case 'diamond': rendered = <RenderDiamond el={element} />; break;
+    case 'ellipse': rendered = <RenderEllipse el={element} />; break;
+    case 'line': rendered = <RenderLine el={element} />; break;
+    case 'arrow': rendered = <RenderArrow el={element} />; break;
+    case 'text': rendered = <RenderText el={element} />; break;
   }
 
   if (!rendered) return null;
+  if (!selected) return rendered;
 
-  if (selected) {
-    // Draw selection outline based on element bounds
-    const pad = 6;
-    let sx: number, sy: number, sw: number, sh: number;
-    if (
-      element.type === 'freedraw' ||
-      element.type === 'line' ||
-      element.type === 'arrow'
-    ) {
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      for (const [px, py] of element.points) {
-        minX = Math.min(minX, element.x + px);
-        minY = Math.min(minY, element.y + py);
-        maxX = Math.max(maxX, element.x + px);
-        maxY = Math.max(maxY, element.y + py);
-      }
-      sx = minX - pad;
-      sy = minY - pad;
-      sw = maxX - minX + pad * 2;
-      sh = maxY - minY + pad * 2;
-    } else {
-      const el = element as RectangleElement | EllipseElement | TextElement;
-      sx = el.x - pad;
-      sy = el.y - pad;
-      sw = el.width + pad * 2;
-      sh = el.height + pad * 2;
-    }
-    return (
-      <G>
-        {rendered}
-        <Rect
-          x={sx}
-          y={sy}
-          width={sw}
-          height={sh}
-          fill="none"
-          stroke="#4dabf7"
-          strokeWidth={1.5}
-          strokeDasharray="4,3"
-          rx={3}
-        />
-        <Circle cx={sx} cy={sy} r={4} fill="#4dabf7" />
-        <Circle cx={sx + sw} cy={sy} r={4} fill="#4dabf7" />
-        <Circle cx={sx} cy={sy + sh} r={4} fill="#4dabf7" />
-        <Circle cx={sx + sw} cy={sy + sh} r={4} fill="#4dabf7" />
-      </G>
-    );
-  }
-
-  return rendered;
+  return (
+    <G>
+      {rendered}
+      <SelectionBox el={element} />
+    </G>
+  );
 }

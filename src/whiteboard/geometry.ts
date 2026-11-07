@@ -22,20 +22,6 @@ export function boardToScreen(
   ];
 }
 
-export function pointsToPath(points: [number, number][]): string {
-  if (points.length === 0) return '';
-  if (points.length === 1) {
-    const [x, y] = points[0];
-    return `M ${x} ${y} L ${x} ${y}`;
-  }
-  const [first, ...rest] = points;
-  const parts = [`M ${first[0]} ${first[1]}`];
-  for (const [x, y] of rest) {
-    parts.push(`L ${x} ${y}`);
-  }
-  return parts.join(' ');
-}
-
 export function smoothPath(points: [number, number][]): string {
   if (points.length === 0) return '';
   if (points.length === 1) {
@@ -48,22 +34,47 @@ export function smoothPath(points: [number, number][]): string {
   const [first] = points;
   const parts = [`M ${first[0]} ${first[1]}`];
   for (let i = 1; i < points.length - 1; i++) {
-    const [x0, y0] = points[i - 1];
     const [x1, y1] = points[i];
     const [x2, y2] = points[i + 1];
-    const cpx = (x0 + x1) / 2;
-    const cpy = (y0 + y1) / 2;
     const cpx2 = (x1 + x2) / 2;
     const cpy2 = (y1 + y2) / 2;
     parts.push(`Q ${x1} ${y1} ${cpx2} ${cpy2}`);
-    void cpx;
-    void cpy;
   }
   const last = points[points.length - 1];
   parts.push(`L ${last[0]} ${last[1]}`);
   return parts.join(' ');
 }
 
+/** Diamond SVG polygon points string given bounding box top-left + size. */
+export function diamondPoints(x: number, y: number, w: number, h: number): string {
+  const ax = Math.abs(w);
+  const ay = Math.abs(h);
+  const ox = w < 0 ? x + w : x;
+  const oy = h < 0 ? y + h : y;
+  const cx = ox + ax / 2;
+  const cy = oy + ay / 2;
+  return `${cx},${oy} ${ox + ax},${cy} ${cx},${oy + ay} ${ox},${cy}`;
+}
+
+/** Curved arrow path: slight quadratic arc perpendicular to the midpoint. */
+export function curvedArrowPath(
+  from: [number, number],
+  to: [number, number],
+): string {
+  const mx = (from[0] + to[0]) / 2;
+  const my = (from[1] + to[1]) / 2;
+  const dx = to[0] - from[0];
+  const dy = to[1] - from[1];
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len < 1) return `M ${from[0]} ${from[1]} L ${to[0]} ${to[1]}`;
+  // Offset control point perpendicular to the line, scaled to 15% of length
+  const perp = 0.15;
+  const cpx = mx - dy * perp;
+  const cpy = my + dx * perp;
+  return `M ${from[0]} ${from[1]} Q ${cpx} ${cpy} ${to[0]} ${to[1]}`;
+}
+
+/** Arrow head polygon points string. */
 export function arrowHeadPoints(
   from: [number, number],
   to: [number, number],
@@ -97,7 +108,10 @@ export function elementBounds(el: WhiteboardElement): {
     }
     return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
   }
-  return { x: el.x, y: el.y, w: (el as { width: number }).width, h: (el as { height: number }).height };
+  const e = el as { x: number; y: number; width: number; height: number };
+  const x = e.width < 0 ? e.x + e.width : e.x;
+  const y = e.height < 0 ? e.y + e.height : e.y;
+  return { x, y, w: Math.abs(e.width), h: Math.abs(e.height) };
 }
 
 export function hitTest(
@@ -107,12 +121,32 @@ export function hitTest(
   threshold = 8,
 ): boolean {
   const bounds = elementBounds(el);
-  return (
+  const inBox =
     bx >= bounds.x - threshold &&
     bx <= bounds.x + bounds.w + threshold &&
     by >= bounds.y - threshold &&
-    by <= bounds.y + bounds.h + threshold
-  );
+    by <= bounds.y + bounds.h + threshold;
+  if (!inBox) return false;
+
+  // Diamond needs a tighter check: point-in-diamond
+  if (el.type === 'diamond') {
+    const cx = bounds.x + bounds.w / 2;
+    const cy = bounds.y + bounds.h / 2;
+    const hw = bounds.w / 2 + threshold;
+    const hh = bounds.h / 2 + threshold;
+    if (hw === 0 || hh === 0) return false;
+    return Math.abs(bx - cx) / hw + Math.abs(by - cy) / hh <= 1;
+  }
+
+  return true;
+}
+
+/** Move an element by (dx, dy) in board space. */
+export function moveElement(el: WhiteboardElement, dx: number, dy: number): WhiteboardElement {
+  if (el.type === 'freedraw' || el.type === 'line' || el.type === 'arrow') {
+    return { ...el, x: el.x + dx, y: el.y + dy };
+  }
+  return { ...el, x: el.x + dx, y: el.y + dy };
 }
 
 let _idCounter = 0;

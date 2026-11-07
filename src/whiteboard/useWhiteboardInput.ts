@@ -2,10 +2,12 @@
 
 import { PanResponder, type PanResponderInstance } from 'react-native';
 
-import { hitTest, newId, screenToBoard } from './geometry';
+import { hitTest, moveElement, newId, screenToBoard } from './geometry';
+import type { ElementStyle } from './StylePanel';
 import type {
   ArrowElement,
   CanvasTransform,
+  DiamondElement,
   EllipseElement,
   FreedrawElement,
   LineElement,
@@ -13,7 +15,6 @@ import type {
   Tool,
   WhiteboardElement,
 } from './types';
-import type { ElementStyle } from './StylePanel';
 
 export type TextEditState = {
   id: string;
@@ -24,15 +25,26 @@ export type TextEditState = {
   value: string;
 };
 
+type DragState = {
+  id: string;
+  startBx: number;
+  startBy: number;
+  origEl: WhiteboardElement;
+};
+
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 20;
+// Minimum move in board units before we commit as a drag (not a click)
+const DRAG_THRESHOLD = 4;
 
 type Refs = {
   transformRef: React.RefObject<CanvasTransform>;
   elementsRef: React.RefObject<WhiteboardElement[]>;
   toolRef: React.RefObject<Tool>;
   currentStyleRef: React.RefObject<ElementStyle>;
+  selectedIdRef: React.RefObject<string | null>;
   drawingRef: React.MutableRefObject<WhiteboardElement | null>;
+  dragRef: React.MutableRefObject<DragState | null>;
   panStartRef: React.MutableRefObject<{ ox: number; oy: number; tx: number; ty: number } | null>;
   pinchRef: React.MutableRefObject<{
     dist: number;
@@ -79,7 +91,13 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
 
       if (activeTool === 'select') {
         const hit = [...refs.elementsRef.current!].reverse().find((el) => hitTest(el, bx, by));
-        refs.setSelectedIdRef.current!(hit?.id ?? null);
+        if (hit) {
+          refs.setSelectedIdRef.current!(hit.id);
+          refs.dragRef.current = { id: hit.id, startBx: bx, startBy: by, origEl: hit };
+        } else {
+          refs.setSelectedIdRef.current!(null);
+          refs.dragRef.current = null;
+        }
         return;
       }
 
@@ -103,6 +121,8 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
         el = { ...base, type: 'freedraw', points: [[0, 0]], width: 0, height: 0 };
       } else if (activeTool === 'rectangle') {
         el = { ...base, type: 'rectangle', width: 0, height: 0 };
+      } else if (activeTool === 'diamond') {
+        el = { ...base, type: 'diamond', width: 0, height: 0 };
       } else if (activeTool === 'ellipse') {
         el = { ...base, type: 'ellipse', width: 0, height: 0 };
       } else if (activeTool === 'line') {
@@ -149,19 +169,36 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
         return;
       }
 
+      // Drag selected element to move it
+      if (refs.toolRef.current === 'select' && refs.dragRef.current) {
+        const [bx, by] = screenToBoard(sx, sy, t);
+        const { startBx, startBy, origEl } = refs.dragRef.current;
+        const dx = bx - startBx;
+        const dy = by - startBy;
+        if (Math.abs(dx) > DRAG_THRESHOLD / t.scale || Math.abs(dy) > DRAG_THRESHOLD / t.scale) {
+          const moved = moveElement(origEl, dx, dy);
+          refs.dragRef.current = { ...refs.dragRef.current, origEl: { ...origEl } };
+          refs.setElements((prev) => prev.map((e) => (e.id === moved.id ? moved : e)));
+          // Update dragRef so next move delta is relative to new position
+          refs.dragRef.current = { id: origEl.id, startBx: bx, startBy: by, origEl: moved };
+        }
+        return;
+      }
+
       if (!refs.drawingRef.current) return;
       const [bx, by] = screenToBoard(sx, sy, t);
       const el = refs.drawingRef.current;
 
       if (el.type === 'freedraw') {
-        const updated: FreedrawElement = {
-          ...el,
-          points: [...el.points, [bx - el.x, by - el.y]],
-        };
+        const updated: FreedrawElement = { ...el, points: [...el.points, [bx - el.x, by - el.y]] };
         refs.drawingRef.current = updated;
         refs.setElements((prev) => prev.map((e) => (e.id === el.id ? updated : e)));
       } else if (el.type === 'rectangle') {
         const updated: RectangleElement = { ...el, width: bx - el.x, height: by - el.y };
+        refs.drawingRef.current = updated;
+        refs.setElements((prev) => prev.map((e) => (e.id === el.id ? updated : e)));
+      } else if (el.type === 'diamond') {
+        const updated: DiamondElement = { ...el, width: bx - el.x, height: by - el.y };
         refs.drawingRef.current = updated;
         refs.setElements((prev) => prev.map((e) => (e.id === el.id ? updated : e)));
       } else if (el.type === 'ellipse') {
@@ -179,6 +216,19 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
       const { nativeEvent } = evt;
       refs.pinchRef.current = null;
       refs.panStartRef.current = null;
+
+      // Commit drag-move to history
+      if (refs.toolRef.current === 'select' && refs.dragRef.current) {
+        const finalEl = refs.elementsRef.current!.find((e) => e.id === refs.dragRef.current!.id);
+        refs.dragRef.current = null;
+        if (finalEl) {
+          refs.pushHistoryRef.current!([
+            ...refs.elementsRef.current!.filter((e) => e.id !== finalEl.id),
+            finalEl,
+          ]);
+        }
+        return;
+      }
 
       if (refs.toolRef.current === 'text') {
         const t = refs.transformRef.current!;

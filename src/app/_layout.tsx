@@ -1,7 +1,7 @@
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, View } from 'react-native';
 
-import { WhiteboardScreen } from './src/whiteboard/WhiteboardScreen';
+import { WhiteboardScreen } from '../whiteboard/WhiteboardScreen';
 
 export default function App() {
   return (

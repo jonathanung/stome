@@ -6,18 +6,18 @@ type ToolConfig = {
   id: Tool;
   label: string;
   icon: string;
-  shortcut: string;
 };
 
 const TOOLS: ToolConfig[] = [
-  { id: 'select', label: 'Select', icon: '↖', shortcut: 'V' },
-  { id: 'hand', label: 'Hand', icon: '✋', shortcut: 'H' },
-  { id: 'freedraw', label: 'Draw', icon: '✏️', shortcut: 'P' },
-  { id: 'rectangle', label: 'Rectangle', icon: '▭', shortcut: 'R' },
-  { id: 'ellipse', label: 'Ellipse', icon: '○', shortcut: 'E' },
-  { id: 'line', label: 'Line', icon: '╱', shortcut: 'L' },
-  { id: 'arrow', label: 'Arrow', icon: '→', shortcut: 'A' },
-  { id: 'text', label: 'Text', icon: 'T', shortcut: 'T' },
+  { id: 'select', label: 'Select', icon: '↖' },
+  { id: 'hand', label: 'Hand', icon: '✋' },
+  { id: 'freedraw', label: 'Draw', icon: '✏️' },
+  { id: 'rectangle', label: 'Rectangle', icon: '▭' },
+  { id: 'diamond', label: 'Diamond', icon: '◇' },
+  { id: 'ellipse', label: 'Ellipse', icon: '○' },
+  { id: 'line', label: 'Line', icon: '╱' },
+  { id: 'arrow', label: 'Arrow', icon: '→' },
+  { id: 'text', label: 'Text', icon: 'T' },
 ];
 
 type Props = {
@@ -51,12 +51,7 @@ export function Toolbar({
             accessibilityLabel={tool.label}
             accessibilityState={{ selected: activeTool === tool.id }}
           >
-            <Text
-              style={[
-                styles.toolIcon,
-                activeTool === tool.id && styles.toolIconActive,
-              ]}
-            >
+            <Text style={[styles.toolIcon, activeTool === tool.id && styles.toolIconActive]}>
               {tool.icon}
             </Text>
           </Pressable>
@@ -101,7 +96,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     elevation: 8,
     flexDirection: 'row',
-    gap: 4,
+    gap: 2,
     paddingHorizontal: 8,
     paddingVertical: 6,
     shadowColor: '#000',

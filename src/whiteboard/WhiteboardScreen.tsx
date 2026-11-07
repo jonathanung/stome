@@ -46,11 +46,18 @@ export function WhiteboardScreen() {
 
   // Stable refs so the PanResponder (created once) always has fresh values
   const drawingRef = useRef<WhiteboardElement | null>(null);
+  const dragRef = useRef<{
+    id: string;
+    startBx: number;
+    startBy: number;
+    origEl: WhiteboardElement;
+  } | null>(null);
   const panStartRef = useRef<{ ox: number; oy: number; tx: number; ty: number } | null>(null);
   const pinchRef = useRef<{ dist: number; scale: number; ox: number; oy: number } | null>(null);
   const transformRef = useRef(transform);
   const elementsRef = useRef(elements);
   const historyIndexRef = useRef(historyIndex);
+  const selectedIdRef = useRef(selectedId);
   const pushHistoryRef = useRef<(els: WhiteboardElement[]) => void>(() => {});
   const toolRef = useRef(tool);
   const currentStyleRef = useRef(currentStyle);
@@ -60,6 +67,7 @@ export function WhiteboardScreen() {
   useEffect(() => { transformRef.current = transform; }, [transform]);
   useEffect(() => { elementsRef.current = elements; }, [elements]);
   useEffect(() => { historyIndexRef.current = historyIndex; }, [historyIndex]);
+  useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
   useEffect(() => { toolRef.current = tool; }, [tool]);
   useEffect(() => { currentStyleRef.current = currentStyle; }, [currentStyle]);
 
@@ -98,8 +106,13 @@ export function WhiteboardScreen() {
     setSelectedId(null);
   }
 
+  function deleteSelected() {
+    if (!selectedId) return;
+    pushHistory(elements.filter((e) => e.id !== selectedId));
+    setSelectedId(null);
+  }
+
   // Create PanResponder once — lives in useWhiteboardInput.ts (opted out of React Compiler).
-  // The refs are passed as stable ref objects; .current is only read inside event handlers.
   /* eslint-disable react-hooks/refs */
   const [panHandlers] = useState(() =>
     createWhiteboardPanResponder({
@@ -107,6 +120,8 @@ export function WhiteboardScreen() {
       elementsRef: elementsRef as React.RefObject<WhiteboardElement[]>,
       toolRef: toolRef as React.RefObject<Tool>,
       currentStyleRef: currentStyleRef as React.RefObject<ElementStyle>,
+      selectedIdRef: selectedIdRef as React.RefObject<string | null>,
+      dragRef,
       drawingRef,
       panStartRef,
       pinchRef,
@@ -119,14 +134,15 @@ export function WhiteboardScreen() {
   );
   /* eslint-enable react-hooks/refs */
 
-  // Web: scroll-wheel zoom
+  // Web: scroll-wheel zoom + Delete key
   const svgContainerRef = useRef<React.ElementRef<typeof View>>(null);
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     const node = (svgContainerRef.current as unknown as { _nativeTag?: HTMLElement } | null)
       ?._nativeTag as HTMLElement | undefined;
     if (!node) return;
-    const handler = (e: WheelEvent) => {
+
+    const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const factor = e.deltaY < 0 ? 1.1 : 0.9;
       setTransform((t) => {
@@ -140,8 +156,24 @@ export function WhiteboardScreen() {
         };
       });
     };
-    node.addEventListener('wheel', handler, { passive: false });
-    return () => node.removeEventListener('wheel', handler);
+
+    node.addEventListener('wheel', onWheel, { passive: false });
+    return () => node.removeEventListener('wheel', onWheel);
+  }, []);
+
+  // Delete key on web
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        const id = selectedIdRef.current;
+        if (!id) return;
+        pushHistoryRef.current(elementsRef.current.filter((el) => el.id !== id));
+        setSelectedId(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, []);
 
   function commitText(value: string) {
@@ -175,8 +207,7 @@ export function WhiteboardScreen() {
 
   const canUndo = historyIndex > 0;
   const canRedo = historyIndex < history.length - 1;
-  const cursor =
-    tool === 'hand' ? 'grab' : tool === 'text' ? 'text' : 'crosshair';
+  const cursor = tool === 'hand' ? 'grab' : tool === 'text' ? 'text' : 'crosshair';
 
   return (
     <SafeAreaView style={styles.root}>
@@ -188,22 +219,10 @@ export function WhiteboardScreen() {
         {...panHandlers}
       >
         <Svg width={canvasSize.width} height={canvasSize.height}>
-          <Rect
-            x={0}
-            y={0}
-            width={canvasSize.width}
-            height={canvasSize.height}
-            fill={EXCALIDRAW_COLORS.canvasBg}
-          />
-          <G
-            transform={`translate(${transform.offsetX}, ${transform.offsetY}) scale(${transform.scale})`}
-          >
+          <Rect x={0} y={0} width={canvasSize.width} height={canvasSize.height} fill={EXCALIDRAW_COLORS.canvasBg} />
+          <G transform={`translate(${transform.offsetX}, ${transform.offsetY}) scale(${transform.scale})`}>
             {elements.map((el) => (
-              <ElementRenderer
-                key={el.id}
-                element={el}
-                selected={selectedId === el.id}
-              />
+              <ElementRenderer key={el.id} element={el} selected={selectedId === el.id} />
             ))}
           </G>
         </Svg>
@@ -214,12 +233,7 @@ export function WhiteboardScreen() {
             multiline
             style={[
               styles.textInput,
-              {
-                left: textEdit.screenX,
-                top: textEdit.screenY,
-                fontSize: 20 * transform.scale,
-                color: currentStyle.strokeColor,
-              },
+              { left: textEdit.screenX, top: textEdit.screenY, fontSize: 20 * transform.scale, color: currentStyle.strokeColor },
             ]}
             value={textEdit.value}
             onChangeText={(v) => setTextEdit((prev) => (prev ? { ...prev, value: v } : null))}
@@ -229,6 +243,17 @@ export function WhiteboardScreen() {
           />
         ) : null}
       </View>
+
+      {/* Delete button — shown when an element is selected */}
+      {selectedId ? (
+        <Pressable
+          style={styles.deleteButton}
+          onPress={deleteSelected}
+          accessibilityLabel="Delete selected element"
+        >
+          <Text style={styles.deleteIcon}>🗑</Text>
+        </Pressable>
+      ) : null}
 
       {/* Style panel */}
       {showStylePanel ? (
@@ -258,10 +283,7 @@ export function WhiteboardScreen() {
       <View style={styles.toolbarWrapper} pointerEvents="box-none">
         <Toolbar
           activeTool={tool}
-          onToolChange={(t) => {
-            setTool(t);
-            setSelectedId(null);
-          }}
+          onToolChange={(t) => { setTool(t); setSelectedId(null); }}
           onUndo={undo}
           onRedo={redo}
           onClear={clear}
@@ -274,13 +296,8 @@ export function WhiteboardScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: EXCALIDRAW_COLORS.canvasBg,
-  },
-  canvas: {
-    flex: 1,
-  },
+  root: { flex: 1, backgroundColor: EXCALIDRAW_COLORS.canvasBg },
+  canvas: { flex: 1 },
   toolbarWrapper: {
     alignItems: 'center',
     bottom: 24,
@@ -288,11 +305,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 0,
   },
-  stylePanelWrapper: {
-    left: 16,
-    position: 'absolute',
-    top: 70,
-  },
+  stylePanelWrapper: { left: 16, position: 'absolute', top: 70 },
   propertiesButton: {
     alignItems: 'center',
     backgroundColor: '#ffffff',
@@ -309,9 +322,26 @@ const styles = StyleSheet.create({
     top: 20,
     width: 40,
   },
-  propertiesIcon: {
-    fontSize: 20,
+  propertiesIcon: { fontSize: 20 },
+  deleteButton: {
+    alignItems: 'center',
+    backgroundColor: '#fff0f0',
+    borderRadius: 10,
+    borderColor: '#ffc9c9',
+    borderWidth: 1,
+    elevation: 4,
+    height: 40,
+    justifyContent: 'center',
+    position: 'absolute',
+    right: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    top: 20,
+    width: 40,
   },
+  deleteIcon: { fontSize: 18 },
   zoomBadge: {
     backgroundColor: 'rgba(255,255,255,0.85)',
     borderRadius: 6,
@@ -321,11 +351,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 16,
   },
-  zoomText: {
-    color: '#495057',
-    fontSize: 12,
-    fontWeight: '600',
-  },
+  zoomText: { color: '#495057', fontSize: 12, fontWeight: '600' },
   textInput: {
     backgroundColor: 'transparent',
     fontFamily: 'System',
