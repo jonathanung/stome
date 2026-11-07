@@ -15,7 +15,10 @@ import {
 } from '../harness/contract';
 import { harnessExecutor, openHarnessDatabase } from '../harness/expoDb';
 import { AskProposalCard } from '../features/ask/AskProposalCard';
+import { AskScopeBar } from '../features/ask/AskScopeBar';
+import { AskSessionHeader } from '../features/ask/AskSessionHeader';
 import { AskSheetPhone } from '../features/ask/AskSheetPhone';
+import { AskTimeoutNotice } from '../features/ask/AskTimeoutNotice';
 import { EditProposalReview, StaleEditNotice } from '../features/ask/EditProposalReview';
 import { chunkLabel, citationsForProposal, visiblePinError, type ChunkFocus } from '../features/ask/citations';
 import { harnessColors } from '../features/ask/harnessColors';
@@ -313,6 +316,20 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
         />
       ) : null}
       <Text style={styles.heading}>Ask about selected chunks</Text>
+      <AskScopeBar
+        disabled={busy}
+        included={selectedIds.length}
+        onIncludeAll={() => setSelectedIds(chunks.map((chunk) => chunk.id))}
+        total={chunks.length}
+      />
+      {askedPrompt ? (
+        <AskSessionHeader
+          chunkCount={session?.selectedChunkIds?.length ?? selectedIds.length}
+          completed={session?.state === 'completed'}
+          roomName="this room"
+          title={askedPrompt.length > 40 ? `${askedPrompt.slice(0, 40)}…` : askedPrompt}
+        />
+      ) : null}
       {isPhone && (proposal || askedPrompt) && !sheetOpen ? (
         <Pressable accessibilityRole="button" onPress={() => setSheetOpen(true)} style={styles.secondary} testID="open-ask-sheet">
           <Text style={styles.secondaryText}>{proposal ? 'Review proposed answer' : 'Open ask'}</Text>
@@ -478,6 +495,9 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
           onConfirm={() => { void onConfirm(); }}
           onDiscard={() => { void onDiscard(); }}
         />
+      ) : null}
+      {error && !proposal && /timed out/i.test(error) ? (
+        <AskTimeoutNotice disabled={continueDisabled} onContinue={() => { void onAsk(true); }} />
       ) : null}
       {error && proposal && isEditProposal(proposal) && error.startsWith('Stale revision') ? (
         <StaleEditNotice disabled={busy} onAskAgain={() => { void onAsk(false); }} />
