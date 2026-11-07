@@ -10,13 +10,14 @@ import { listChunks, listRooms } from '../../data/queries';
 import { expoDriver } from '../../db/expo-driver';
 import { sourceIdentity } from '../../import/markdown';
 import { pickNotes, type PickedNote } from '../../import/pick-notes';
+import { destinationForMapping, unsetRoomMapping, type RoomMapping } from '../../import/room-map';
 import { changeSourcePath, changeSubjects, createSubjectReview, type SubjectReview } from '../../import/review-draft';
+import { RoomMappingControl } from './room-mapping';
 
 interface Draft extends SubjectReview {
   id: string;
   note: PickedNote;
-  roomId: string | null;
-  name: string;
+  mapping: RoomMapping;
   result?: string;
   done?: boolean;
 }
@@ -40,7 +41,6 @@ export default function NoteImportScreen() {
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const [preview, setPreview] = useState<{ title: string; bodies: string[] } | null>(null);
-  const [roomPicker, setRoomPicker] = useState<string | null>(null);
 
   const refresh = useCallback(async () => setRooms(await listRooms(db)), [db]);
   useEffect(() => {
@@ -59,21 +59,22 @@ export default function NoteImportScreen() {
       const result = await pickNotes();
       if (result) {
         setErrors(result.errors);
-        setDrafts(result.notes.map((note) => ({ id: randomUUID(), note, ...createSubjectReview(note.path, note.subjects), roomId: null, name: note.title.slice(0, 80) })));
+        setDrafts(result.notes.map((note) => ({ id: randomUUID(), note, ...createSubjectReview(note.path, note.subjects), mapping: unsetRoomMapping() })));
       }
     } catch (error) { setErrors([String(error)]); }
     finally { busyRef.current = false; setBusy(false); }
   };
 
   const save = async (draft: Draft) => {
-    if (busyRef.current || draft.done) return;
+    const destination = destinationForMapping(draft.mapping);
+    if (busyRef.current || draft.done || !destination) return;
     busyRef.current = true;
     setBusy(true);
     try {
       const sourceId = sourceIdentity(collection, draft.path);
       const result = await commit({
         opId: randomUUID(), kind: 'import.note', source: 'import', confirmed: true,
-        payload: { sourceId, fingerprint: draft.note.fingerprint, bodies: draft.note.bodies, subjects: draft.subjects.split(','), destination: draft.roomId ? { roomId: draft.roomId } : { name: draft.name } },
+        payload: { sourceId, fingerprint: draft.note.fingerprint, bodies: draft.note.bodies, subjects: draft.subjects.split(','), destination },
       });
       if (result.ok) {
         update(draft.id, { done: true, result: result.value.skipped ? 'Already imported. Your existing notes were kept.' : `Saved ${result.value.chunkIds.length} chunks.` });
@@ -113,9 +114,8 @@ export default function NoteImportScreen() {
             <Field label={`Source path for ${item.note.title}`} value={item.path} disabled={busy || item.done} onChangeText={(path) => changeReview(item.id, (draft) => changeSourcePath(draft, path))} />
             <Text style={styles.hint}>Include its original folder if another note has the same filename. Folders suggest subjects until you edit subjects.</Text>
             <Field label={`Subjects for ${item.note.title} (comma separated)`} value={item.subjects} disabled={busy || item.done} onChangeText={(subjects) => changeReview(item.id, (draft) => changeSubjects(draft, subjects))} />
-            <Action label={item.roomId ? `Room: ${rooms.find((room) => room.id === item.roomId)?.name ?? 'unavailable'}` : 'Destination: new room'} disabled={busy || item.done} onPress={() => setRoomPicker(item.id)} />
-            {!item.roomId ? <Field label={`New room name for ${item.note.title}`} value={item.name} disabled={busy || item.done} onChangeText={(name) => update(item.id, { name })} /> : null}
-            <Action label={item.done ? 'Imported' : `Confirm import of ${item.note.title}`} onPress={() => save(item)} disabled={busy || item.done} />
+            <RoomMappingControl title={item.note.title} subjects={item.subjects} rooms={rooms} mapping={item.mapping} disabled={busy || item.done === true} onChange={(mapping) => update(item.id, { mapping, result: undefined })} />
+            <Action label={item.done ? 'Imported' : `Confirm import of ${item.note.title}`} onPress={() => save(item)} disabled={busy || item.done || !destinationForMapping(item.mapping)} />
             {item.result ? <Text accessibilityLiveRegion="polite" style={item.done ? styles.text : styles.error}>{item.result}</Text> : null}
           </View>}
           ListFooterComponent={<View style={styles.section}>
@@ -126,9 +126,6 @@ export default function NoteImportScreen() {
       </KeyboardAvoidingView>
       <Modal visible={preview !== null} animationType="slide" onRequestClose={() => setPreview(null)}>
         <SafeAreaView style={styles.root}><FlatList contentContainerStyle={styles.page} data={preview?.bodies ?? []} keyExtractor={(_, i) => String(i)} ListHeaderComponent={<View style={styles.section}><Text style={styles.title}>{preview?.title}</Text><Action label="Close preview" onPress={() => setPreview(null)} /></View>} ListEmptyComponent={<Text style={styles.text}>No chunks in this room.</Text>} renderItem={({ item, index }) => <View style={styles.card}><Text style={styles.label}>Chunk {index + 1}</Text><Text selectable style={styles.text}>{item}</Text></View>} /></SafeAreaView>
-      </Modal>
-      <Modal visible={roomPicker !== null} animationType="slide" onRequestClose={() => setRoomPicker(null)}>
-        <SafeAreaView style={styles.root}><FlatList contentContainerStyle={styles.page} data={rooms} keyExtractor={(room) => room.id} ListHeaderComponent={<View style={styles.section}><Text style={styles.title}>Choose a room</Text><Action label="Cancel" onPress={() => setRoomPicker(null)} /><Action label="Create a new room" onPress={() => { if (roomPicker) update(roomPicker, { roomId: null }); setRoomPicker(null); }} /></View>} renderItem={({ item }) => <View style={styles.section}><Action label={item.name} onPress={() => { if (roomPicker) update(roomPicker, { roomId: item.id }); setRoomPicker(null); }} /></View>} /></SafeAreaView>
       </Modal>
     </SafeAreaView>
   );
