@@ -53,6 +53,7 @@ export default function RootLayout() {
             <Stack screenOptions={{ headerTitle: 'stome', headerStyle: { backgroundColor: '#f6f4ee' }, headerTintColor: '#292820' }}>
               <Stack.Screen name="index" options={{ headerShown: false }} />
               <Stack.Screen name="rooms/[id]" options={{ headerShown: false }} />
+              <Stack.Screen name="board/[roomId]" options={{ headerShown: false }} />
             </Stack>
           </SQLiteProvider>
         </Suspense>

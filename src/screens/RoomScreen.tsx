@@ -13,6 +13,7 @@ import { createCommit } from '../data/commit';
 import type { Annotation, Chunk, Room } from '../data/models';
 import { getRoom, listChunks, listRoomAnnotations } from '../data/queries';
 import { expoDriver } from '../db/expo-driver';
+import { isWhiteboardChunk, whiteboardHref } from '../features/whiteboard/contract';
 import { HarnessPanel } from './HarnessPanel';
 
 type ChunkWithAnnotations = Chunk & { annotations: Annotation[] };
@@ -55,7 +56,7 @@ export function RoomScreen() {
       group.push(annotation);
       byChunk.set(annotation.chunkId, group);
     }
-    return { room: nextRoom, chunks: notes.map((chunk) => ({
+    return { room: nextRoom, chunks: notes.filter((chunk) => !isWhiteboardChunk(chunk)).map((chunk) => ({
       ...chunk, annotations: byChunk.get(chunk.id) ?? [],
     })) };
   }, [db, id]);
@@ -105,6 +106,9 @@ export function RoomScreen() {
           </Pressable>
           <Text accessibilityRole="header" style={{ color: theme.color.text.primary, fontSize: 32, fontWeight: '700' }}>{room.name}</Text>
           <Text style={{ color: theme.color.text.secondary }}>Stone stage: {room.stage}</Text>
+          <View style={{ alignSelf: 'flex-start' }}>
+            <Button label="Whiteboard" variant="outline" onPress={() => router.push(whiteboardHref(room.id))} />
+          </View>
           <Text style={{ color: theme.color.text.primary, fontSize: 20, fontWeight: '600', marginTop: 8 }}>Notes</Text>
           <TextInput accessibilityLabel="Note content" placeholder="Write a note chunk" placeholderTextColor={theme.color.text.tertiary}
             multiline textAlignVertical="top" value={content} onChangeText={setContent} style={[input, { minHeight: 100 }]} />
