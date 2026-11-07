@@ -5,16 +5,18 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator, FlatList, KeyboardAvoidingView, Platform,
-  Pressable, Text, View,
+  Pressable, Text, useWindowDimensions, View,
 } from 'react-native';
 
 import { Button, Screen, TrilithonMark, useStoneTheme } from '../../design-theme/src/primitives';
 import { createCommit } from '../data/commit';
 import type { Room } from '../data/models';
 import { listRooms } from '../data/queries';
+import { listRoomStats, type RoomStats } from '../data/room-stats';
 import { expoDriver } from '../db/expo-driver';
 import { Icon, type IconName } from '../ui/Icon';
 import { StageGlyph, stageName } from '../ui/StageGlyph';
+import { RoomsPhone } from './RoomsScreen.phone';
 import { EmptyState, Field, Group, Notice, Row, SectionTitle, useColumn } from '../ui/kit';
 
 function message(reason: unknown): string {
@@ -51,6 +53,8 @@ export function RoomsScreen() {
   const commit = useMemo(() => createCommit(db, { now: Date.now, newId: randomUUID }), [db]);
   const theme = useStoneTheme();
   const column = useColumn();
+  const { width } = useWindowDimensions();
+  const [stats, setStats] = useState<Record<string, RoomStats>>({});
   const [rooms, setRooms] = useState<Room[]>([]);
   const [name, setName] = useState('');
   const [managingId, setManagingId] = useState<string | null>(null);
@@ -61,40 +65,59 @@ export function RoomsScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => setRooms(await listRooms(db)), [db]);
+  const refresh = useCallback(async () => {
+    setRooms(await listRooms(db));
+    setStats(await listRoomStats(db, Date.now()));
+  }, [db]);
   useFocusEffect(useCallback(() => {
     let active = true;
-    listRooms(db).then((rows) => {
-      if (active) { setRooms(rows); setLoading(false); }
+    Promise.all([listRooms(db), listRoomStats(db, Date.now())]).then(([rows, counts]) => {
+      if (active) { setRooms(rows); setStats(counts); setLoading(false); }
     }).catch((reason: unknown) => {
       if (active) { setError(message(reason)); setLoading(false); }
     });
     return () => { active = false; };
   }, [db]));
 
-  async function action(run: () => Promise<void>) {
-    if (busy) return;
+  async function action(run: () => Promise<void>): Promise<boolean> {
+    if (busy) return false;
     setBusy(true);
     setError(null);
-    try { await run(); await refresh(); }
-    catch (reason) { setError(message(reason)); await refresh().catch(() => undefined); }
+    try { await run(); await refresh(); return true; }
+    catch (reason) { setError(message(reason)); await refresh().catch(() => undefined); return false; }
     finally { setBusy(false); }
   }
 
-  async function create() {
+  async function createNamed(roomName: string) {
     const result = await commit({
       opId: randomUUID(), kind: 'room.create', source: 'human', confirmed: false,
-      payload: { name },
+      payload: { name: roomName },
     });
     if (!result.ok) throw new Error(result.error.message);
     setName('');
     router.push(`/rooms/${result.value.roomId}`);
   }
+  const create = () => createNamed(name);
 
   function closeManage() {
     setManagingId(null);
     setEditingId(null);
     setDeletingId(null);
+  }
+
+  if (width < 600) {
+    return <RoomsPhone
+      rooms={rooms} stats={stats} loading={loading} error={error} busy={busy}
+      onCreate={(roomName) => action(() => createNamed(roomName))}
+      onRename={(room, roomName) => action(async () => {
+        const result = await commit({ opId: randomUUID(), kind: 'room.rename', source: 'human', confirmed: false, expectedRevision: room.revision, payload: { roomId: room.id, name: roomName } });
+        if (!result.ok) throw new Error(result.error.message);
+      })}
+      onDelete={(room) => action(async () => {
+        const result = await commit({ opId: randomUUID(), kind: 'room.delete', source: 'human', confirmed: true, expectedRevision: room.revision, payload: { roomId: room.id } });
+        if (!result.ok) throw new Error(result.error.message);
+      })}
+    />;
   }
 
   const header = <View style={{ gap: theme.space.section, paddingTop: theme.space.base, marginBottom: theme.space.base }}>
