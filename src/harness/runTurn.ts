@@ -28,7 +28,6 @@ import {
   discardProposal,
   failRun,
   getSession,
-  holdOperationId,
   listMessages,
   readStubResult,
   recordFoundationPin,
@@ -191,17 +190,10 @@ export async function fulfillQuestion(
       sessionId: prepared.sessionId,
       runToken: prepared.runToken,
       proposal,
+      operationId: newId(),
       messageId: newId(),
       now,
     });
-    if (stored === 'stored') {
-      const finishedEarly = await getSession(db, prepared.sessionId);
-      await holdOperationId(db, {
-        sessionId: prepared.sessionId,
-        operationId: finishedEarly?.pendingOperationId ?? newId(),
-        now,
-      });
-    }
     const finished = await getSession(db, prepared.sessionId);
     if (stored === 'discarded' || finished?.state !== 'completed') {
       return result('discarded', finished, null, null, null);
@@ -277,9 +269,10 @@ function operationFromAssessment(request: FoundationAnnotationRequest) {
 
 /**
  * Saves the current proposal as one confirmed AI annotation through createCommit.
- * The operation id was stored on the session before this call. A repeat of that
- * id does not insert another annotation. Demo pins in the harness file are not
- * copied and are not deleted.
+ * expectedRevision is the revision stored on the proposal. A newer chunk revision
+ * rejects the confirm and is not sent in its place. The operation id was stored
+ * on the session before this call. A repeat of that id does not insert another
+ * annotation. Demo pins in the harness file are not copied and are not deleted.
  */
 export async function confirmFoundationQuestion(
   harness: SqlExecutor,
@@ -304,6 +297,25 @@ export async function confirmFoundationQuestion(
   }
   if (!session.proposal) {
     throw new HarnessError('proposal_mismatch', 'There is no proposal waiting for confirmation');
+  }
+  const prior = await app.get<{ kind: string; result: string }>('SELECT kind, result FROM applied_ops WHERE op_id = ?', [
+    operationId,
+  ]);
+  if (prior) {
+    if (prior.kind !== 'annotation.create') {
+      throw new HarnessError('proposal_mismatch', `This operation id was already used for ${prior.kind}`);
+    }
+    const value = JSON.parse(prior.result) as { annotationId?: unknown };
+    if (typeof value.annotationId !== 'string' || value.annotationId.length === 0) {
+      throw new HarnessError('invalid_shape', 'The saved operation has no annotation');
+    }
+    await recordFoundationPin(harness, {
+      sessionId: input.sessionId,
+      operationId,
+      annotationId: value.annotationId,
+      now,
+    });
+    return { replayed: true, annotationId: value.annotationId, operationId };
   }
   if (noteIdFromChunk(session.proposal.chunkId) !== null) {
     throw new HarnessError(

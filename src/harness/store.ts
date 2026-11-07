@@ -289,10 +289,52 @@ export async function startRun(
   });
 }
 
+/** Stable id for a completed proposal whose operation id was never stored. */
+export function repairOperationId(sessionId: string, proposalId: string): string {
+  const text = `${sessionId}\n${proposalId}`;
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `pin-${(hash >>> 0).toString(16)}-${sessionId.replaceAll('-', '').slice(0, 20)}`;
+}
+
+/**
+ * A completed proposal and its operation id are stored in one update.
+ * If an older crash left the proposal without an id, the repair id is
+ * deterministic so a later reopen confirms the same operation.
+ */
+export async function ensurePendingOperationId(db: SqlExecutor, sessionId: string, now: number): Promise<HarnessSession> {
+  const session = await requireSession(db, sessionId);
+  if (session.pendingOperationId || session.confirmedOperationId || session.state !== 'completed' || !session.proposal) {
+    return session;
+  }
+  const operationId = repairOperationId(session.id, session.proposal.id);
+  await db.run(
+    `UPDATE harness_sessions
+     SET pending_operation_id = ?, updated_at = ?
+     WHERE id = ? AND state = 'completed' AND confirmed_operation_id IS NULL AND pending_operation_id IS NULL`,
+    [operationId, now, sessionId],
+  );
+  return requireSession(db, sessionId);
+}
+
 export async function completeRun(
   db: SqlExecutor,
-  input: { sessionId: string; runToken: string; proposal: StoredProposal; messageId: string; now: number },
+  input: {
+    sessionId: string;
+    runToken: string;
+    proposal: StoredProposal;
+    operationId: string;
+    messageId: string;
+    now: number;
+  },
 ): Promise<'stored' | 'discarded'> {
+  const operationId = input.operationId.trim();
+  if (operationId.length === 0 || operationId.length > 64) {
+    throw new HarnessError('invalid_shape', 'The operation id is missing');
+  }
   return db.transaction(async (tx) => {
     const session = await requireSession(tx, input.sessionId);
     if (session.state !== 'running' || session.runToken !== input.runToken) {
@@ -301,9 +343,10 @@ export async function completeRun(
     await tx.run(
       `UPDATE harness_sessions
        SET state = 'completed', run_token = NULL, proposal_json = ?,
-           confirmed_operation_id = NULL, error_code = NULL, error_message = NULL, updated_at = ?
+           confirmed_operation_id = NULL, pending_operation_id = ?,
+           error_code = NULL, error_message = NULL, updated_at = ?
        WHERE id = ? AND state = 'running' AND run_token = ?`,
-      [JSON.stringify(input.proposal), input.now, input.sessionId, input.runToken],
+      [JSON.stringify(input.proposal), operationId, input.now, input.sessionId, input.runToken],
     );
     const stored = await requireSession(tx, input.sessionId);
     if (stored.state !== 'completed' || stored.runToken !== null) {

@@ -7,11 +7,15 @@ import type { Db, SqlValue } from './driver';
  *
  * Uses withTransactionAsync rather than the exclusive variant: the exclusive
  * one opens a second connection where `PRAGMA foreign_keys` is off, which
- * would silently skip cascades. The write boundary serializes commits, so
- * transactions never overlap.
+ * would silently skip cascades. The write boundary serializes commits only
+ * for one `Db` object, so each SQLite handle has a single wrapper.
  */
+const drivers = new WeakMap<SQLiteDatabase, Db>();
+
 export function expoDriver(db: SQLiteDatabase): Db {
-  return {
+  const existing = drivers.get(db);
+  if (existing) return existing;
+  const driver: Db = {
     exec: (sql) => db.execAsync(sql),
     async run(sql, params: readonly SqlValue[] = []) {
       const result = await db.runAsync(sql, [...params]);
@@ -27,4 +31,6 @@ export function expoDriver(db: SQLiteDatabase): Db {
       return value;
     },
   };
+  drivers.set(db, driver);
+  return driver;
 }
