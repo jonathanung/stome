@@ -16,6 +16,13 @@ import { changeSourcePath, changeSubjects, createSubjectReview, type SubjectRevi
 import { ImportChooseFiles, ImportSteps } from './import-choose-files';
 import { RoomMappingControl } from './room-mapping';
 import { router } from 'expo-router';
+import { HarnessError } from '../../harness/contract';
+import { companionProvider } from '../../harness/companionClient';
+import { getCompanionSettings, useCompanionSettings } from '../../harness/companionSettings';
+import { completeReadTool } from '../../harness/provider';
+import { IMPORT_TOOL_NAME, type ImportSuggestOutput, type ImportSuggestion } from '../../harness/tools';
+import { applySuggestion, buildSuggestBatches } from '../../import/suggest';
+import { SuggestControls, SuggestionRow } from './suggest-ui';
 
 interface Draft extends SubjectReview {
   id: string;
@@ -54,6 +61,57 @@ export default function NoteImportScreen() {
   const busyRef = useRef(false);
   const [stage, setStage] = useState<'choose' | 'review'>('choose');
   const [preview, setPreview] = useState<{ title: string; bodies: string[] } | null>(null);
+  const paired = useCompanionSettings().token.trim() !== '';
+  const [suggestions, setSuggestions] = useState<Record<string, ImportSuggestion>>({});
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
+  const suggestAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => suggestAbort.current?.abort(), []);
+
+  const suggestRooms = async () => {
+    if (suggestAbort.current) return;
+    const open = drafts.filter((draft) => !draft.done);
+    if (!open.length) return;
+    const controller = new AbortController();
+    suggestAbort.current = controller;
+    setSuggesting(true);
+    setSuggestError(null);
+    try {
+      const settings = getCompanionSettings();
+      const provider = companionProvider({ baseUrl: settings.url, token: settings.token });
+      const batches = buildSuggestBatches(open.map((draft) => ({ id: draft.id, title: draft.note.title, bodies: draft.note.bodies })), rooms);
+      const found: Record<string, ImportSuggestion> = {};
+      for (const batch of batches) {
+        const out = await completeReadTool<ImportSuggestOutput>(
+          provider, { tool: IMPORT_TOOL_NAME, input: batch, scenario: settings.scenario }, controller.signal,
+        );
+        for (const suggestion of out.suggestions) found[suggestion.noteId] = suggestion;
+      }
+      if (!controller.signal.aborted) setSuggestions((current) => ({ ...current, ...found }));
+    } catch (error) {
+      if (controller.signal.aborted && error instanceof HarnessError && error.code === 'cancelled') setSuggestError(null);
+      else if (!controller.signal.aborted) setSuggestError(error instanceof Error ? error.message : 'Suggestions failed');
+    } finally {
+      if (suggestAbort.current === controller) suggestAbort.current = null;
+      if (!controller.signal.aborted || suggestAbort.current === null) setSuggesting(false);
+    }
+  };
+  const cancelSuggest = () => suggestAbort.current?.abort();
+  const dropSuggestion = (id: string) => setSuggestions((current) => { const { [id]: _removed, ...rest } = current; return rest; });
+  const applyOne = (id: string) => {
+    const suggestion = suggestions[id];
+    if (!suggestion) return;
+    setDrafts((items) => items.map((item) => {
+      if (item.id !== id || item.done) return item;
+      const applied = applySuggestion(suggestion, item.subjects);
+      return { ...changeSubjects(item, applied.subjects), mapping: applied.mapping, result: undefined };
+    }));
+    dropSuggestion(id);
+  };
+  const applyAll = () => {
+    const ids = Object.keys(suggestions).filter((id) => drafts.some((draft) => draft.id === id && !draft.done));
+    ids.forEach(applyOne);
+  };
 
   const mapped = drafts.filter((draft) => destinationForMapping(draft.mapping)).length;
   const needRoom = drafts.length - mapped;
@@ -143,6 +201,7 @@ export default function NoteImportScreen() {
             <Action label={drafts.length ? 'Choose another batch' : 'Choose Markdown files'} onPress={choose} disabled={busy} />
             {busy ? <ActivityIndicator accessibilityLabel="Working on notes" /> : null}
             {errors.map((error, i) => <Text key={i} accessibilityRole="alert" style={styles.error}>{error}</Text>)}
+            <SuggestControls paired={paired} running={suggesting} error={suggestError} pending={Object.keys(suggestions).length} onSuggest={suggestRooms} onCancel={cancelSuggest} onApplyAll={applyAll} />
           </View>}
           renderItem={({ item }) => <View style={styles.card}>
             <Text style={styles.heading}>{item.note.title}</Text>
@@ -154,6 +213,7 @@ export default function NoteImportScreen() {
             <Field label={`Source path for ${item.note.title}`} value={item.path} disabled={busy || item.done} onChangeText={(path) => changeReview(item.id, (draft) => changeSourcePath(draft, path))} />
             <Text style={styles.hint}>Include its original folder if another note has the same filename. Folders suggest subjects until you edit subjects.</Text>
             <Field label={`Subjects for ${item.note.title} (comma separated)`} value={item.subjects} disabled={busy || item.done} onChangeText={(subjects) => changeReview(item.id, (draft) => changeSubjects(draft, subjects))} />
+            {suggestions[item.id] && !item.done ? <SuggestionRow title={item.note.title} suggestion={suggestions[item.id]} rooms={rooms} disabled={busy} onApply={() => applyOne(item.id)} onIgnore={() => dropSuggestion(item.id)} /> : null}
             <RoomMappingControl title={item.note.title} subjects={item.subjects} rooms={rooms} mapping={item.mapping} disabled={busy || item.done === true} onChange={(mapping) => update(item.id, { mapping, result: undefined })} />
             <Action label={item.done ? 'Imported' : `Confirm import of ${item.note.title}`} onPress={() => save(item)} disabled={busy || item.done || !destinationForMapping(item.mapping)} />
             {item.result ? <Text accessibilityLiveRegion="polite" style={item.done ? styles.text : styles.error}>{item.result}</Text> : null}
