@@ -11,7 +11,6 @@ import {
   chunkViewFromFoundation,
   isEditProposal,
   noteIdFromChunk,
-  noteToChunk,
   parseProposeInput,
   requestCharCount,
   PROVIDER_LIMITS,
@@ -19,26 +18,23 @@ import {
   type EditProposal,
   type FoundationAnnotationRequest,
   type MockScenario,
-  type NoteLike,
   type StoredProposal,
 } from './contract';
 import { completeWithLimits, type Provider } from './provider';
 import {
   cancelRun,
-  commitStubAnnotation,
   completeRun,
   createSession,
   discardProposal,
   failRun,
   getSession,
   listMessages,
-  readStubResult,
+  readHarnessOperation,
   recordFoundationEdit,
   recordFoundationPin,
   startRun,
   type HarnessSession,
   type SqlExecutor,
-  type StubCommitResult,
 } from './store';
 
 export type AskStatus = 'proposal' | 'failed' | 'cancelled' | 'discarded';
@@ -339,7 +335,7 @@ export async function confirmFoundationQuestion(
 ): Promise<FoundationSaveResult> {
   const now = nowMs(input.now);
   const operationId = input.operationId.trim();
-  const remembered = await readStubResult(harness, operationId);
+  const remembered = await readHarnessOperation(harness, operationId);
   if (remembered) {
     return remembered;
   }
@@ -497,32 +493,6 @@ async function confirmChunkEdit(
     chunkId: saved.value.chunkId,
     revision: saved.value.revision,
   };
-}
-
-export async function confirmQuestion(
-  db: SqlExecutor,
-  input: { sessionId: string; note: NoteLike; operationId: string; confirmed: boolean; now?: number },
-): Promise<StubCommitResult> {
-  const replay = await readStubResult(db, input.operationId.trim());
-  if (replay) {
-    return replay;
-  }
-  const session = await getSession(db, input.sessionId);
-  if (!session) {
-    throw new HarnessError('not_found', 'The harness session is missing');
-  }
-  const chunk = noteToChunk(input.note);
-  const request = assessConfirmedAnnotation({
-    confirmed: input.confirmed,
-    operationId: input.operationId,
-    proposal: session.proposal,
-    sessionRoomId: session.roomId,
-    sessionState: session.state,
-    selectedChunkIds: session.selectedChunkIds,
-    confirmedOperationId: session.confirmedOperationId,
-    chunk,
-  });
-  return commitStubAnnotation(db, request, session.id, nowMs(input.now));
 }
 
 export async function discardQuestion(db: SqlExecutor, sessionId: string, now?: number): Promise<void> {
