@@ -25,7 +25,7 @@ The token lives in component memory. It is not written to `localStorage` or `ses
 
 Open a room's whiteboard in the web app, paste the companion token, and choose Explain, Check, or Quiz. The companion's `/v1/board` route accepts a bounded snapshot of that room's board. Its default board provider returns labeled mock replies. For a live model, start the companion with `STOME_BOARD_PROVIDER=openai` and `STOME_BOARD_API_KEY` (or `OPENAI_API_KEY`) set in the server environment. `STOME_BOARD_MODEL` defaults to `gpt-4o-mini`. The board provider uses the Responses API with a strict JSON schema and `store: false`; the API key stays in the companion process. A reply may propose one new or replacement text item. Dismiss leaves the board unchanged; Accept passes an AI-sourced, confirmed `board.save` operation through the Foundation commit boundary with the revision that was shown when the request started. A stale board is rejected.
 
-The canvas itself works on web, iOS, and Android. This local companion binds to loopback and enforces the web origin, so its board assistant is currently a same-computer web workflow. It receives object geometry and text, not an image of the board.
+The canvas works on web, iOS, and Android. The local companion binds to loopback for same-computer web use. Native devices use the separate `npm run board:service` HTTPS endpoint with a trusted certificate and pairing token. The service binds to loopback by default; configure its host, port, certificate paths, and optional `STOME_BOARD_APP_ORIGIN` for a web frontend. It receives object geometry and text, not an image of the board. It does not accept unrelated note or harness tool routes.
 
 ```bash
 STOME_APP_ORIGIN=http://localhost:8081 STOME_COMPANION_PORT=8787 npm run companion

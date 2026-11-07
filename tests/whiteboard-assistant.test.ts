@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { openAiBoardProvider } from '../companion/board-provider.ts';
-import { applyBoardCorrection, mockBoardReply, parseBoardReply, parseBoardRequest } from '../src/whiteboard/assistant.ts';
+import { applyBoardCorrection, boardServiceOrigin, mockBoardReply, parseBoardReply, parseBoardRequest } from '../src/whiteboard/assistant.ts';
 import { boardToNote, type BoardItem } from '../src/whiteboard/model.ts';
 
 const items: BoardItem[] = [
@@ -10,6 +10,14 @@ const items: BoardItem[] = [
   { id: 'arrow', kind: 'arrow', x: 40, y: 50, width: 100, height: 0 },
 ];
 const request = parseBoardRequest({ roomId: 'room-1', revision: 3, action: 'check', items });
+
+test('native board service requires HTTPS and a clean origin', () => {
+  assert.equal(boardServiceOrigin('https://board.example.com', 'native'), 'https://board.example.com');
+  assert.equal(boardServiceOrigin('http://127.0.0.1:8787', 'web'), 'http://127.0.0.1:8787');
+  assert.throws(() => boardServiceOrigin('http://192.168.1.2:8790', 'native'), /HTTPS/);
+  assert.throws(() => boardServiceOrigin('https://key@board.example.com', 'native'), /credentials/);
+  assert.throws(() => boardServiceOrigin('https://board.example.com/other', 'native'), /path/);
+});
 
 test('board replies validate correction targets and do not edit until applied', () => {
   const reply = parseBoardReply({ message: 'Clarify the title', correction: { kind: 'replace_text', targetId: 'topic', text: 'Mitosis', x: 20, y: 30 } }, request);

@@ -37,6 +37,7 @@
     "check:schema": "node --experimental-sqlite --experimental-strip-types scripts/check-schema.ts",
     "check:harness": "node --experimental-sqlite --experimental-strip-types --import ./scripts/register-harness.mjs --test scripts/check-harness.test.ts",
     "companion": "node --experimental-strip-types --import ./scripts/register-harness.mjs companion/server.ts",
+    "board:service": "node --experimental-strip-types --import ./scripts/register-harness.mjs companion/board-service.ts",
     "lint": "expo lint",
     "check": "npm run typecheck && npm run lint && npm run check:schema && npm run check:harness && npm test && npm run check:writes",
     "test": "node --experimental-sqlite --experimental-strip-types --disable-warning=ExperimentalWarning --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test \"tests/**/*.test.ts\"",

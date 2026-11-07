@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -10,6 +11,8 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { pairingTtlMs, startCompanion } from '../companion/server.ts';
+import { startBoardService } from '../companion/board-service.ts';
+import { mockBoardProvider } from '../companion/board-provider.ts';
 import { parseBoardReply, parseBoardRequest } from '../src/whiteboard/assistant.ts';
 import { companionProvider } from '../src/harness/companionClient.ts';
 import { serializedExecutor, type RawSql } from '../src/harness/serialized.ts';
@@ -1173,4 +1176,31 @@ test('board companion endpoint requires pairing and returns a validated reply', 
   const body = await response.json() as { ok: boolean; provider: string; output: unknown };
   assert.equal(body.provider, 'mock');
   assert.match(parseBoardReply(body.output, request).message, /Mock check/);
+});
+
+test('native HTTPS board service keeps provider behind token and TLS', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'stome-board-service-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const key = join(dir, 'key.pem'), cert = join(dir, 'cert.pem');
+  execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert,
+    '-days', '1', '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost,IP:127.0.0.1'], { stdio: 'ignore' });
+  const service = await startBoardService({ tls: { key: readFileSync(key), cert: readFileSync(cert) },
+    token: 'test-pairing-token', expiresAt: Date.now() + 60_000, provider: mockBoardProvider, port: 0 });
+  t.after(() => service.close());
+  const input = JSON.stringify(parseBoardRequest({ roomId: 'room-1', revision: 0, action: 'quiz', items: [] }));
+  const postBoard = (token: string, origin?: string) => new Promise<{ status: number; body: string }>((resolve, reject) => {
+    const req = httpsRequest({ hostname: '127.0.0.1', port: service.port, path: '/v1/board', method: 'POST',
+      ca: readFileSync(cert), headers: { 'content-type': 'application/json', 'x-stome-token': token,
+        ...(origin ? { origin } : {}) } }, (res) => {
+      const parts: Buffer[] = [];
+      res.on('data', (part: Buffer) => parts.push(part));
+      res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(parts).toString('utf8') }));
+    });
+    req.on('error', reject); req.end(input);
+  });
+  assert.equal((await postBoard('wrong')).status, 401);
+  assert.equal((await postBoard('test-pairing-token', 'https://evil.example')).status, 403);
+  const reply = await postBoard('test-pairing-token');
+  assert.equal(reply.status, 200);
+  assert.match(reply.body, /Mock quiz/);
 });
