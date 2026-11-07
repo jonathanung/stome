@@ -1,23 +1,30 @@
+import { MAX_FREEFORM_IMAGE_BYTES, isFreeformImagePath } from './freeform/parse.ts';
 import { MAX_IMPORT_BYTES } from './markdown.ts';
 import { MAX_PDF_BYTES } from './pdf/parse.ts';
 
 const NOTE_TOO_BIG = 'Each note must be at most 1 MiB.';
 const PDF_TOO_BIG = 'Each PDF must be at most 8 MiB.';
-const UNSUPPORTED = 'Only UTF-8 Markdown, OneNote HTML, MHTML and DOCX exports, and PDF files are supported.';
+const IMAGE_TOO_BIG = 'Each image must be at most 8 MiB.';
+const UNSUPPORTED = 'Only UTF-8 Markdown, OneNote HTML, MHTML and DOCX exports, PDF files, and PNG or JPEG board images are supported.';
 const TEXT_EXPORT = /\.(md|html?|mht|mhtml)$/i;
 
 export type ImportRoute =
   | { kind: 'pdf'; limit: number }
+  | { kind: 'freeform'; limit: number }
   | { kind: 'docx' }
   | { kind: 'markdown' }
   | { kind: 'onenote-text' }
   | { kind: 'reject'; message: string };
 
-/** Same order as the picker: PDF keeps its own 8 MiB limit, then the 1 MiB note limit. */
+/** PDF and board images keep an 8 MiB limit. Text notes, including Markdown, stay at 1 MiB. */
 export function routeImportAsset(name: string, size: number | undefined): ImportRoute {
   if (/\.pdf$/i.test(name)) {
     if (size !== undefined && size > MAX_PDF_BYTES) return { kind: 'reject', message: PDF_TOO_BIG };
     return { kind: 'pdf', limit: MAX_PDF_BYTES };
+  }
+  if (isFreeformImagePath(name)) {
+    if (size !== undefined && size > MAX_FREEFORM_IMAGE_BYTES) return { kind: 'reject', message: IMAGE_TOO_BIG };
+    return { kind: 'freeform', limit: MAX_FREEFORM_IMAGE_BYTES };
   }
   if (size !== undefined && size > MAX_IMPORT_BYTES) return { kind: 'reject', message: NOTE_TOO_BIG };
   if (/\.docx$/i.test(name)) return { kind: 'docx' };

@@ -4,6 +4,7 @@ import { getDocumentAsync } from 'expo-document-picker';
 import { File, FileMode } from 'expo-file-system';
 import { Platform } from 'react-native';
 
+import { MAX_FREEFORM_IMAGE_BYTES, parseFreeformImage } from './freeform/parse.ts';
 import { documentPickerCopiesToCache, routeImportAsset, takeCappedBytes, type BoundedByteSource } from './import-bytes.ts';
 import { MAX_IMPORT_BYTES, parseMarkdown, type ParsedNote } from './markdown.ts';
 import { parseOneNoteBytes, parseOneNoteText } from './onenote/parse.ts';
@@ -12,7 +13,7 @@ import { MAX_PDF_BYTES, parsePdf } from './pdf/parse.ts';
 export interface PickedNote extends ParsedNote {
   fingerprint: string;
   /** Present for every file read here. Markdown stays on the Markdown parser. */
-  exportFormat?: 'markdown' | 'onenote-html' | 'onenote-mhtml' | 'onenote-docx' | 'pdf';
+  exportFormat?: 'markdown' | 'onenote-html' | 'onenote-mhtml' | 'onenote-docx' | 'pdf' | 'freeform-image';
   /** PDF only: the page number of each body, in order. */
   pages?: number[];
 }
@@ -59,6 +60,12 @@ export async function pickNotes(): Promise<{ notes: PickedNote[]; errors: string
       if (route.kind === 'pdf') {
         const bytes = ownedBytes(await readBoundedBytes(asset, MAX_PDF_BYTES));
         const note = await parsePdf({ path: asset.name, bytes });
+        notes.push({ ...note, fingerprint: hexDigest(await digest(CryptoDigestAlgorithm.SHA256, bytes)) });
+        continue;
+      }
+      if (route.kind === 'freeform') {
+        const bytes = ownedBytes(await readBoundedBytes(asset, MAX_FREEFORM_IMAGE_BYTES));
+        const note = parseFreeformImage({ path: asset.name, bytes });
         notes.push({ ...note, fingerprint: hexDigest(await digest(CryptoDigestAlgorithm.SHA256, bytes)) });
         continue;
       }

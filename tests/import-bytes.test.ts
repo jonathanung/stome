@@ -49,8 +49,12 @@ test('PDF keeps an 8 MiB route and other notes stay at 1 MiB', () => {
   assert.deepEqual(routeImportAsset('Cells.mhtml', 400), { kind: 'onenote-text' });
   assert.deepEqual(routeImportAsset('Cells.mht', 400), { kind: 'onenote-text' });
   assert.deepEqual(routeImportAsset('Cells.docx', 400), { kind: 'docx' });
-  assert.deepEqual(routeImportAsset('notes.txt', 13), { kind: 'reject', message: 'Only UTF-8 Markdown, OneNote HTML, MHTML and DOCX exports, and PDF files are supported.' });
-  assert.deepEqual(routeImportAsset('page.one', 20), { kind: 'reject', message: 'Only UTF-8 Markdown, OneNote HTML, MHTML and DOCX exports, and PDF files are supported.' });
+  assert.deepEqual(routeImportAsset('board.png', 2 * 1024 * 1024), { kind: 'freeform', limit: 8 * 1024 * 1024 });
+  assert.deepEqual(routeImportAsset('board.jpeg', undefined), { kind: 'freeform', limit: 8 * 1024 * 1024 });
+  assert.deepEqual(routeImportAsset('board.jpg', 8 * 1024 * 1024 + 1), { kind: 'reject', message: 'Each image must be at most 8 MiB.' });
+  const unsupported = 'Only UTF-8 Markdown, OneNote HTML, MHTML and DOCX exports, PDF files, and PNG or JPEG board images are supported.';
+  assert.deepEqual(routeImportAsset('notes.txt', 13), { kind: 'reject', message: unsupported });
+  assert.deepEqual(routeImportAsset('page.one', 20), { kind: 'reject', message: unsupported });
 });
 
 test('a missing or underreported size stops after one capped read and closes', async () => {

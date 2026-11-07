@@ -33,8 +33,7 @@ export type IconName =
   | 'highlightArea'
   | 'questionPin'
   | 'addPage'
-  | 'pin'
-  | 'draw';
+  | 'pin';
 
 /** 24px stroke glyphs, drawn the way the Stone boards draw them (1.75 stroke, round caps). */
 function Glyph({ name }: { name: IconName }) {
@@ -101,8 +100,6 @@ function Glyph({ name }: { name: IconName }) {
       return <><Path d="M12 17v5" /><Path d="M9 3h6l-1 6 3 3H7l3-3z" /></>;
     case 'spark':
       return <><Path d="M12 3v3" /><Path d="M12 18v3" /><Path d="M3 12h3" /><Path d="M18 12h3" /><Path d="m6 6 2 2" /><Path d="m16 16 2 2" /><Path d="m6 18 2-2" /><Path d="m16 8 2-2" /></>;
-    case 'draw':
-      return <><Path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /><Path d="m15 5 4 4" /></>;
   }
 }
 
