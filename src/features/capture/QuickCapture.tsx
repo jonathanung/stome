@@ -8,20 +8,21 @@ import { useStoneTheme } from '../../../design-theme/src/primitives';
 import { createCommit } from '../../data/commit';
 import { listRooms } from '../../data/queries';
 import { expoDriver } from '../../db/expo-driver';
-import {
-  CAPTURE_DRAFT_KEY,
-  LAST_ROOM_KEY,
-  canSubmit,
-  captureOperation,
-  emptyDraft,
-  finishDraft,
-  parseDraft,
-  type CaptureDraft,
-} from './draft';
+import { LAST_ROOM_KEY, canSubmit } from './draft';
 import { CAPTURE_SHORTCUT_LABEL, isCaptureShortcut } from './shortcut';
+import {
+  CLEANUP_FAILED_MESSAGE,
+  STORAGE_DEGRADED_MESSAGE,
+  createCaptureController,
+  loadCaptureState,
+  readStorageItem,
+  writeStorageItem,
+  type CaptureSession,
+  type CaptureStorage,
+} from './session';
 import { chooseCaptureRoom, roomIdFromPath } from './target';
 
-function store(kind: 'local' | 'session'): Storage | null {
+function browserStorage(kind: 'local' | 'session'): CaptureStorage | null {
   if (typeof window === 'undefined') return null;
   try {
     return kind === 'local' ? window.localStorage : window.sessionStorage;
@@ -37,16 +38,49 @@ export function QuickCapture() {
   const commit = useMemo(() => createCommit(db, { now: Date.now, newId: randomUUID }), [db]);
   const theme = useStoneTheme();
   const inputRef = useRef<ComponentRef<typeof TextInput>>(null);
-  const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState<CaptureDraft>(() => parseDraft(store('session')?.getItem(CAPTURE_DRAFT_KEY) ?? null) ?? emptyDraft(randomUUID));
-  const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [needsRoom, setNeedsRoom] = useState(false);
   const pathRoom = roomIdFromPath(pathname);
+  const [open, setOpen] = useState(false);
+  const [session, setSession] = useState<CaptureSession>(() => loadCaptureState(browserStorage('session'), randomUUID));
+  const [controller] = useState(() => createCaptureController({
+    storage: browserStorage('session'),
+    newId: randomUUID,
+    initial: session,
+    onChange: (next) => setSession(next),
+    commit: async () => ({ ok: false, message: 'Could not save' }),
+    destination: async () => ({ needsRoom: true }),
+  }));
+
   useEffect(() => {
-    if (pathRoom) store('local')?.setItem(LAST_ROOM_KEY, pathRoom);
-  }, [pathRoom]);
+    controller.setLive({
+      commit: async (operation) => {
+        try {
+          const result = await commit(operation);
+          if (!result.ok) return { ok: false, message: result.error.message };
+          return { ok: true, duplicate: result.duplicate };
+        } catch (reason) {
+          return { ok: false, message: reason instanceof Error ? reason.message : 'Could not save' };
+        }
+      },
+      destination: async () => {
+        const rooms = await listRooms(db);
+        const last = readStorageItem(browserStorage('local'), LAST_ROOM_KEY);
+        if (!last.ok) controller.markDegraded();
+        const target = chooseCaptureRoom({
+          pathname,
+          lastRoomId: pathRoom ?? (last.ok ? last.value : null),
+          roomIds: rooms.map((room) => room.id),
+        });
+        if ('needsRoom' in target) return { needsRoom: true };
+        return { roomId: target.roomId };
+      },
+    });
+  }, [controller, db, commit, pathname, pathRoom]);
+
+  useEffect(() => {
+    if (!pathRoom) return;
+    const stored = writeStorageItem(browserStorage('local'), LAST_ROOM_KEY, pathRoom);
+    controller.observeRoom(pathRoom, stored);
+  }, [controller, pathRoom]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -75,45 +109,24 @@ export function QuickCapture() {
     if (open) inputRef.current?.focus();
   }, [open]);
 
-  function remember(next: CaptureDraft) {
-    setDraft(next);
-    store('session')?.setItem(CAPTURE_DRAFT_KEY, JSON.stringify(next));
-  }
-
   async function save() {
-    if (!canSubmit(draft, busy)) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const rooms = await listRooms(db);
-      const target = chooseCaptureRoom({
-        pathname,
-        lastRoomId: pathRoom ?? store('local')?.getItem(LAST_ROOM_KEY) ?? null,
-        roomIds: rooms.map((room) => room.id),
-      });
-      if ('needsRoom' in target) {
-        setNeedsRoom(true);
-        setError('Create a room before capturing a note.');
-        return;
-      }
-      setNeedsRoom(false);
-      const result = await commit(captureOperation(draft, target.roomId));
-      if (!result.ok) {
-        setFailed(true);
-        setError(result.error.message);
-        return;
-      }
-      setFailed(false);
-      remember(finishDraft(draft, true, randomUUID));
-      setOpen(false);
-    } catch (reason) {
-      setFailed(true);
-      setError(reason instanceof Error ? reason.message : 'Could not save');
-    } finally {
-      setBusy(false);
-    }
+    const result = await controller.save();
+    if (result.closePanel) setOpen(false);
   }
 
+  const failed = session.notice?.kind === 'error';
+  const needsRoom = session.notice?.kind === 'needs-room';
+  const error = session.notice?.kind === 'error'
+    ? session.notice.message
+    : needsRoom
+      ? 'Create a room before capturing a note.'
+      : null;
+  const warning = session.notice?.kind === 'degraded'
+    ? STORAGE_DEGRADED_MESSAGE
+    : session.notice?.kind === 'saved' && session.notice.cleanupFailed
+      ? CLEANUP_FAILED_MESSAGE
+      : null;
+  const ready = canSubmit(session.draft, session.busy);
   const field = {
     borderWidth: 1 as const,
     borderColor: theme.color.border.strong,
@@ -150,18 +163,14 @@ export function QuickCapture() {
           <TextInput
             accessibilityLabel="Quick capture note"
             autoCapitalize="sentences"
-            onChangeText={(text) => {
-              setNeedsRoom(false);
-              setError(null);
-              remember({ text, opId: draft.opId });
-            }}
+            onChangeText={(text) => controller.edit(text)}
             onSubmitEditing={() => { void save(); }}
             placeholder="One line for this room"
             placeholderTextColor={theme.color.text.tertiary}
             ref={inputRef}
             style={field}
             testID="quick-capture-input"
-            value={draft.text}
+            value={session.draft.text}
           />
           {needsRoom ? (
             <Link href="/" style={{ color: theme.color.text.primary, textDecorationLine: 'underline' }} testID="quick-capture-create-room">
@@ -169,25 +178,29 @@ export function QuickCapture() {
             </Link>
           ) : null}
           {error ? <Text accessibilityRole="alert" style={{ color: theme.color.status.danger.text }} testID="quick-capture-error">{error}</Text> : null}
+          {warning ? <Text accessibilityRole="alert" style={{ color: theme.color.status.warning.text }} testID="quick-capture-warning">{warning}</Text> : null}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={failed ? 'Retry capture' : 'Save capture'}
-            disabled={!canSubmit(draft, busy)}
+            disabled={!ready}
             onPress={() => { void save(); }}
             style={{
               alignSelf: 'flex-start',
-              backgroundColor: canSubmit(draft, busy) ? theme.color.accent.bg : theme.color.bg.inset,
+              backgroundColor: ready ? theme.color.accent.bg : theme.color.bg.inset,
               borderRadius: theme.radius.control,
               paddingHorizontal: 14,
               paddingVertical: 10,
             }}
             testID={failed ? 'quick-capture-retry' : 'quick-capture-save'}
           >
-            <Text style={{ color: canSubmit(draft, busy) ? theme.color.accent.fg : theme.color.text.disabled, fontSize: 16 }}>
+            <Text style={{ color: ready ? theme.color.accent.fg : theme.color.text.disabled, fontSize: 16 }}>
               {failed ? 'Retry' : 'Save'}
             </Text>
           </Pressable>
         </View>
+      ) : null}
+      {warning && !open ? (
+        <Text accessibilityRole="alert" style={{ color: theme.color.status.warning.text }} testID="quick-capture-warning">{warning}</Text>
       ) : null}
       <Pressable
         accessibilityRole="button"
