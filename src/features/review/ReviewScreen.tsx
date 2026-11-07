@@ -428,6 +428,7 @@ function MarkButton({ state, label, hint, disabled, onPress }: { state: ReviewSt
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={label}
       accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}
