@@ -1,8 +1,10 @@
+import { REVIEW_STATES } from './models.ts';
+
 export const DATABASE_NAME = 'stome.db';
 
-export const SUPPORTED_VERSION = 5;
+export const SUPPORTED_VERSION = 6;
 
-export { ROOM_STAGES, ANNOTATION_TYPES, type RoomStage, type AnnotationType } from './models.ts';
+export { ROOM_STAGES, ANNOTATION_TYPES, REVIEW_STATES, type RoomStage, type AnnotationType, type ReviewState } from './models.ts';
 
 export const CONNECTION_PRAGMAS = 'PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;';
 
@@ -133,9 +135,33 @@ export const MIGRATIONS: readonly Migration[] = [
   },
   {
     version: 5,
-    name: 'room whiteboards',
+    name: 'human review marks',
     sql: `
-      CREATE TABLE whiteboards (
+      CREATE TABLE review_marks (
+        chunk_id TEXT NOT NULL REFERENCES chunks (id) ON DELETE CASCADE,
+        local_day TEXT NOT NULL CHECK (local_day GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+        state TEXT NOT NULL CHECK (state IN (${REVIEW_STATES.map((state) => `'${state}'`).join(', ')})),
+        marked_at INTEGER NOT NULL,
+        due_at INTEGER NOT NULL,
+        time_zone TEXT NOT NULL CHECK (length(time_zone) BETWEEN 1 AND 64),
+        PRIMARY KEY (chunk_id, local_day)
+      );
+    `,
+  },
+  {
+    version: 6,
+    name: 'review marks and room whiteboards compatibility',
+    sql: `
+      CREATE TABLE IF NOT EXISTS review_marks (
+        chunk_id TEXT NOT NULL REFERENCES chunks (id) ON DELETE CASCADE,
+        local_day TEXT NOT NULL CHECK (local_day GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+        state TEXT NOT NULL CHECK (state IN (${REVIEW_STATES.map((state) => `'${state}'`).join(', ')})),
+        marked_at INTEGER NOT NULL,
+        due_at INTEGER NOT NULL,
+        time_zone TEXT NOT NULL CHECK (length(time_zone) BETWEEN 1 AND 64),
+        PRIMARY KEY (chunk_id, local_day)
+      );
+      CREATE TABLE IF NOT EXISTS whiteboards (
         room_id TEXT PRIMARY KEY NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
         revision INTEGER NOT NULL DEFAULT 1,
         items TEXT NOT NULL CHECK (json_valid(items)),

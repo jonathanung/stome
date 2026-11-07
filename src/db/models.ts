@@ -6,6 +6,11 @@ export const ANNOTATION_TYPES = ['highlight', 'ai_answer', 'stroke'] as const;
 
 export type AnnotationType = (typeof ANNOTATION_TYPES)[number];
 
+/** Human review ratings. These are not annotation types. */
+export const REVIEW_STATES = ['missed', 'unclear', 'got_it'] as const;
+
+export type ReviewState = (typeof REVIEW_STATES)[number];
+
 export type AnnotationPayload = Record<string, unknown>;
 
 export type Room = {

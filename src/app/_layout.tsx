@@ -5,6 +5,7 @@ import { Component, Suspense, type ReactNode } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
 import { ThemeProvider } from '../../design-theme/src/primitives';
+import { QuickCapture } from '../features/capture/QuickCapture';
 import { expoDriver } from '../db/expo-driver';
 import { migrateDb } from '../db/migrate';
 import { DATABASE_NAME } from '../db/schema';
@@ -54,7 +55,9 @@ export default function RootLayout() {
               <Stack.Screen name="index" options={{ headerShown: false }} />
               <Stack.Screen name="rooms/[id]" options={{ headerShown: false }} />
               <Stack.Screen name="rooms/[id]/board" options={{ headerShown: false }} />
+              <Stack.Screen name="rooms/[id]/review" options={{ headerShown: false }} />
             </Stack>
+            <QuickCapture />
           </SQLiteProvider>
         </Suspense>
       </DatabaseBoundary>

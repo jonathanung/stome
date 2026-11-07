@@ -24,7 +24,7 @@ test('a fresh database migrates to the latest version, and running again does no
   await migrateDb(db);
   assert.equal(await version(db), SUPPORTED_VERSION);
   const before = await tables(db);
-  assert.deepEqual(before, ['annotations', 'applied_ops', 'chunk_subjects', 'chunks', 'import_sources', 'notes', 'rooms', 'whiteboards']);
+  assert.deepEqual(before, ['annotations', 'applied_ops', 'chunk_subjects', 'chunks', 'import_sources', 'notes', 'review_marks', 'rooms', 'whiteboards']);
 
   await migrateDb(db);
   assert.equal(await version(db), SUPPORTED_VERSION);
@@ -35,6 +35,23 @@ test('migration versions are contiguous and a newer database is refused', () => 
   MIGRATIONS.forEach((m, i) => assert.equal(m.version, i + 1));
   assert.equal(migrationsFor(SUPPORTED_VERSION).length, 0);
   assert.throws(() => migrationsFor(SUPPORTED_VERSION + 1), /newer/);
+});
+
+test('both version 5 layouts upgrade with review marks and whiteboards', async () => {
+  for (const prior of ['main', 'whiteboard'] as const) {
+    const db = nodeDb();
+    for (const migration of MIGRATIONS.slice(0, 4)) await db.exec(migration.sql);
+    await db.exec(prior === 'main' ? MIGRATIONS[4].sql : `CREATE TABLE whiteboards (
+      room_id TEXT PRIMARY KEY NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+      revision INTEGER NOT NULL DEFAULT 1, items TEXT NOT NULL CHECK (json_valid(items)), updated_at INTEGER NOT NULL
+    );`);
+    await db.exec('PRAGMA user_version = 5');
+    await migrateDb(db);
+    assert.equal(await version(db), SUPPORTED_VERSION);
+    assert.ok((await tables(db)).includes('review_marks'));
+    assert.ok((await tables(db)).includes('whiteboards'));
+    db.close();
+  }
 });
 
 test('notes from the v1 scaffold become chunks in a "notes" room', async () => {

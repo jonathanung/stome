@@ -1,7 +1,7 @@
 // App-owned harness contract. This file does not write Room, chunk, or annotation rows.
-// Foundation (#35, #36) owns that schema and the only commit implementation.
-// Until those exist, chunks are scaffold notes and a confirmed write is described
-// by FoundationAnnotationRequest, which the stub adapter in store.ts persists.
+// Foundation owns that schema. A confirmed pin is an Operation passed to createCommit.
+// FoundationAnnotationRequest is the assessed proposal. The gate payload is built
+// from it at confirm time. Older demo pins stay in the harness file.
 
 export const SCAFFOLD_ROOM_ID = 'scaffold-notes';
 
@@ -16,6 +16,8 @@ export const PAIRING_TTL_MS = 2 * 60 * 60 * 1000;
 export const HARNESS_DATABASE_NAME = 'stome-harness.db';
 
 export const TOOL_NAME = 'notes.proposeAnnotation' as const;
+
+export const EDIT_TOOL_NAME = 'notes.proposeChunkEdit' as const;
 
 export type SessionState = 'idle' | 'running' | 'completed' | 'failed' | 'cancelled';
 
@@ -87,18 +89,42 @@ export type ProposeOutput = {
   anchorEnd: number;
 };
 
-export type StoredProposal = {
+export type EditProposeOutput = {
+  roomId: string;
+  chunkId: string;
+  type: 'chunk_edit';
+  body: string;
+};
+
+type ProposalBase = {
   id: string;
-  tool: typeof TOOL_NAME;
   roomId: string;
   chunkId: string;
   noteId: number;
+  chunkRevision: number;
+};
+
+export type AnnotationProposal = ProposalBase & {
+  tool: typeof TOOL_NAME;
   type: 'ai_answer';
   body: string;
   anchorStart: number;
   anchorEnd: number;
-  chunkRevision: number;
 };
+
+/** Whole-body replacement. previousBody is the text the proposal was grounded on. */
+export type EditProposal = ProposalBase & {
+  tool: typeof EDIT_TOOL_NAME;
+  type: 'chunk_edit';
+  previousBody: string;
+  body: string;
+};
+
+export type StoredProposal = AnnotationProposal | EditProposal;
+
+export function isEditProposal(proposal: StoredProposal): proposal is EditProposal {
+  return proposal.tool === EDIT_TOOL_NAME;
+}
 
 /** Shape the harness will hand to FND.2. The stub is the only writer today. */
 export type FoundationAnnotationRequest = {
@@ -136,6 +162,18 @@ export function noteToChunk(note: NoteLike): ChunkView {
     label: note.title,
     text: note.body,
     revision: note.updatedAt,
+  };
+}
+
+/** A foundation chunk has no scaffold note. noteId stays 0 so it cannot be mistaken for note 0. */
+export function chunkViewFromFoundation(chunk: { id: string; roomId: string; body: string; revision: number }): ChunkView {
+  return {
+    id: chunk.id,
+    roomId: chunk.roomId,
+    noteId: 0,
+    label: chunk.body.slice(0, 80),
+    text: chunk.body,
+    revision: chunk.revision,
   };
 }
 
@@ -235,6 +273,26 @@ function failString(label: string): never {
   throw new HarnessError('invalid_shape', `${label} must be a string`);
 }
 
+export function parseEditOutput(value: unknown): EditProposeOutput {
+  if (!isRecord(value)) {
+    throw new HarnessError('invalid_shape', 'Tool output must be an object');
+  }
+  exactKeys(value, ['roomId', 'chunkId', 'type', 'body']);
+  if (value.type !== 'chunk_edit') {
+    throw new HarnessError('invalid_shape', 'notes.proposeChunkEdit only proposes a whole-note replacement');
+  }
+  const body = requireString(value.body, 'replacement');
+  if (body.length > PROVIDER_LIMITS.maxOutputChars) {
+    throw new HarnessError('output_limit', 'The replacement is longer than the output limit');
+  }
+  return {
+    roomId: requireString(value.roomId, 'roomId'),
+    chunkId: requireString(value.chunkId, 'chunkId'),
+    type: 'chunk_edit',
+    body,
+  };
+}
+
 export function parseProposeOutput(value: unknown): ProposeOutput {
   if (!isRecord(value)) {
     throw new HarnessError('invalid_shape', 'Tool output must be an object');
@@ -264,11 +322,18 @@ export const TOOL_REGISTRY = {
     parseInput: parseProposeInput,
     parseOutput: parseProposeOutput,
   },
+  [EDIT_TOOL_NAME]: {
+    name: EDIT_TOOL_NAME,
+    parseInput: parseProposeInput,
+    parseOutput: parseEditOutput,
+  },
 } as const;
 
+const NOTE_TOOLS = [TOOL_NAME, EDIT_TOOL_NAME].sort();
+
 export function assertRegistryIsNotesOnly(): void {
-  const names = Object.keys(TOOL_REGISTRY);
-  if (names.length !== 1 || names[0] !== TOOL_NAME) {
+  const names = Object.keys(TOOL_REGISTRY).sort();
+  if (names.length !== NOTE_TOOLS.length || names.some((name, index) => name !== NOTE_TOOLS[index])) {
     throw new HarnessError('invalid_shape', 'The tool registry is no longer the notes-only set');
   }
 }
@@ -288,7 +353,8 @@ export function assertSingleRoomSelection(chunks: readonly ChunkView[]): void {
     if (chunk.roomId !== roomId) {
       throw new HarnessError('scope_rejected', 'A session can only include chunks from one room');
     }
-    if (noteIdFromChunk(chunk.id) !== chunk.noteId) {
+    const scaffoldNoteId = noteIdFromChunk(chunk.id);
+    if (scaffoldNoteId !== null && scaffoldNoteId !== chunk.noteId) {
       throw new HarnessError('invalid_shape', 'The chunk id does not match the scaffold note');
     }
     if (seen.has(chunk.id)) {
@@ -369,7 +435,7 @@ export function assessConfirmedAnnotation(input: {
     kind: 'annotation.create',
     source: 'ai',
     confirmed: true,
-    expectedRevision: input.chunk.revision,
+    expectedRevision: proposal.chunkRevision,
     payload: {
       proposalId: proposal.id,
       roomId: proposal.roomId,
