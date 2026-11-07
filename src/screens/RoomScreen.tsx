@@ -1,5 +1,5 @@
 import { randomUUID } from 'expo-crypto';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -15,6 +15,7 @@ import { getRoom, listChunks, listRoomAnnotations } from '../data/queries';
 import { expoDriver } from '../db/expo-driver';
 import { AnchoredChunkText, PinnedAnswer } from '../features/ask/AnchoredChunkText';
 import type { ChunkFocus } from '../features/ask/citations';
+import { ReviewEntry } from '../features/review/ReviewEntry';
 import { HarnessPanel } from './HarnessPanel';
 
 type ChunkWithAnnotations = Chunk & { annotations: Annotation[] };
@@ -116,7 +117,7 @@ export function RoomScreen() {
     setRoom(next.room);
     setChunks(next.chunks);
   }, [load]);
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     let active = true;
     load().then((next) => {
       if (active) { setRoom(next.room); setChunks(next.chunks); setLoading(false); }
@@ -124,7 +125,7 @@ export function RoomScreen() {
       if (active) { setError(reason instanceof Error ? reason.message : 'Could not load room'); setLoading(false); }
     });
     return () => { active = false; };
-  }, [load]);
+  }, [load]));
   const openCitation = useCallback((next: ChunkFocus) => {
     setFocus(next);
   }, []);
@@ -196,6 +197,7 @@ export function RoomScreen() {
           </Pressable>
           <Text accessibilityRole="header" style={{ color: theme.color.text.primary, fontSize: 32, fontWeight: '700' }}>{room.name}</Text>
           <Text style={{ color: theme.color.text.secondary }}>Stone stage: {room.stage}</Text>
+          <ReviewEntry roomId={room.id} />
           <Text style={{ color: theme.color.text.primary, fontSize: 20, fontWeight: '600', marginTop: 8 }}>Notes</Text>
           <TextInput accessibilityLabel="Note content" placeholder="Write a note chunk" placeholderTextColor={theme.color.text.tertiary}
             multiline textAlignVertical="top" value={content} onChangeText={setContent} style={[input, { minHeight: 100 }]} />

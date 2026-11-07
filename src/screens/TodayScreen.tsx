@@ -1,4 +1,4 @@
-import { Link, useFocusEffect } from 'expo-router';
+import { Link, router, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
@@ -9,6 +9,8 @@ import type { DueChunk } from '../data/models';
 import { listDueChunks } from '../data/queries';
 import { planToday } from '../data/today';
 import { expoDriver } from '../db/expo-driver';
+import { reviewMarkController } from '../features/review/mark-attempt';
+import { reviewHref } from '../features/review/session';
 
 const STATE_LABEL = {
   missed: 'Missed',
@@ -32,21 +34,28 @@ export function TodayScreen() {
 
   useFocusEffect(useCallback(() => {
     let active = true;
-    listDueChunks(db, Date.now())
-      .then((due) => {
-        if (active) {
+    let ticket = 0;
+    const load = () => {
+      const mine = ++ticket;
+      return listDueChunks(db, Date.now())
+        .then((due) => {
+          if (!active || mine !== ticket) return;
           setItems(planToday(due));
           setLoading(false);
-        }
-      })
-      .catch((reason: unknown) => {
-        if (active) {
+        })
+        .catch((reason: unknown) => {
+          if (!active || mine !== ticket) return;
           setError(reason instanceof Error ? reason.message : 'Could not read today’s list');
           setLoading(false);
-        }
-      });
+        });
+    };
+    void load();
+    const unsubscribe = reviewMarkController.subscribe(() => {
+      void load();
+    });
     return () => {
       active = false;
+      unsubscribe();
     };
   }, [db]));
 
@@ -82,14 +91,17 @@ export function TodayScreen() {
           {items.map((item) => {
             const title = item.chunk.body.split('\n')[0]?.slice(0, 80) || 'Empty chunk';
             return (
-              <View
+              <Pressable
                 key={item.chunk.id}
+                accessibilityRole="button"
+                accessibilityLabel={`Review ${title}`}
+                onPress={() => router.push(reviewHref(item.chunk.roomId, item.chunk.id))}
                 style={{ backgroundColor: theme.color.bg.surface, borderColor: theme.color.border.hairline, borderRadius: theme.radius.card, borderWidth: 1, gap: 6, padding: 16 }}
                 testID={`today-item-${item.chunk.id}`}
               >
                 <Text style={{ color: theme.color.text.secondary }}>{STATE_LABEL[item.mark.state]}</Text>
                 <Text style={{ color: theme.color.text.primary, fontSize: 18 }}>{title}</Text>
-              </View>
+              </Pressable>
             );
           })}
         </View>
