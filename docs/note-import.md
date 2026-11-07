@@ -16,12 +16,23 @@ form the stable source identity; cache URIs are never identities.
 | OneNote (#20) | Microsoft Graph exposes notebooks/sections/pages, needs delegated authentication (app-only auth retired). Desktop PDF export and web page-to-PDF routes exist; PDFs lose notebook hierarchy. No native `.one` parser selected. | High / medium-high for OAuth, HTML, images and ink. | Defer #25. |
 | Freeform (#21) | Apple documents sending a board copy and exporting PDF. Board positions and connectors do not map cleanly to linear notes. Whiteboard mapping needs its own model. | High / high for PDF extraction or spatial preservation. | Defer #26. |
 
-This is a conservative implementation decision for #28, recorded here for the
-parent epic. GitHub issues have not been updated. Research is incomplete:
-there are no real GoodNotes, OneNote or Freeform exports in this checkout and
-no device sample tests have been performed. Do not close #19–21 on this evidence.
-The Markdown tests use the explicitly synthetic `tests/fixtures/import-vault/`
-sample vault; they do not establish compatibility with every Obsidian plugin.
+Markdown is implemented; its selection here remains the conservative
+recommendation for #28, not completion of that issue's research gates. The
+source-specific reports below supersede the original preliminary research
+summary. OneNote and Freeform are research-only assessments of documented
+routes, not claims of working importers. GoodNotes #19 still requires authentic
+typed and handwritten export samples; neither #19 nor #28 can close on the
+current evidence. No device sample tests are claimed. The Markdown tests use
+the explicitly synthetic `tests/fixtures/import-vault/` sample vault; they do
+not establish compatibility with every Obsidian plugin.
+
+Source research and sample evidence:
+
+- [Obsidian feasibility (#18)](import/obsidian-feasibility.md)
+- [GoodNotes feasibility (#19)](import/goodnotes-feasibility.md) and
+  [sample report](import/goodnotes-sample-report.md)
+- [OneNote feasibility (#20)](import/onenote-feasibility.md)
+- [Freeform feasibility (#21)](import/freeform-feasibility.md)
 
 Primary references (consulted 2026-11-07):
 
@@ -56,7 +67,18 @@ block lists, inline hashtags outside code, then the parent folder (if supplied).
 This is deliberately a small YAML subset, not a general YAML interpreter.
 Complex YAML yields a warning. Names and subjects obey Foundation limits.
 Suggestions are labeled for review and may be replaced with comma-separated
-subjects. Destination selection is explicit: use an existing room or name a
+subjects. Because the picker supplies a filename, the user can add its folder
+to the reviewed source path. Until subjects are manually edited, a valid path
+change recomputes suggestions from the original file tags plus the current
+parent folder; changing/removing the folder removes its previous automatic
+suggestion. Incomplete or invalid paths do not produce a folder suggestion and
+are still rejected on save. Folder names are normalized, deduplicated without
+case sensitivity and omitted with a warning if subject limits are exceeded.
+Because the review field uses commas to separate subjects, a folder containing
+a comma is also omitted with a warning rather than being split into subjects.
+Manually edited subjects, including an intentionally empty value, stay unchanged
+when the path changes. Choosing another batch starts fresh suggestions.
+Destination selection is explicit: use an existing room or name a
 new one. No room assignment is silently inferred. No rewards are awarded and
 existing room stages are unchanged (#29).
 Chunk creation/update timestamps record the import time. Source-file modification

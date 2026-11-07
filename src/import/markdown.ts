@@ -124,6 +124,6 @@ export function parseMarkdown(input: ImportInput): ParsedNote {
       warnings.add('Some subject suggestions exceeded the limits and were omitted. Review the subjects.');
     } else if (subject && !subjects.some((s) => s.toLowerCase() === subject.toLowerCase())) subjects.push(subject);
   }
-  if (!subjects.length) warnings.add('No subjects were inferred. You can add subjects before saving.');
+  if (!subjects.length) warnings.add('No subjects were inferred from the file. You can add subjects or a source folder before saving.');
   return { path, title: folders[folders.length - 1].replace(/\.md$/i, ''), bodies, subjects, warnings: [...warnings] };
 }
