@@ -34,13 +34,15 @@ export function mockSuccessOutput(input: ProposeInput): ProposeOutput {
     throw new HarnessError('invalid_output', 'The selected note has no text to anchor');
   }
   const ids = input.chunks.map((item) => item.id).sort().join(',');
+  const deepMarker = 'DEEP-ANCHOR.';
+  const deepAt = input.prompt.trim() === 'Cite the deep passage.' ? chunk.text.indexOf(deepMarker) : -1;
   return {
     roomId: input.roomId,
     chunkId: chunk.id,
     type: 'ai_answer',
     body: `Mock answer (${ids}; messages=${input.priorMessages.length}): ${input.prompt.trim()}`,
-    anchorStart: 0,
-    anchorEnd,
+    anchorStart: deepAt >= 0 ? deepAt : 0,
+    anchorEnd: deepAt >= 0 ? deepAt + deepMarker.length : anchorEnd,
   };
 }
 
@@ -49,12 +51,15 @@ export function mockEditOutput(input: ProposeInput): EditProposeOutput {
   if (!chunk || input.chunks.length !== 1) {
     throw new HarnessError('invalid_output', 'A note edit needs exactly one chunk');
   }
-  const suffix = `\n\nMock edit (${chunk.id}; messages=${input.priorMessages.length}): ${input.prompt.trim()}`;
+  const prompt = input.prompt.trim();
+  const rewrite = /^Replace the first 12 characters with (.{12})\.$/.exec(prompt);
+  const suffix = `\n\nMock edit (${chunk.id}; messages=${input.priorMessages.length}): ${prompt}`;
+  const body = rewrite ? `${rewrite[1]}${chunk.text.slice(Math.min(12, chunk.text.length))}` : `${chunk.text}${suffix}`;
   return {
     roomId: chunk.roomId,
     chunkId: chunk.id,
     type: 'chunk_edit',
-    body: `${chunk.text}${suffix}`,
+    body,
   };
 }
 
