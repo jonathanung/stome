@@ -10,8 +10,7 @@
  */
 
 import type { Db, SqlValue } from '../db/driver.ts';
-import { validBoardItems } from '../whiteboard/model.ts';
-import { ANNOTATION_TYPES } from '../db/schema.ts';
+import { ANNOTATION_TYPES, REVIEW_STATES, type ReviewState } from '../db/schema.ts';
 import {
   LIMITS,
   NEEDS_REVISION,
@@ -108,11 +107,6 @@ function normalize(op: Operation): Normalized {
   const p: Record<string, unknown> = isObject(op.payload) ? op.payload : reject('invalid', 'payload must be an object');
 
   switch (op.kind) {
-    case 'board.save': {
-      const roomId = requireId(p.roomId, 'roomId');
-      if (!validBoardItems(p.items) || JSON.stringify(p.items).length > 300_000) reject('invalid', 'invalid whiteboard items');
-      return { kind: op.kind, payload: { roomId, items: p.items as Payloads['board.save']['items'] } };
-    }
     case 'import.note': {
       if (typeof p.sourceId !== 'string' || !p.sourceId.startsWith('markdown:') || p.sourceId.length > 2048 || p.sourceId.length <= 9) {
         reject('invalid', 'import needs a stable Markdown collection/path identity');
@@ -191,7 +185,55 @@ function normalize(op: Operation): Normalized {
     }
     case 'annotation.delete':
       return { kind: op.kind, payload: { annotationId: requireId(p.annotationId, 'annotationId') } };
+    case 'review.mark':
+      if (!(REVIEW_STATES as readonly string[]).includes(String(p.state))) reject('invalid', 'review state must be missed, unclear, or got_it');
+      return {
+        kind: op.kind,
+        payload: {
+          chunkId: requireId(p.chunkId, 'chunkId'),
+          state: p.state as ReviewState,
+          timeZone: timeZone(p.timeZone),
+        },
+      };
   }
+}
+
+const MINUTE_MS = 60_000;
+const DAY_MS = 24 * 60 * MINUTE_MS;
+const REVIEW_DUE_MS: Record<ReviewState, number> = {
+  missed: 10 * MINUTE_MS,
+  unclear: DAY_MS,
+  got_it: 3 * DAY_MS,
+};
+
+/** One review_marks row is one credit: a chunk on one local day. */
+const BRICK_CREDIT_COUNT = 3;
+
+function timeZone(value: unknown): string {
+  if (typeof value !== 'string') return reject('invalid', 'time zone must be text');
+  const zone = value.trim();
+  if (zone.length === 0 || zone.length > 64) return reject('invalid', 'time zone must be a recognized IANA name');
+  try {
+    Intl.DateTimeFormat('en-US', { timeZone: zone }).format();
+  } catch {
+    return reject('invalid', 'time zone must be a recognized IANA name');
+  }
+  return zone;
+}
+
+/** Calendar day of `now` in `zone`, as YYYY-MM-DD. */
+function localDay(now: number, zone: string): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: zone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(now));
+  const year = parts.find((part) => part.type === 'year')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+  const day = parts.find((part) => part.type === 'day')?.value;
+  if (!year || !month || !day) return reject('invalid', 'time zone must be a recognized IANA name');
+  return `${year}-${month}-${day}`;
 }
 
 function checkAnchor(type: string, anchor: Record<string, unknown>, body: string): void {
@@ -229,16 +271,6 @@ async function apply(db: Db, op: Operation, n: Normalized, deps: CommitDeps): Pr
   const run = (sql: string, params: SqlValue[]) => db.run(sql, params);
 
   switch (n.kind) {
-    case 'board.save': {
-      const { roomId, items } = n.payload;
-      if (!await db.get('SELECT 1 FROM rooms WHERE id = ?', [roomId])) reject('not_found', 'room does not exist');
-      const board = await db.get<RevisionRow>('SELECT revision FROM whiteboards WHERE room_id = ?', [roomId]);
-      const revision = board?.revision ?? 0;
-      if (op.expectedRevision !== revision) reject('stale_revision', `whiteboard changed elsewhere (now revision ${revision})`);
-      if (board) await run('UPDATE whiteboards SET items = ?, revision = revision + 1, updated_at = ? WHERE room_id = ?', [JSON.stringify(items), now, roomId]);
-      else await run('INSERT INTO whiteboards (room_id, items, updated_at) VALUES (?, ?, ?)', [roomId, JSON.stringify(items), now]);
-      return { roomId, revision: revision + 1 };
-    }
     case 'import.note': {
       const { sourceId, fingerprint, destination, bodies, subjects } = n.payload;
       const prior = await db.get<{ fingerprint: string; room_id: string; chunk_ids: string }>(
@@ -370,16 +402,56 @@ async function apply(db: Db, op: Operation, n: Normalized, deps: CommitDeps): Pr
       if (deleted.changes === 0) reject('not_found', 'annotation does not exist');
       return { annotationId };
     }
+    case 'review.mark': {
+      const { chunkId, state, timeZone: zone } = n.payload;
+      const chunk = await db.get<RevisionRow & { room_id: string }>('SELECT revision, room_id FROM chunks WHERE id = ?', [chunkId]);
+      await expectRevision(chunk, op.expectedRevision, 'chunk');
+      const day = localDay(now, zone);
+      const dueAt = now + REVIEW_DUE_MS[state];
+      await run(
+        `INSERT INTO review_marks (chunk_id, local_day, state, marked_at, due_at, time_zone)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (chunk_id, local_day) DO UPDATE SET
+           state = excluded.state,
+           marked_at = excluded.marked_at,
+           due_at = excluded.due_at,
+           time_zone = excluded.time_zone`,
+        [chunkId, day, state, now, dueAt, zone],
+      );
+      const credits = await db.get<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM review_marks
+         JOIN chunks ON chunks.id = review_marks.chunk_id
+         WHERE chunks.room_id = ?`,
+        [chunk!.room_id],
+      );
+      const room = await db.get<{ stage: string }>('SELECT stage FROM rooms WHERE id = ?', [chunk!.room_id]);
+      if (!room) reject('not_found', 'room does not exist');
+      if (room!.stage !== 'stonehenge' && room!.stage !== 'brick') reject('not_found', 'room does not exist');
+      let stage: 'stonehenge' | 'brick' = room!.stage === 'brick' ? 'brick' : 'stonehenge';
+      if ((credits?.n ?? 0) >= BRICK_CREDIT_COUNT && stage === 'stonehenge') {
+        await run(`UPDATE rooms SET stage = 'brick', updated_at = ? WHERE id = ? AND stage = 'stonehenge'`, [now, chunk!.room_id]);
+        stage = 'brick';
+      }
+      return { chunkId, state, localDay: day, markedAt: now, dueAt, timeZone: zone, stage };
+    }
   }
 }
+
+/**
+ * One queue per database object. Room saves and harness confirms must share
+ * that object — `expoDriver` returns the same wrapper for one SQLite handle —
+ * because `withTransactionAsync` does not isolate two wrappers. Each caller
+ * still uses its own clock and id factory. A failed commit rolls back only
+ * its own transaction; the next queued commit then runs on the committed
+ * database.
+ */
+const commitQueues = new WeakMap<Db, Promise<unknown>>();
 
 /**
  * Creates the app's commit function for one database. Commits are queued so
  * two never share a transaction, even when the UI fires them concurrently.
  */
 export function createCommit(db: Db, deps: CommitDeps): Commit {
-  let queue: Promise<unknown> = Promise.resolve();
-
   async function commitNow(op: Operation): Promise<CommitResult> {
     let normalized: Normalized;
     try {
@@ -415,8 +487,9 @@ export function createCommit(db: Db, deps: CommitDeps): Commit {
   }
 
   return (<K extends OpKind>(op: Operation<K>) => {
-    const next = queue.then(() => commitNow(op as Operation));
-    queue = next.catch(() => undefined);
+    const previous = commitQueues.get(db) ?? Promise.resolve();
+    const next = previous.then(() => commitNow(op as Operation));
+    commitQueues.set(db, next.catch(() => undefined));
     return next as Promise<CommitResult<K>>;
   }) as Commit;
 }

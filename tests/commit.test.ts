@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 import { createCommit, type CommitDeps } from '../src/data/commit.ts';
 import type { OpKind, Operation, Payloads } from '../src/data/operations.ts';
-import { getBoard, getRoom, listAnnotations, listChunks, listRoomAnnotations, listRooms } from '../src/data/queries.ts';
+import { getRoom, listAnnotations, listChunks, listRoomAnnotations, listRooms } from '../src/data/queries.ts';
 import type { Db } from '../src/db/driver.ts';
 import { migrateDb } from '../src/db/migrate.ts';
 import { failOnWrite, nodeDb } from './support/node-db.ts';
@@ -35,50 +35,6 @@ async function room(s: Awaited<ReturnType<typeof setup>>, name = 'biology') {
 }
 
 const count = async (db: Db, table: string) => (await db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM ${table}`))!.n;
-
-test('whiteboard saves require a current revision and explicit acceptance for AI edits', async () => {
-  const s = await setup();
-  const roomId = await room(s);
-  const text = { id: 'label', kind: 'text' as const, x: 20, y: 30, text: 'Photosynthesis' };
-  const first = await s.commit(s.op('board.save', { roomId, items: [text] }, { expectedRevision: 0 }));
-  assert.ok(first.ok);
-  assert.equal(first.value.revision, 1);
-  assert.deepEqual((await getBoard(s.db, roomId)).items, [text]);
-  const proposed = s.op('board.save', { roomId, items: [...(await getBoard(s.db, roomId)).items,
-    { id: 'correction', kind: 'text', x: 20, y: 70, text: 'Check the chloroplast label' }] },
-    { expectedRevision: 1, source: 'ai' });
-  const unconfirmed = await s.commit(proposed);
-  assert.ok(!unconfirmed.ok);
-  assert.equal(unconfirmed.error.code, 'unconfirmed');
-  assert.equal((await getBoard(s.db, roomId)).items.length, 1);
-  const accepted = await s.commit({ ...proposed, confirmed: true });
-  assert.ok(accepted.ok);
-  assert.equal((await getBoard(s.db, roomId)).items.length, 2);
-  const stale = await s.commit(s.op('board.save', { roomId, items: [] }, { expectedRevision: 1 }));
-  assert.ok(!stale.ok);
-  assert.equal(stale.error.code, 'stale_revision');
-  assert.equal((await getBoard(s.db, roomId)).items.length, 2);
-});
-
-test('whiteboard rejects out of bounds geometry and follows room deletion', async () => {
-  const s = await setup();
-  const roomId = await room(s);
-  const invalid = await s.commit(s.op('board.save', { roomId, items: [
-    { id: 'bad', kind: 'pencil', points: [[1001, 0]] },
-  ] }, { expectedRevision: 0 }));
-  assert.ok(!invalid.ok);
-  assert.equal(invalid.error.code, 'invalid');
-  assert.equal(await count(s.db, 'whiteboards'), 0);
-  const saved = await s.commit(s.op('board.save', { roomId, items: [
-    { id: 'shape', kind: 'rect', x: 10, y: 20, width: 50, height: 40 },
-  ] }, { expectedRevision: 0 }));
-  assert.ok(saved.ok);
-  const roomRecord = await getRoom(s.db, roomId);
-  assert.ok(roomRecord);
-  const deleted = await s.commit(s.op('room.delete', { roomId }, { expectedRevision: roomRecord.revision, confirmed: true }));
-  assert.ok(deleted.ok);
-  assert.equal(await count(s.db, 'whiteboards'), 0);
-});
 
 /* ----------------------------------------------------------- acceptance */
 
