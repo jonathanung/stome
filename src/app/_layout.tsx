@@ -1,9 +1,17 @@
+import {
+  Inter_400Regular,
+  Inter_500Medium,
+  Inter_600SemiBold,
+  Inter_700Bold,
+  useFonts,
+} from '@expo-google-fonts/inter';
+import { Outfit_700Bold, Outfit_800ExtraBold, Outfit_900Black } from '@expo-google-fonts/outfit';
 import { getRandomBytes } from 'expo-crypto';
 import { Stack } from 'expo-router';
 import { SQLiteProvider, type SQLiteDatabase } from 'expo-sqlite';
 import { StatusBar } from 'expo-status-bar';
 import { Component, Suspense, type ReactNode } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
 
 import { ThemeProvider, useStoneTheme } from '../../design-theme/src/primitives';
 import { expoDriver } from '../db/expo-driver';
@@ -69,6 +77,7 @@ function AppStack() {
   return (
     <Stack screenOptions={stackHeaderOptions(theme)}>
       <Stack.Screen name="index" options={{ headerShown: false }} />
+      <Stack.Screen name="today" options={{ headerShown: false }} />
       <Stack.Screen name="rooms/[id]" options={{ headerShown: false }} />
       <Stack.Screen name="recent" options={{ headerShown: false }} />
       <Stack.Screen name="rooms/[id]/review" options={{ headerShown: false }} />
@@ -81,11 +90,34 @@ function ThemedRoot({ children }: { children: ReactNode }) {
   return <View style={[styles.root, { backgroundColor: theme.color.bg.canvas }]}>{children}</View>;
 }
 
+function ThemedStatusBar() {
+  const theme = useStoneTheme();
+  return <StatusBar style={theme.scheme === 'dark' ? 'light' : 'dark'} />;
+}
+
 export default function RootLayout() {
+  const [loaded, error] = useFonts({
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_600SemiBold,
+    Inter_700Bold,
+    Outfit_700Bold,
+    Outfit_800ExtraBold,
+    Outfit_900Black,
+  });
+  // A font that fails to load falls back to the system face rather than blocking the app.
+  const ready = loaded || Boolean(error);
+  if (!ready) {
+    return (
+      <ThemeProvider>
+        <ThemedRoot><ActivityIndicator style={{ flex: 1 }} /></ThemedRoot>
+      </ThemeProvider>
+    );
+  }
   return (
-    <ThemeProvider>
+    <ThemeProvider fontMode={error ? 'css' : 'expo'}>
       <ThemedRoot>
-        <StatusBar style="auto" />
+        <ThemedStatusBar />
         <DatabaseBoundary>
           <Suspense fallback={<StorageOpening />}>
             <SQLiteProvider databaseName={DATABASE_NAME} onInit={prepareDatabase} useSuspense>

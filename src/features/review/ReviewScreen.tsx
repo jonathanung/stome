@@ -6,6 +6,9 @@ import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button, Screen, useStoneTheme } from '../../../design-theme/src/primitives';
+import { StageGlyph } from '../../ui/StageGlyph';
+import { REVIEW_TONE, StatusMark } from '../../ui/StatusMark';
+import { BackButton, EmptyState, Group, Notice, ScreenHeader, SectionTitle, useColumn } from '../../ui/kit';
 import { createCommit } from '../../data/commit';
 import type { ReviewMark, Room, RoomStage } from '../../data/models';
 import { getChunk, getRoom, latestReviewMark, listChunks } from '../../data/queries';
@@ -69,6 +72,7 @@ export function ReviewScreen() {
   const db = useMemo(() => expoDriver(sqlite), [sqlite]);
   const commit = useMemo(() => createCommit(db, { now: Date.now, newId: randomUUID }), [db]);
   const theme = useStoneTheme();
+  const column = useColumn();
   const [room, setRoom] = useState<Room | null>(null);
   const [stage, setStage] = useState<RoomStage>('stonehenge');
   const stageRef = useRef<RoomStage>('stonehenge');
@@ -250,71 +254,87 @@ export function ReviewScreen() {
     setError(null);
   }
 
-  const inputColor = theme.color.text.primary;
+  const ink = theme.color.text.primary;
   const muted = theme.color.text.secondary;
 
   return (
     <Screen>
-      <SafeAreaView style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ flexGrow: 1, paddingBottom: 32 }}>
-          <View style={{ width: '100%', maxWidth: 760, alignSelf: 'center', padding: 20, gap: 16 }} testID="review-screen">
-            <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={leave} testID="review-back">
-              <Text style={{ color: muted }}>← Back</Text>
-            </Pressable>
-            <Text accessibilityRole="header" style={{ color: inputColor, fontSize: 32, fontWeight: '700' }}>Review</Text>
-            {loading ? <ActivityIndicator /> : null}
-            {shownError ? <Text accessibilityRole="alert" testID="review-error" style={{ color: theme.color.status.danger.text }}>{shownError}</Text> : null}
+      <SafeAreaView style={{ flex: 1 }} edges={['top', 'left', 'right']}>
+        <ScrollView contentContainerStyle={{ flexGrow: 1, paddingBottom: 120 }}>
+          <View style={[column, { gap: theme.space.section }]} testID="review-screen">
+            <ScreenHeader
+              back={<BackButton label={room?.name ?? 'Back'} accessibilityLabel="Back" onPress={leave} testID="review-back" />}
+              title="Review"
+            >
+              {room ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.md, marginTop: theme.space.xs }}>
+                  <StageGlyph stage={stage} size={28} />
+                  <Text testID="review-stage" style={[theme.text('bodySmall'), { color: muted }]}>Stone stage: {stage}</Text>
+                </View>
+              ) : null}
+            </ScreenHeader>
+            {loading ? <ActivityIndicator color={theme.color.accent.bg} /> : null}
+            {shownError ? <Notice tone="danger" testID="review-error">{shownError}</Notice> : null}
             {!loading && missing ? (
-              <View style={{ gap: 12 }}>
-                <Text accessibilityRole="alert" style={{ color: inputColor }}>This room was not found.</Text>
-                <Button label="Back to rooms" onPress={() => router.replace('/')} />
-              </View>
+              <EmptyState title="This room was not found." body="It may have been deleted on this device.">
+                <Button label="Back to rooms" size="compact" onPress={() => router.replace('/')} />
+              </EmptyState>
             ) : null}
             {!loading && room ? (
-              <View style={{ gap: 16 }}>
-                <Text style={{ color: inputColor, fontSize: 20, fontWeight: '600' }}>{room.name}</Text>
-                <Text testID="review-stage" style={{ color: muted }}>Stone stage: {stage}</Text>
-                {saved ? <Text testID="review-saved" style={{ color: inputColor }}>{saved}</Text> : null}
+              <View style={{ gap: theme.space.section }}>
+                {saved ? <Notice tone="success" testID="review-saved">{saved}</Notice> : null}
                 {card && asked ? (
-                  <View style={{ backgroundColor: theme.color.bg.surface, borderColor: theme.color.border.hairline, borderRadius: theme.radius.card, borderWidth: 1, gap: 12, padding: 16 }}>
-                    <Text testID="review-progress" style={{ color: muted }}>
-                      {`Note ${Math.min(done + 1, total)} of ${total}`}
-                    </Text>
-                    <Text testID="review-revision" style={{ color: muted }}>{`Revision ${card.revision}`}</Text>
-                    <Text testID="review-chunk" style={{ color: inputColor, fontSize: 18, lineHeight: 26 }}>{card.body}</Text>
+                  <View style={{ backgroundColor: theme.color.bg.surface, borderColor: theme.color.border.hairline, borderRadius: theme.radius.card, borderWidth: 1, gap: theme.space.base, padding: theme.space.card, ...theme.shadow.card }}>
+                    <View style={{ gap: theme.space.md }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text testID="review-progress" style={[theme.text('label'), { color: theme.color.text.tertiary }]}>
+                          {`Note ${Math.min(done + 1, total)} of ${total}`}
+                        </Text>
+                        <Text testID="review-revision" style={[theme.text('label'), { color: theme.color.text.tertiary }]}>{`Revision ${card.revision}`}</Text>
+                      </View>
+                      <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ flexDirection: 'row', gap: 4 }}>
+                        {Array.from({ length: total }, (_, index) => (
+                          <View key={index} style={{ flex: 1, height: 4, borderRadius: 2, backgroundColor: index < done ? theme.color.accent.bg : theme.color.bg.inset }} />
+                        ))}
+                      </View>
+                    </View>
+                    <Text testID="review-chunk" style={[theme.text('reading'), { color: ink }]}>{card.body}</Text>
                     {asked.ok ? (
-                      <Text testID="review-question" style={{ color: inputColor, fontSize: 16, lineHeight: 24 }}>{asked.question.split('\n')[0]}</Text>
+                      <View style={{ backgroundColor: theme.color.bg.canvas, borderRadius: theme.radius.lg, padding: theme.space.base }}>
+                        <Text testID="review-question" style={[theme.text('actionTitle'), { color: ink }]}>{asked.question.split('\n')[0]}</Text>
+                      </View>
                     ) : (
-                      <View style={{ gap: 8 }}>
-                        <Text accessibilityRole="alert" testID="review-question-error" style={{ color: theme.color.status.danger.text }}>{asked.message}</Text>
-                        <Button label="Skip this note" variant="ghost" disabled={busy} onPress={skip} />
+                      <View style={{ gap: theme.space.md, alignItems: 'flex-start' }}>
+                        <Text accessibilityRole="alert" testID="review-question-error" style={[theme.text('bodySmall'), { color: theme.color.status.danger.text }]}>{asked.message}</Text>
+                        <Button label="Skip this note" size="compact" variant="ghost" disabled={busy} onPress={skip} />
                       </View>
                     )}
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                    <View style={{ flexDirection: 'row', gap: theme.space.md }}>
                       {(Object.keys(REVIEW_LABEL) as ReviewState[]).map((state) => (
-                        <Button
-                          key={state}
-                          label={REVIEW_LABEL[state]}
-                          variant="outline"
-                          disabled={busy}
-                          onPress={() => void mark(state)}
-                        />
+                        <MarkButton key={state} state={state} label={REVIEW_LABEL[state]} disabled={busy} onPress={() => void mark(state)} />
                       ))}
                     </View>
                   </View>
                 ) : (
-                  <Text testID="review-empty" style={{ color: inputColor, fontSize: 18 }}>
-                    {total === 0 && scheduled.length === 0 ? 'No notes to review.' : 'Nothing is due right now.'}
-                  </Text>
+                  <EmptyState
+                    testID="review-empty"
+                    title={total === 0 && scheduled.length === 0 ? 'No notes to review.' : 'Nothing is due right now.'}
+                    body={total === 0 && scheduled.length === 0 ? 'Add notes to this room, then come back to review them.' : 'Marked notes come back on the day shown below.'}
+                  />
                 )}
                 {scheduled.length ? (
-                  <View style={{ gap: 8 }} testID="review-schedule">
-                    <Text style={{ color: inputColor, fontSize: 18, fontWeight: '600' }}>Coming up</Text>
-                    {scheduled.map((item) => (
-                      <Text key={item.chunkId} testID={`review-scheduled-${item.chunkId}`} style={{ color: muted }}>
-                        {`${REVIEW_LABEL[item.state]} · ${item.localDay} · due ${formatDueAt(item.dueAt)}`}
-                      </Text>
-                    ))}
+                  <View style={{ gap: theme.space.xl }} testID="review-schedule">
+                    <SectionTitle>Coming up</SectionTitle>
+                    <Group>
+                      {scheduled.map((item) => (
+                        <View key={item.chunkId} style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.xl, minHeight: 52, paddingHorizontal: theme.space.base, paddingVertical: theme.space.md }}>
+                          <StatusMark state={item.state} size={24} />
+                          <Text testID={`review-scheduled-${item.chunkId}`} style={[theme.text('bodySmall'), { flex: 1, color: muted }]}>
+                            {`${REVIEW_LABEL[item.state]} · ${item.localDay} · due ${formatDueAt(item.dueAt)}`}
+                          </Text>
+                        </View>
+                      ))}
+                    </Group>
                   </View>
                 ) : null}
               </View>
@@ -323,5 +343,33 @@ export function ReviewScreen() {
         </ScrollView>
       </SafeAreaView>
     </Screen>
+  );
+}
+
+/** One review choice, tinted with its status wash so the three read apart at a glance. */
+function MarkButton({ state, label, disabled, onPress }: { state: ReviewState; label: string; disabled: boolean; onPress: () => void }) {
+  const theme = useStoneTheme();
+  const pair = theme.color.status[REVIEW_TONE[state]];
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flex: 1,
+        minHeight: 56,
+        borderRadius: theme.radius.lg,
+        backgroundColor: pair.wash,
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: theme.space.xs,
+        paddingVertical: theme.space.md,
+        opacity: disabled ? 0.5 : pressed ? 0.75 : 1,
+      })}
+    >
+      <StatusMark state={state} size={22} />
+      <Text style={[theme.text('buttonCompact'), { color: pair.text }]}>{label}</Text>
+    </Pressable>
   );
 }

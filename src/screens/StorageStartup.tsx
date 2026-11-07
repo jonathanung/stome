@@ -10,7 +10,7 @@ export function StorageOpening() {
     <Screen>
       <SafeAreaView style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: theme.space.md }}>
         <ActivityIndicator color={theme.color.text.primary} />
-        <Text style={{ color: theme.color.text.secondary, fontSize: 16 }}>Opening local notes…</Text>
+        <Text style={[theme.text('bodySmall'), { color: theme.color.text.secondary }]}>Opening local notes…</Text>
       </SafeAreaView>
     </Screen>
   );
@@ -36,11 +36,11 @@ export function StorageStartupScreen({
               <TrilithonMark width={40} height={28} />
               <Text
                 accessibilityRole="header"
-                style={{ color: theme.color.text.primary, fontSize: 32, fontWeight: '700', lineHeight: 38 }}
+                style={[theme.text('screenTitle'), { color: theme.color.text.primary }]}
               >
                 {failure.title}
               </Text>
-              <Text accessibilityRole="alert" style={{ color: theme.color.text.secondary, fontSize: 17, lineHeight: 24 }}>
+              <Text accessibilityRole="alert" style={[theme.text('body'), { color: theme.color.text.secondary }]}>
                 {failure.message}
               </Text>
               {showRetry ? (
@@ -54,8 +54,8 @@ export function StorageStartupScreen({
                   padding: theme.space.xl,
                 }}
               >
-                <Text style={{ color: theme.color.text.secondary, fontSize: 13, fontWeight: '600' }}>Error details</Text>
-                <Text selectable style={{ color: theme.color.text.primary, fontSize: 14, lineHeight: 20 }}>
+                <Text style={[theme.text('label'), { color: theme.color.text.secondary }]}>Error details</Text>
+                <Text selectable style={[theme.text('bodySmall'), { color: theme.color.text.primary }]}>
                   {failure.diagnostic}
                 </Text>
               </View>

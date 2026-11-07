@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, FlatList, KeyboardAvoidingView, Platform,
-  Pressable, Text, TextInput, View,
+  Text, View,
 } from 'react-native';
 
 import { Button, Screen, useStoneTheme } from '../../design-theme/src/primitives';
@@ -19,6 +19,9 @@ import type { ChunkFocus } from '../features/ask/citations';
 import { ChunkEditor, type EditResult } from '../features/chunks/ChunkEditor';
 import { pastedParagraphs } from '../features/chunks/paste';
 import { ReviewEntry } from '../features/review/ReviewEntry';
+import { Icon } from '../ui/Icon';
+import { StageGlyph, stageName } from '../ui/StageGlyph';
+import { BackButton, EmptyState, Field, Notice, SectionTitle, useColumn } from '../ui/kit';
 import { HarnessPanel } from './HarnessPanel';
 
 function readable(error: CommitError): string {
@@ -92,6 +95,7 @@ export function RoomScreen() {
   const db = useMemo(() => expoDriver(sqlite), [sqlite]);
   const commit = useMemo(() => createCommit(db, { now: Date.now, newId: randomUUID }), [db]);
   const theme = useStoneTheme();
+  const column = useColumn();
   const listRef = useRef<FlatList<ChunkWithAnnotations>>(null);
   const scrollY = useRef(0);
   const [focus, setFocus] = useState<ChunkFocus | null>(null);
@@ -203,16 +207,11 @@ export function RoomScreen() {
     });
   }
 
-  const input = {
-    borderWidth: 1 as const, borderColor: theme.color.border.strong,
-    borderRadius: theme.radius.control, backgroundColor: theme.color.bg.surface,
-    color: theme.color.text.primary, fontSize: 16, padding: 12,
-  };
-
-  if (loading) return <Screen><SafeAreaView style={{ flex: 1 }}><ActivityIndicator style={{ marginTop: 40 }} /></SafeAreaView></Screen>;
-  if (!room) return <Screen><SafeAreaView style={{ flex: 1 }}><View style={{ padding: 24, gap: 16 }}>
-    <Text accessibilityRole="alert" style={{ color: theme.color.text.primary }}>This room was not found.</Text>
-    <Button label="Back to rooms" onPress={() => router.replace('/')} />
+  if (loading) return <Screen><SafeAreaView style={{ flex: 1 }}><ActivityIndicator color={theme.color.accent.bg} style={{ marginTop: 40 }} /></SafeAreaView></Screen>;
+  if (!room) return <Screen><SafeAreaView style={{ flex: 1 }}><View style={[column, { paddingTop: theme.space.page }]}>
+    <EmptyState title="This room was not found." body="It may have been deleted on this device.">
+      <Button label="Back to rooms" size="compact" onPress={() => router.replace('/')} />
+    </EmptyState>
   </View></SafeAreaView></Screen>;
 
   return <Screen><SafeAreaView style={{ flex: 1 }}>
@@ -227,33 +226,48 @@ export function RoomScreen() {
           scrollY.current = next;
           listRef.current?.scrollToOffset({ offset: next, animated: false });
         }}
-        contentContainerStyle={{ width: '100%', maxWidth: 760, alignSelf: 'center', padding: 20, paddingBottom: 48, gap: 12 }}
-        ListHeaderComponent={<View style={{ gap: 14, marginBottom: 12 }}>
-          <Pressable accessibilityRole="button" onPress={() => router.replace('/')}>
-            <Text style={{ color: theme.color.text.secondary }}>← All rooms</Text>
-          </Pressable>
-          <Text accessibilityRole="header" style={{ color: theme.color.text.primary, fontSize: 32, fontWeight: '700' }}>{room.name}</Text>
-          <Text style={{ color: theme.color.text.secondary }}>Stone stage: {room.stage}</Text>
+        contentContainerStyle={[column, { paddingTop: theme.space.md, paddingBottom: 120, gap: theme.space.xl }]}
+        ListHeaderComponent={<View style={{ gap: theme.space.section, marginBottom: theme.space.base }}>
+          <View style={{ gap: theme.space.xs }}>
+            <BackButton label="Rooms" accessibilityLabel="All rooms" onPress={() => router.replace('/')} />
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.base }}>
+              <StageGlyph stage={room.stage} size={56} onCanvas />
+              <View style={{ flex: 1, gap: theme.space.xxs }}>
+                <Text accessibilityRole="header" style={[theme.text('screenTitle'), { color: theme.color.text.primary }]}>{room.name}</Text>
+                <Text style={[theme.text('bodySmall'), { color: theme.color.text.tertiary }]}>
+                  {`${stageName(room.stage)} · ${chunks.length} ${chunks.length === 1 ? 'chunk' : 'chunks'}`}
+                </Text>
+              </View>
+            </View>
+          </View>
           <ReviewEntry roomId={room.id} />
-          <Text style={{ color: theme.color.text.primary, fontSize: 20, fontWeight: '600', marginTop: 8 }}>Notes</Text>
-          <TextInput accessibilityLabel="Note content" placeholder="Write a note chunk" placeholderTextColor={theme.color.text.tertiary}
-            multiline textAlignVertical="top" value={content} onChangeText={onContentChange} style={[input, { minHeight: 100 }]} />
-          <Text style={{ color: theme.color.text.tertiary }}>
-            {pasteNotice ?? 'Paste paragraphs separated by a blank line to add one chunk per paragraph.'}
-          </Text>
-          <TextInput accessibilityLabel="Subject tags" placeholder="Subject tags, separated by commas" placeholderTextColor={theme.color.text.tertiary}
-            value={tags} onChangeText={setTags} style={input} />
-          <TextInput accessibilityLabel="Source link" placeholder="Source link (optional)" placeholderTextColor={theme.color.text.tertiary}
-            value={source} onChangeText={setSource} autoCapitalize="none" keyboardType="url" style={input} />
-          <View style={{ alignSelf: 'flex-start' }}><Button label="Add note" disabled={!content.trim() || busy} onPress={() => void action(async () => {
-            const result = await commit({ opId: randomUUID(), kind: 'chunk.create', source: 'human', confirmed: false,
-              payload: { roomId: room.id, bodies: [content], subjects: tags.split(','), sourceLink: source.trim() || null } });
-            if (!result.ok) throw new Error(result.error.message);
-            setContent(''); setTags(''); setSource('');
-          })} /></View>
-          {error ? <Text accessibilityRole="alert" style={{ color: theme.color.status.danger.text }}>{error}</Text> : null}
+          <View style={{ gap: theme.space.xl, backgroundColor: theme.color.bg.surface, borderRadius: theme.radius.float, borderWidth: 1, borderColor: theme.color.border.hairline, padding: theme.space.base, ...theme.shadow.card }}>
+            <SectionTitle>New note</SectionTitle>
+            <Field accessibilityLabel="Note content" placeholder="Write a note chunk"
+              multiline value={content} onChangeText={onContentChange} style={{ minHeight: 112 }} />
+            <Text style={[theme.text('label'), { color: pasteNotice ? theme.color.status.success.text : theme.color.text.tertiary }]}>
+              {pasteNotice ?? 'Paste paragraphs separated by a blank line to add one chunk per paragraph.'}
+            </Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.space.md }}>
+              <View style={{ flexGrow: 1, flexBasis: 200 }}>
+                <Field accessibilityLabel="Subject tags" placeholder="Subjects, comma separated" value={tags} onChangeText={setTags} />
+              </View>
+              <View style={{ flexGrow: 1, flexBasis: 200 }}>
+                <Field accessibilityLabel="Source link" placeholder="Source link (optional)"
+                  value={source} onChangeText={setSource} autoCapitalize="none" keyboardType="url" />
+              </View>
+            </View>
+            <View style={{ alignSelf: 'flex-start' }}><Button label="Add note" disabled={!content.trim() || busy} onPress={() => void action(async () => {
+              const result = await commit({ opId: randomUUID(), kind: 'chunk.create', source: 'human', confirmed: false,
+                payload: { roomId: room.id, bodies: [content], subjects: tags.split(','), sourceLink: source.trim() || null } });
+              if (!result.ok) throw new Error(result.error.message);
+              setContent(''); setTags(''); setSource('');
+            })} /></View>
+          </View>
+          {error ? <Notice tone="danger">{error}</Notice> : null}
+          {chunks.length ? <SectionTitle>Notes</SectionTitle> : null}
         </View>}
-        ListEmptyComponent={<Text style={{ color: theme.color.text.secondary }}>No notes in this room yet.</Text>}
+        ListEmptyComponent={<EmptyState title="No notes in this room yet" body="Write your first chunk above, or paste a few paragraphs at once." />}
         ListFooterComponent={<HarnessPanel roomId={room.id} chunks={chunks} appDb={sqlite} onOpenCitation={openCitation} onSaved={() => { void refresh(); }} />}
         renderItem={({ item, index }) => {
           const cited = focus?.chunkId === item.id ? focus : null;
@@ -266,7 +280,10 @@ export function RoomScreen() {
             onSetSubjects={(subjects, rev) => edit(() => commit({ opId: randomUUID(), kind: 'chunk.update', ...human, expectedRevision: rev, payload: { chunkId: item.id, subjects } }))}
             onMove={(toIndex, rev) => edit(() => commit({ opId: randomUUID(), kind: 'chunk.move', ...human, expectedRevision: rev, payload: { chunkId: item.id, toIndex } }))}
             onDelete={(rev) => edit(() => commit({ opId: randomUUID(), kind: 'chunk.delete', ...human, expectedRevision: rev, payload: { chunkId: item.id } }))}>
-          {item.sourceLink ? <Text style={{ color: theme.color.text.secondary }}>Source: {item.sourceLink}</Text> : null}
+          {item.sourceLink ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.sm }}>
+            <Icon name="link" size={14} color={theme.color.text.tertiary} />
+            <Text numberOfLines={1} style={[theme.text('label'), { flex: 1, color: theme.color.text.tertiary }]}>Source: {item.sourceLink}</Text>
+          </View> : null}
           {item.annotations.map((annotation) => annotation.type === 'ai_answer' ? (
             <PinnedAnswer
               key={annotation.id}
@@ -278,23 +295,23 @@ export function RoomScreen() {
               grounding={annotation.payload}
               onOpen={openCitation}
             />
-          ) : <Text key={annotation.id} style={{ color: theme.color.text.secondary }} testID={`annotation-${annotation.id}`}>
+          ) : <Text key={annotation.id} style={[theme.text('bodySmall'), { color: theme.color.text.secondary, backgroundColor: theme.color.status.warning.wash, borderRadius: theme.radius.md, paddingHorizontal: theme.space.lg, paddingVertical: theme.space.sm, alignSelf: 'flex-start', overflow: 'hidden' }]} testID={`annotation-${annotation.id}`}>
             {annotationLabel(annotation)}
           </Text>)}
           {annotating === item.id ? <View style={{ gap: 8 }}>
-            <TextInput accessibilityLabel="Whole-chunk highlight note" placeholder="Add a highlight note for this chunk"
-              placeholderTextColor={theme.color.text.tertiary} value={annotationText} onChangeText={setAnnotationText} style={input} />
+            <Field accessibilityLabel="Whole-chunk highlight note" placeholder="Add a highlight note for this chunk"
+              value={annotationText} onChangeText={setAnnotationText} autoFocus />
             <View style={{ flexDirection: 'row', gap: 8 }}>
-              <Button label="Save annotation" disabled={!annotationText.trim() || !item.body.length || busy} onPress={() => void action(async () => {
+              <Button label="Save annotation" size="compact" disabled={!annotationText.trim() || !item.body.length || busy} onPress={() => void action(async () => {
                 const result = await commit({ opId: randomUUID(), kind: 'annotation.create', source: 'human', confirmed: false,
                   expectedRevision: item.revision,
                   payload: { chunkId: item.id, type: 'highlight', anchor: { start: 0, end: item.body.length }, payload: { text: annotationText.trim() } } });
                 if (!result.ok) throw new Error(result.error.message);
                 setAnnotationText(''); setAnnotating(null);
               })} />
-              <Button label="Cancel" variant="ghost" onPress={() => setAnnotating(null)} />
+              <Button label="Cancel" size="compact" variant="ghost" onPress={() => setAnnotating(null)} />
             </View>
-          </View> : <View style={{ alignSelf: 'flex-start' }}><Button label="Annotate" variant="outline" onPress={() => setAnnotating(item.id)} /></View>}
+          </View> : <View style={{ alignSelf: 'flex-start' }}><Button label="Annotate" size="compact" variant="outline" onPress={() => setAnnotating(item.id)} /></View>}
         </ChunkEditor>;
         }}
       />
