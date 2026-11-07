@@ -1,8 +1,10 @@
+import { REVIEW_STATES } from './models.ts';
+
 export const DATABASE_NAME = 'stome.db';
 
-export const SUPPORTED_VERSION = 4;
+export const SUPPORTED_VERSION = 5;
 
-export { ROOM_STAGES, ANNOTATION_TYPES, type RoomStage, type AnnotationType } from './models.ts';
+export { ROOM_STAGES, ANNOTATION_TYPES, REVIEW_STATES, type RoomStage, type AnnotationType, type ReviewState } from './models.ts';
 
 export const CONNECTION_PRAGMAS = 'PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;';
 
@@ -129,6 +131,21 @@ export const MIGRATIONS: readonly Migration[] = [
         imported_at INTEGER NOT NULL
       );
       CREATE INDEX import_sources_room ON import_sources (room_id);
+    `,
+  },
+  {
+    version: 5,
+    name: 'human review marks',
+    sql: `
+      CREATE TABLE review_marks (
+        chunk_id TEXT NOT NULL REFERENCES chunks (id) ON DELETE CASCADE,
+        local_day TEXT NOT NULL CHECK (local_day GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+        state TEXT NOT NULL CHECK (state IN (${REVIEW_STATES.map((state) => `'${state}'`).join(', ')})),
+        marked_at INTEGER NOT NULL,
+        due_at INTEGER NOT NULL,
+        time_zone TEXT NOT NULL CHECK (length(time_zone) BETWEEN 1 AND 64),
+        PRIMARY KEY (chunk_id, local_day)
+      );
     `,
   },
 ];
