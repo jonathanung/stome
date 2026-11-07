@@ -23,7 +23,7 @@ const routes = [
   { name: 'import', url: 'stome://import', text: 'Bring your notes' },
 ];
 
-const fatalPattern = /FATAL EXCEPTION|JavascriptException|Unable to load script|ReactNativeJS: .*?(TypeError|ReferenceError|SyntaxError|Invariant Violation)/;
+const fatalPattern = /FATAL EXCEPTION|JavascriptException|Unable to load script|\[(?:TypeError|ReferenceError|SyntaxError):|Invariant Violation/;
 
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
@@ -53,6 +53,10 @@ function fatalLines(log) {
   return log.split('\n').filter((line) => fatalPattern.test(line));
 }
 
+function metroFatalLines() {
+  return fatalLines(buildLog.join(''));
+}
+
 async function uiXml() {
   await adb(['shell', 'uiautomator', 'dump', '/sdcard/uidump.xml']);
   return adb(['exec-out', 'cat', '/sdcard/uidump.xml']);
@@ -62,6 +66,7 @@ async function waitForText(expected) {
   const started = Date.now();
   let last = '';
   while (Date.now() - started < 90_000) {
+    if (metroFatalLines().length > 0) return last;
     last = await uiXml().catch((error) => String(error));
     if (last.includes(`text="${expected}"`) || last.includes(`content-desc="${expected}"`) || last.includes(expected)) {
       return last;
@@ -133,11 +138,12 @@ try {
     writeFileSync(path.join(outDir, `${route.name}.logcat.txt`), log);
     const problems = [];
     if (!xml.includes(route.text)) problems.push(`missing visible text ${JSON.stringify(route.text)}`);
-    const fatals = fatalLines(log);
-    if (fatals.length > 0) problems.push(`logcat: ${fatals.slice(0, 5).join(' | ')}`);
+    const fatals = [...metroFatalLines(), ...fatalLines(log)];
+    if (fatals.length > 0) problems.push(`runtime: ${fatals.slice(0, 3).join(' | ')}`);
     if (problems.length > 0) failed = true;
     results.push({ name: route.name, url: route.url ?? 'launcher', problems, screenshot: shot });
     console.log(`${problems.length === 0 ? 'ok' : 'fail'} ${route.name}${problems.length ? ` — ${problems.join('; ')}` : ''}`);
+    if (fatals.length > 0) break;
   }
 } catch (error) {
   failed = true;
