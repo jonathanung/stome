@@ -1,6 +1,6 @@
 export const DATABASE_NAME = 'stome.db';
 
-export const SUPPORTED_VERSION = 2;
+export const SUPPORTED_VERSION = 3;
 
 export const CONNECTION_PRAGMAS = 'PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;';
 
@@ -65,6 +65,18 @@ export const MIGRATIONS: readonly Migration[] = [
       );
 
       CREATE INDEX annotations_chunk_idx ON annotations (chunk_id);
+    `,
+  },
+  {
+    version: 3,
+    sql: `
+      CREATE TABLE operations (
+        op_id TEXT PRIMARY KEY NOT NULL,
+        kind TEXT NOT NULL,
+        source TEXT NOT NULL CHECK (source IN ('human', 'import', 'ai')),
+        result_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
     `,
   },
 ];
