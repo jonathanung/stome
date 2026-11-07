@@ -169,8 +169,8 @@ export function ChunkEditor({
           {`Chunk ${n} · edited ${new Date(chunk.updatedAt).toLocaleString()}`}
         </StoneText>
         <View style={{ flexDirection: 'row', gap: theme.space.base }}>
-          <TextAction label="↑" accessibilityLabel={`Move chunk ${n} up`} disabled={index === 0} onPress={() => void run((rev) => onMove(index - 1, rev))} />
-          <TextAction label="↓" accessibilityLabel={`Move chunk ${n} down`} disabled={index === count - 1} onPress={() => void run((rev) => onMove(index + 1, rev))} />
+          <TextAction label="Up" accessibilityLabel={`Move chunk ${n} up`} disabled={index === 0} onPress={() => void run((rev) => onMove(index - 1, rev))} />
+          <TextAction label="Down" accessibilityLabel={`Move chunk ${n} down`} disabled={index === count - 1} onPress={() => void run((rev) => onMove(index + 1, rev))} />
           <TextAction
             label="Delete"
             accessibilityLabel={`Delete chunk ${n}`}
