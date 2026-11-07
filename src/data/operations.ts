@@ -4,7 +4,7 @@
  * (#32), is one of these.
  */
 
-import type { AnnotationType, ReviewState } from '../db/schema.ts';
+import type { AnnotationType, ReviewState, RoomStage } from '../db/schema.ts';
 import type { AnnotationAnchors } from './models.ts';
 
 export const SOURCES = ['human', 'import', 'ai'] as const;
@@ -47,8 +47,10 @@ export interface Payloads {
   };
   'annotation.delete': { annotationId: string };
   /**
-   * Latest human review of one chunk for the device's local calendar day.
-   * A second mark on that day replaces the row. It does not change the chunk.
+   * Latest human review of one chunk for one local calendar day.
+   * A second mark that day replaces the row and earns no extra credit.
+   * It does not change the chunk. The third distinct chunk-day in a room
+   * promotes that room to brick in the same commit.
    */
   'review.mark': { chunkId: string; state: ReviewState; timeZone: string };
 }
@@ -71,6 +73,7 @@ export interface Results {
     markedAt: number;
     dueAt: number;
     timeZone: string;
+    stage: RoomStage;
   };
 }
 
