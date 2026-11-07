@@ -82,23 +82,39 @@ export async function listRecentChunks(db: Db, limit = 30): Promise<RecentChunk[
   return rows.map((r) => ({ ...toChunk(r), roomName: r.room_name }));
 }
 
+interface AnnotationRow {
+  id: string;
+  chunk_id: string;
+  type: Annotation['type'];
+  anchor: string;
+  payload: string;
+  created_at: number;
+  updated_at: number;
+}
+
+const toAnnotation = (row: AnnotationRow): Annotation => ({
+  id: row.id,
+  chunkId: row.chunk_id,
+  type: row.type,
+  anchor: JSON.parse(row.anchor),
+  payload: JSON.parse(row.payload),
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
 export async function listAnnotations(db: Db, chunkId: string): Promise<Annotation[]> {
-  const rows = await db.all<{
-    id: string;
-    chunk_id: string;
-    type: Annotation['type'];
-    anchor: string;
-    payload: string;
-    created_at: number;
-    updated_at: number;
-  }>('SELECT * FROM annotations WHERE chunk_id = ? ORDER BY created_at', [chunkId]);
-  return rows.map((r) => ({
-    id: r.id,
-    chunkId: r.chunk_id,
-    type: r.type,
-    anchor: JSON.parse(r.anchor),
-    payload: JSON.parse(r.payload),
-    createdAt: r.created_at,
-    updatedAt: r.updated_at,
-  }));
+  const rows = await db.all<AnnotationRow>('SELECT * FROM annotations WHERE chunk_id = ? ORDER BY created_at, id', [chunkId]);
+  return rows.map(toAnnotation);
+}
+
+/** Loads annotations for all chunks in one room without one query per chunk. */
+export async function listRoomAnnotations(db: Db, roomId: string): Promise<Annotation[]> {
+  const rows = await db.all<AnnotationRow>(
+    `SELECT a.* FROM annotations a
+       JOIN chunks c ON c.id = a.chunk_id
+      WHERE c.room_id = ?
+      ORDER BY c.position, a.created_at, a.id`,
+    [roomId],
+  );
+  return rows.map(toAnnotation);
 }

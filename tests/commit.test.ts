@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 import { createCommit, type CommitDeps } from '../src/data/commit.ts';
 import type { OpKind, Operation, Payloads } from '../src/data/operations.ts';
-import { getRoom, listAnnotations, listChunks, listRooms } from '../src/data/queries.ts';
+import { getRoom, listAnnotations, listChunks, listRoomAnnotations, listRooms } from '../src/data/queries.ts';
 import type { Db } from '../src/db/driver.ts';
 import { migrateDb } from '../src/db/migrate.ts';
 import { failOnWrite, nodeDb } from './support/node-db.ts';
@@ -296,4 +296,26 @@ test('a local room and its ordered notes survive reopen, then confirmed deletion
   assert.deepEqual(await listChunks(afterDelete, roomId), []);
   assert.equal(await count(afterDelete, 'annotations'), 0);
   afterDelete.close();
+});
+
+
+test('room annotation query returns only annotations for that room in chunk order', async () => {
+  const s = await setup();
+  const firstRoom = await room(s, 'first');
+  const secondRoom = await room(s, 'second');
+  const firstChunks = await s.commit(s.op('chunk.create', { roomId: firstRoom, bodies: ['one', 'two'] }));
+  const otherChunk = await s.commit(s.op('chunk.create', { roomId: secondRoom, bodies: ['other'] }));
+  assert.ok(firstChunks.ok && otherChunk.ok);
+  for (const [chunkId, note] of [
+    [firstChunks.value.chunkIds[1], 'second'],
+    [otherChunk.value.chunkIds[0], 'other'],
+    [firstChunks.value.chunkIds[0], 'first'],
+  ]) {
+    const saved = await s.commit(s.op('annotation.create', {
+      chunkId, type: 'highlight', anchor: { start: 0, end: 1 }, payload: { note },
+    }));
+    assert.ok(saved.ok);
+  }
+  assert.deepEqual((await listRoomAnnotations(s.db, firstRoom)).map((item) => item.payload.note), ['first', 'second']);
+  assert.deepEqual((await listRoomAnnotations(s.db, secondRoom)).map((item) => item.payload.note), ['other']);
 });

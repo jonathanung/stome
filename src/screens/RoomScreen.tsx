@@ -10,10 +10,20 @@ import {
 import { Button, Screen, useStoneTheme } from '../../design-theme/src/primitives';
 import { createCommit } from '../data/commit';
 import type { Annotation, Chunk, Room } from '../data/models';
-import { getRoom, listAnnotations, listChunks } from '../data/queries';
+import { getRoom, listChunks, listRoomAnnotations } from '../data/queries';
 import { expoDriver } from '../db/expo-driver';
 
 type ChunkWithAnnotations = Chunk & { annotations: Annotation[] };
+
+function annotationLabel(annotation: Annotation): string {
+  if (annotation.type === 'stroke') return 'Whiteboard stroke';
+  if (annotation.type === 'ai_answer') {
+    const answer = annotation.payload.answer;
+    return typeof answer === 'string' && answer.trim() ? `AI answer: ${answer}` : 'AI answer';
+  }
+  const note = annotation.payload.text ?? annotation.payload.note;
+  return typeof note === 'string' && note.trim() ? `Highlight: ${note}` : 'Highlight';
+}
 
 export function RoomScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -34,11 +44,18 @@ export function RoomScreen() {
 
   const load = useCallback(async () => {
     if (!id) return { room: null, chunks: [] as ChunkWithAnnotations[] };
-    const [nextRoom, notes] = await Promise.all([getRoom(db, id), listChunks(db, id)]);
-    const nextChunks = await Promise.all(notes.map(async (chunk) => ({
-      ...chunk, annotations: await listAnnotations(db, chunk.id),
-    })));
-    return { room: nextRoom, chunks: nextChunks };
+    const [nextRoom, notes, annotations] = await Promise.all([
+      getRoom(db, id), listChunks(db, id), listRoomAnnotations(db, id),
+    ]);
+    const byChunk = new Map<string, Annotation[]>();
+    for (const annotation of annotations) {
+      const group = byChunk.get(annotation.chunkId) ?? [];
+      group.push(annotation);
+      byChunk.set(annotation.chunkId, group);
+    }
+    return { room: nextRoom, chunks: notes.map((chunk) => ({
+      ...chunk, annotations: byChunk.get(chunk.id) ?? [],
+    })) };
   }, [db, id]);
   const refresh = useCallback(async () => {
     const next = await load();
@@ -109,7 +126,7 @@ export function RoomScreen() {
           </View> : null}
           {item.sourceLink ? <Text style={{ color: theme.color.text.secondary }}>Source: {item.sourceLink}</Text> : null}
           {item.annotations.map((annotation) => <Text key={annotation.id} style={{ color: theme.color.text.secondary }}>
-            Annotation · {annotation.type}: {String(annotation.payload.text ?? annotation.payload.note ?? '')}
+            {annotationLabel(annotation)}
           </Text>)}
           {annotating === item.id ? <View style={{ gap: 8 }}>
             <TextInput accessibilityLabel="Whole-chunk highlight note" placeholder="Add a highlight note for this chunk"
