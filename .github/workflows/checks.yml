@@ -1,0 +1,42 @@
+# Pull requests and pushes to main.
+# TypeScript, Expo lint, and the Node sqlite schema script.
+# No simulator, signing, deploy, secrets, or provider calls.
+
+name: checks
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Typecheck, lint, Node SQLite
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      EXPO_NO_TELEMETRY: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install
+        run: npm ci
+
+      - name: Check
+        run: npm run check

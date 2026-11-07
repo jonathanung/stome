@@ -25,7 +25,11 @@
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "check:schema": "node --experimental-sqlite --experimental-strip-types scripts/check-schema.ts",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "check": "npm run typecheck && npm run lint && npm run check:schema"
+  },
+  "engines": {
+    "node": "22.23.4"
   },
   "private": true
 }
