@@ -32,6 +32,7 @@ STOME_APP_ORIGIN=http://localhost:8081 STOME_COMPANION_PORT=8787 npm run compani
 | Saved chunks | `stome.db` rooms and chunks | Written by the room screen and import, through `createCommit` |
 | Sessions, messages, operation ids | separate Expo SQLite file `stome-harness.db` | Harness-owned. The operation id is stored on the session before `createCommit` |
 | Confirmed AI answer | `annotations` in `stome.db` | `source: 'ai'`, `confirmed: true`. `expectedRevision` is the revision stored on the proposal when it was created. A newer chunk revision rejects the confirm. Replay of that operation id does not insert again |
+| Confirmed AI note edit | `chunks.content` in `stome.db` | `chunk.update`, `source: 'ai'`, `confirmed: true`. The proposal stores the body it read and that revision. Confirm sends that revision, not a newer read. Cancel, discard, refusal, and a stale revision leave the saved text unchanged. Replay does not write again |
 | Older demo pins | `harness_stub_annotations` | Left in place. A `note:*` selection fails confirm and is not copied |
 | Model calls | deterministic mock in the companion | No live provider |
 
@@ -63,7 +64,7 @@ A companion payload is not a write permission. Confirmation re-reads the chunk, 
 
 ## Tool and provider
 
-The registry contains only `notes.proposeAnnotation`. There is no plugin loader, shell tool, or filesystem tool.
+The registry contains only `notes.proposeAnnotation` and `notes.proposeChunkEdit`. There is no plugin loader, shell tool, or filesystem tool. `notes.proposeChunkEdit` proposes a whole-body replacement for one selected chunk. The mock keeps the original text and appends `Mock edit (<chunk id>; messages=<prior count>): <prompt>`. The proposal stores that previous body and the chunk revision it read. Confirm writes `chunk.update` with `source: 'ai'` and `expectedRevision` set to the stored revision. A newer read is not substituted. Cancel, discard, a refused confirm, and a stale or missing chunk leave the saved text unchanged and add no AI row. Replaying the operation id does not write again. If the commit landed and the session record failed, the next confirm reads `applied_ops` before it checks the chunk, then repairs the session even if the chunk was edited or deleted afterward.
 
 Mock scenarios, all deterministic:
 

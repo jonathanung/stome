@@ -497,6 +497,38 @@ export async function recordFoundationPin(
   });
 }
 
+/** Session bookkeeping after createCommit accepts a note edit. Does not write the chunk. */
+export async function recordFoundationEdit(
+  db: SqlExecutor,
+  input: { sessionId: string; operationId: string; chunkId: string; revision: number; now: number },
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    const existing = await tx.get<OperationRow>('SELECT result_json FROM harness_operations WHERE id = ?', [
+      input.operationId,
+    ]);
+    if (!existing) {
+      const result = {
+        replayed: false,
+        operationId: input.operationId,
+        chunkId: input.chunkId,
+        revision: input.revision,
+        kind: 'chunk.update' as const,
+      };
+      await tx.run('INSERT INTO harness_operations (id, result_json, created_at) VALUES (?, ?, ?)', [
+        input.operationId,
+        JSON.stringify(result),
+        input.now,
+      ]);
+    }
+    await tx.run(
+      `UPDATE harness_sessions
+       SET confirmed_operation_id = ?, pending_operation_id = NULL, updated_at = ?
+       WHERE id = ?`,
+      [input.operationId, input.now, input.sessionId],
+    );
+  });
+}
+
 /**
  * Temporary stand-in for the Foundation commit (#36).
  * Writes only harness_stub_annotations. Re-checks the assessed request.
