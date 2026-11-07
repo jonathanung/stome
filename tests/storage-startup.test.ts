@@ -155,3 +155,22 @@ test('two overlapping migration failures close each handle and do not share one 
   ]);
   assert.deepEqual(closed, [1]);
 });
+
+test('auto retry is bounded and only for busy storage', async () => {
+  const { AUTO_RETRY_LIMIT, canAutoRetry, readAttempt, recordRetry, clearAttempts } = await import('../src/db/storage-startup.ts');
+  const busy = classifyStorageFailure({ name: 'NoModificationAllowedError', message: 'locked' });
+  const unknown = classifyStorageFailure(new Error('boom'));
+  const map = new Map<string, string>();
+  const store = { getItem: (k: string) => map.get(k) ?? null, setItem: (k: string, v: string) => void map.set(k, v), removeItem: (k: string) => void map.delete(k) };
+  assert.equal(readAttempt(store), 1);
+  for (let i = 1; i < AUTO_RETRY_LIMIT; i += 1) {
+    assert.equal(canAutoRetry(busy, readAttempt(store)), true);
+    recordRetry(store);
+  }
+  assert.equal(readAttempt(store), AUTO_RETRY_LIMIT);
+  assert.equal(canAutoRetry(busy, readAttempt(store)), false);
+  assert.equal(canAutoRetry(unknown, 1), false);
+  clearAttempts(store);
+  assert.equal(readAttempt(store), 1);
+  assert.equal(readAttempt(null), 1);
+});
