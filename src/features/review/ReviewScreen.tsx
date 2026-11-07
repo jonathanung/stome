@@ -169,6 +169,10 @@ export function ReviewScreen() {
     ? `The previous ${REVIEW_LABEL[pending.payload.state]} mark did not finish. Retry that choice. It will not be counted twice.`
     : null);
 
+  // The last note's mark did not save: stay on the summary and offer a retry.
+  const reviewedAny = tally.got_it + tally.unclear + tally.missed > 0;
+  const showDone = reviewedAny && (!card ? total > 0 && done > 0 : cards.length === 1 && pending !== null);
+
   async function mark(state: ReviewState) {
     if (!card || !roomId || marking.current) return;
     const seen = card;
@@ -324,7 +328,7 @@ export function ReviewScreen() {
               ) : null}
             </View>
             {loading ? <ActivityIndicator color={theme.color.accent.bg} /> : null}
-            {shownError ? <Notice tone="danger" testID="review-error">{shownError}</Notice> : null}
+            {shownError && !(showDone && !error) ? <Notice tone="danger" testID="review-error">{shownError}</Notice> : null}
             {!loading && missing ? (
               <EmptyState title="This room was not found." body="It may have been deleted on this device.">
                 <Button label="Back to rooms" size="compact" onPress={() => router.replace('/')} />
@@ -333,7 +337,7 @@ export function ReviewScreen() {
             {!loading && room ? (
               <View style={{ flexGrow: 1, gap: theme.space.base }}>
                 {saved ? <Notice tone="success" testID="review-saved">{saved}</Notice> : null}
-                {card && asked ? (
+                {card && asked && !showDone ? (
                   <>
                     <View accessibilityLabel="Question" style={[cardStyle, theme.shadow.card]}>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: theme.space.md }}>
@@ -371,7 +375,8 @@ export function ReviewScreen() {
                       <Text style={[theme.text('nav'), { color: muted }]}>Skip this note</Text>
                     </Pressable>
                   </>
-                ) : total > 0 && done > 0 && tally.got_it + tally.unclear + tally.missed > 0 ? (
+                ) : null}
+                {showDone ? (
                   <ReviewDone
                     roomName={room.name}
                     stage={stage}
@@ -379,16 +384,17 @@ export function ReviewScreen() {
                     tally={tally}
                     minutes={Math.round((finishedAt - startedAt) / 60000)}
                     nextUp={nextUpSummary(sessionDue, finishedAt)}
+                    unsaved={pending ? { count: 1, busy, onRetry: () => void mark(pending.payload.state) } : null}
                     onToday={() => router.replace('/today')}
                     onHome={() => router.replace('/stone')}
                   />
-                ) : (
+                ) : !(card && asked) ? (
                   <EmptyState
                     testID="review-empty"
                     title={total === 0 && scheduled.length === 0 ? 'No notes to review.' : 'Nothing is due right now.'}
                     body={total === 0 && scheduled.length === 0 ? 'Add notes to this room, then come back to review them.' : 'Marked notes come back on the day shown below.'}
                   />
-                )}
+                ) : null}
                 {scheduled.length ? (
                   <View style={{ gap: theme.space.xl }} testID="review-schedule">
                     <SectionTitle>Coming up</SectionTitle>
