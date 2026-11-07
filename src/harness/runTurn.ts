@@ -1,14 +1,20 @@
+import { createCommit } from '../data/commit';
+import { getChunk } from '../data/queries';
+import type { Db } from '../db/driver';
 import {
   HarnessError,
   TOOL_NAME,
   assertOutputInScope,
   assertSingleRoomSelection,
   assessConfirmedAnnotation,
+  chunkViewFromFoundation,
+  noteIdFromChunk,
   noteToChunk,
   parseProposeInput,
   requestCharCount,
   PROVIDER_LIMITS,
   type ChunkView,
+  type FoundationAnnotationRequest,
   type MockScenario,
   type NoteLike,
   type StoredProposal,
@@ -22,8 +28,10 @@ import {
   discardProposal,
   failRun,
   getSession,
+  holdOperationId,
   listMessages,
   readStubResult,
+  recordFoundationPin,
   startRun,
   type HarnessSession,
   type SqlExecutor,
@@ -186,6 +194,14 @@ export async function fulfillQuestion(
       messageId: newId(),
       now,
     });
+    if (stored === 'stored') {
+      const finishedEarly = await getSession(db, prepared.sessionId);
+      await holdOperationId(db, {
+        sessionId: prepared.sessionId,
+        operationId: finishedEarly?.pendingOperationId ?? newId(),
+        now,
+      });
+    }
     const finished = await getSession(db, prepared.sessionId);
     if (stored === 'discarded' || finished?.state !== 'completed') {
       return result('discarded', finished, null, null, null);
@@ -225,6 +241,101 @@ function result(
   errorMessage: string | null,
 ): AskResult {
   return { status, session, proposal, errorCode, errorMessage };
+}
+
+function gateFailure(code: string, message: string): HarnessError {
+  if (code === 'stale_revision') {
+    return new HarnessError('stale_revision', 'The chunk changed after the proposal. Ask again before saving.');
+  }
+  if (code === 'unconfirmed') {
+    return new HarnessError('confirmation_required', message);
+  }
+  if (code === 'not_found') {
+    return new HarnessError('not_found', message);
+  }
+  if (code === 'conflict') {
+    return new HarnessError('proposal_mismatch', message);
+  }
+  return new HarnessError('invalid_shape', message);
+}
+
+function operationFromAssessment(request: FoundationAnnotationRequest) {
+  return {
+    opId: request.opId,
+    kind: 'annotation.create' as const,
+    source: 'ai' as const,
+    confirmed: true as const,
+    expectedRevision: request.expectedRevision,
+    payload: {
+      chunkId: request.payload.chunkId,
+      type: 'ai_answer' as const,
+      anchor: { start: request.payload.anchorStart, end: request.payload.anchorEnd },
+      payload: { answer: request.payload.body, proposalId: request.payload.proposalId },
+    },
+  };
+}
+
+/**
+ * Saves the current proposal as one confirmed AI annotation through createCommit.
+ * The operation id was stored on the session before this call. A repeat of that
+ * id does not insert another annotation. Demo pins in the harness file are not
+ * copied and are not deleted.
+ */
+export async function confirmFoundationQuestion(
+  harness: SqlExecutor,
+  app: Db,
+  input: { sessionId: string; operationId: string; confirmed: boolean; now?: number },
+): Promise<StubCommitResult> {
+  const now = nowMs(input.now);
+  const operationId = input.operationId.trim();
+  const remembered = await readStubResult(harness, operationId);
+  if (remembered) {
+    return remembered;
+  }
+  const session = await getSession(harness, input.sessionId);
+  if (!session) {
+    throw new HarnessError('not_found', 'The harness session is missing');
+  }
+  if (!session.pendingOperationId) {
+    throw new HarnessError('invalid_shape', 'This proposal has no saved operation id');
+  }
+  if (operationId !== session.pendingOperationId) {
+    throw new HarnessError('proposal_mismatch', 'The confirmation does not match the saved operation id');
+  }
+  if (!session.proposal) {
+    throw new HarnessError('proposal_mismatch', 'There is no proposal waiting for confirmation');
+  }
+  if (noteIdFromChunk(session.proposal.chunkId) !== null) {
+    throw new HarnessError(
+      'not_found',
+      'This question pointed at a demo note. Ask about a chunk. The old pin was left in place.',
+    );
+  }
+  const current = await getChunk(app, session.proposal.chunkId);
+  if (!current) {
+    throw new HarnessError('not_found', 'The chunk for this proposal is not in the library');
+  }
+  const request = assessConfirmedAnnotation({
+    confirmed: input.confirmed,
+    operationId,
+    proposal: session.proposal,
+    sessionRoomId: session.roomId,
+    sessionState: session.state,
+    selectedChunkIds: session.selectedChunkIds,
+    confirmedOperationId: session.confirmedOperationId,
+    chunk: chunkViewFromFoundation(current),
+  });
+  const commit = createCommit(app, {
+    now: () => now,
+    newId: () => globalThis.crypto.randomUUID(),
+  });
+  const saved = await commit(operationFromAssessment(request));
+  if (!saved.ok) {
+    throw gateFailure(saved.error.code, saved.error.message);
+  }
+  const annotationId = saved.value.annotationId;
+  await recordFoundationPin(harness, { sessionId: session.id, operationId, annotationId, now });
+  return { replayed: saved.duplicate, annotationId, operationId };
 }
 
 export async function confirmQuestion(

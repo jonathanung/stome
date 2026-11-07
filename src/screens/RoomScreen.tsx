@@ -14,6 +14,7 @@ import type { Annotation, Chunk, Room } from '../data/models';
 import type { CommitError, CommitResult, OpKind } from '../data/operations';
 import { getRoom, listChunks, listRoomAnnotations } from '../data/queries';
 import { expoDriver } from '../db/expo-driver';
+import { HarnessPanel } from './HarnessPanel';
 import { ChunkEditor, type EditResult } from '../features/chunks/ChunkEditor';
 import { pastedParagraphs } from '../features/chunks/paste';
 
@@ -160,6 +161,7 @@ export function RoomScreen() {
           {error ? <Text accessibilityRole="alert" style={{ color: theme.color.status.danger.text }}>{error}</Text> : null}
         </View>}
         ListEmptyComponent={<Text style={{ color: theme.color.text.secondary }}>No notes in this room yet.</Text>}
+        ListFooterComponent={<HarnessPanel roomId={room.id} chunks={chunks} appDb={sqlite} onSaved={() => { void refresh(); }} />}
         renderItem={({ item, index }) => <ChunkEditor chunk={item} index={index} count={chunks.length} onError={setError}
           onSaveBody={(body, rev) => edit(() => commit({ opId: randomUUID(), kind: 'chunk.update', ...human, expectedRevision: rev, payload: { chunkId: item.id, body } }))}
           onSetSubjects={(subjects, rev) => edit(() => commit({ opId: randomUUID(), kind: 'chunk.update', ...human, expectedRevision: rev, payload: { chunkId: item.id, subjects } }))}

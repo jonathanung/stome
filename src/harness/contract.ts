@@ -1,7 +1,7 @@
 // App-owned harness contract. This file does not write Room, chunk, or annotation rows.
-// Foundation (#35, #36) owns that schema and the only commit implementation.
-// Until those exist, chunks are scaffold notes and a confirmed write is described
-// by FoundationAnnotationRequest, which the stub adapter in store.ts persists.
+// Foundation owns that schema. A confirmed pin is an Operation passed to createCommit.
+// FoundationAnnotationRequest is the assessed proposal. The gate payload is built
+// from it at confirm time. Older demo pins stay in the harness file.
 
 export const SCAFFOLD_ROOM_ID = 'scaffold-notes';
 
@@ -136,6 +136,18 @@ export function noteToChunk(note: NoteLike): ChunkView {
     label: note.title,
     text: note.body,
     revision: note.updatedAt,
+  };
+}
+
+/** A foundation chunk has no scaffold note. noteId stays 0 so it cannot be mistaken for note 0. */
+export function chunkViewFromFoundation(chunk: { id: string; roomId: string; body: string; revision: number }): ChunkView {
+  return {
+    id: chunk.id,
+    roomId: chunk.roomId,
+    noteId: 0,
+    label: chunk.body.slice(0, 80),
+    text: chunk.body,
+    revision: chunk.revision,
   };
 }
 
@@ -288,7 +300,8 @@ export function assertSingleRoomSelection(chunks: readonly ChunkView[]): void {
     if (chunk.roomId !== roomId) {
       throw new HarnessError('scope_rejected', 'A session can only include chunks from one room');
     }
-    if (noteIdFromChunk(chunk.id) !== chunk.noteId) {
+    const scaffoldNoteId = noteIdFromChunk(chunk.id);
+    if (scaffoldNoteId !== null && scaffoldNoteId !== chunk.noteId) {
       throw new HarnessError('invalid_shape', 'The chunk id does not match the scaffold note');
     }
     if (seen.has(chunk.id)) {

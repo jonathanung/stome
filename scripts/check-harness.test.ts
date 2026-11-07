@@ -10,17 +10,23 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { pairingTtlMs, startCompanion } from '../companion/server.ts';
+import { createCommit } from '../src/data/commit.ts';
+import { getChunk, listAnnotations } from '../src/data/queries.ts';
+import { migrateDb } from '../src/db/migrate.ts';
 import { companionProvider } from '../src/harness/companionClient.ts';
+import { nodeDb } from '../tests/support/node-db.ts';
 import { serializedExecutor, type RawSql } from '../src/harness/serialized.ts';
 import {
   SCAFFOLD_ROOM_ID,
   TOOL_REGISTRY,
+  chunkViewFromFoundation,
   noteToChunk,
   type ChunkView,
 } from '../src/harness/contract.ts';
 import { createProvider, mockProvider, mockSuccessOutput } from '../src/harness/provider.ts';
 import {
   beginQuestion,
+  confirmFoundationQuestion,
   confirmQuestion,
   discardQuestion,
   fulfillQuestion,
@@ -1094,6 +1100,134 @@ function runCli(env: Record<string, string>): Promise<{ code: number | null; std
     });
   });
 }
+
+test('a confirmed chunk answer is one ai annotation and the same operation id adds nothing', async () => {
+  const app = nodeDb();
+  await migrateDb(app);
+  const harness = await harnessDb();
+  const commit = createCommit(app, {
+    now: () => 5_000,
+    newId: () => 'room-or-chunk',
+  });
+  const room = await commit({
+    opId: 'room-1',
+    kind: 'room.create',
+    source: 'human',
+    confirmed: false,
+    payload: { name: 'biology' },
+  });
+  assert.equal(room.ok, true);
+  if (!room.ok) return;
+  const created = await commit({
+    opId: 'chunk-1',
+    kind: 'chunk.create',
+    source: 'human',
+    confirmed: false,
+    payload: { roomId: room.value.roomId, bodies: ['photosynthesis makes sugar'] },
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+  const savedChunk = await getChunk(app, created.value.chunkIds[0] ?? '');
+  assert.ok(savedChunk);
+  if (!savedChunk) return;
+  const view = chunkViewFromFoundation(savedChunk);
+  const prepared = await beginQuestion(harness, { chunks: [view], prompt: 'Why sugar?' });
+  const outcome = await fulfillQuestion(harness, prepared, {
+    chunks: [view],
+    scenario: 'success',
+    provider: mockProvider,
+    signal: new AbortController().signal,
+  });
+  assert.equal(outcome.status, 'proposal');
+  const operationId = outcome.session?.pendingOperationId ?? '';
+  assert.ok(operationId);
+  const saved = await confirmFoundationQuestion(harness, app, {
+    sessionId: prepared.sessionId,
+    operationId,
+    confirmed: true,
+    now: 6_000,
+  });
+  assert.equal(saved.replayed, false);
+  const again = await confirmFoundationQuestion(harness, app, {
+    sessionId: prepared.sessionId,
+    operationId,
+    confirmed: true,
+    now: 7_000,
+  });
+  assert.equal(again.replayed, true);
+  assert.equal(again.annotationId, saved.annotationId);
+  const pins = await listAnnotations(app, savedChunk.id);
+  assert.equal(pins.length, 1);
+  assert.equal(pins[0]?.type, 'ai_answer');
+  assert.deepEqual(pins[0]?.anchor, { start: 0, end: 12 });
+  assert.equal(pins[0]?.payload.answer, outcome.proposal?.body);
+  const after = await getChunk(app, savedChunk.id);
+  assert.equal(after?.body, 'photosynthesis makes sugar');
+  assert.equal(after?.revision, savedChunk.revision);
+  assert.equal((await listStubAnnotations(harness)).length, 0);
+  const applied = await app.get<{ source: string }>('SELECT source FROM applied_ops WHERE op_id = ?', [operationId]);
+  assert.equal(applied?.source, 'ai');
+
+  const edited = await commit({
+    opId: 'edit-1',
+    kind: 'chunk.update',
+    source: 'human',
+    confirmed: false,
+    expectedRevision: savedChunk.revision,
+    payload: { chunkId: savedChunk.id, body: 'photosynthesis makes sugar now' },
+  });
+  assert.equal(edited.ok, true);
+  const continued = await beginQuestion(harness, {
+    chunks: [chunkViewFromFoundation((await getChunk(app, savedChunk.id))!)],
+    prompt: 'Say more',
+    continueSessionId: prepared.sessionId,
+  });
+  const second = await fulfillQuestion(harness, continued, {
+    chunks: [chunkViewFromFoundation((await getChunk(app, savedChunk.id))!)],
+    scenario: 'success',
+    provider: mockProvider,
+    signal: new AbortController().signal,
+  });
+  assert.equal(second.status, 'proposal');
+  const secondId = second.session?.pendingOperationId ?? '';
+  const pinned = await confirmFoundationQuestion(harness, app, {
+    sessionId: prepared.sessionId,
+    operationId: secondId,
+    confirmed: true,
+    now: 8_000,
+  });
+  assert.equal(pinned.replayed, false);
+  assert.equal((await listAnnotations(app, savedChunk.id)).length, 2);
+  const firstAgain = await confirmFoundationQuestion(harness, app, {
+    sessionId: prepared.sessionId,
+    operationId,
+    confirmed: true,
+    now: 9_000,
+  });
+  assert.equal(firstAgain.replayed, true);
+  assert.equal((await listAnnotations(app, savedChunk.id)).length, 2);
+
+  const demo = await beginQuestion(harness, { chunks: [chunk(1)], prompt: 'Old demo' });
+  const demoRun = await fulfillQuestion(harness, demo, {
+    chunks: [chunk(1)],
+    scenario: 'success',
+    provider: mockProvider,
+    signal: new AbortController().signal,
+  });
+  assert.equal(demoRun.status, 'proposal');
+  await assert.rejects(
+    () =>
+      confirmFoundationQuestion(harness, app, {
+        sessionId: demo.sessionId,
+        operationId: demoRun.session?.pendingOperationId ?? '',
+        confirmed: true,
+      }),
+    /demo note/,
+  );
+  assert.equal((await listAnnotations(app, savedChunk.id)).length, 2);
+  app.close();
+  harness.close();
+});
 
 function post(
   url: string,
