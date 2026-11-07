@@ -27,9 +27,11 @@ const repoRoot = new URL('..', import.meta.url).pathname;
 const puppeteerRoot = process.env.STOME_PUPPETEER_ROOT ?? '/tmp/stome-browser/package.json';
 const chromePath = process.env.CHROME_PATH ?? '/usr/bin/google-chrome';
 const webPort = Number(process.env.STOME_WEB_PORT ?? 8081);
-const webUrl = process.env.STOME_WEB_URL ?? `http://localhost:${webPort}/`;
+const ownedWebUrl = `http://127.0.0.1:${webPort}/`;
+const webUrl = process.env.STOME_WEB_URL ?? ownedWebUrl;
 const outDir = process.env.STOME_REGRESSION_OUT ?? '/opt/cursor/artifacts/browser-regression';
 const spawnServers = process.env.STOME_REGRESSION_NO_SPAWN !== '1';
+const pageUrl = spawnServers ? ownedWebUrl : webUrl;
 const expoPort = Number(process.env.EXPO_INTERNAL_PORT ?? 8082);
 const companionPort = Number(process.env.STOME_COMPANION_PORT ?? 8787);
 const token = process.env.STOME_PAIRING_TOKEN ?? randomBytes(16).toString('hex');
@@ -490,7 +492,7 @@ async function shot(page, name) {
 }
 
 async function openRoom(page) {
-  await page.goto(webUrl, { waitUntil: 'domcontentloaded', timeout: 120000 });
+  await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 120000 });
   await page.waitForFunction(() => document.body.innerText.includes('Study rooms'), { timeout: 60000 });
 }
 
@@ -629,7 +631,7 @@ async function main() {
       ['node', '--experimental-strip-types', '--import', './scripts/register-harness.mjs', 'companion/server.ts'],
       'companion/server.ts',
       {
-        STOME_APP_ORIGIN: new URL(webUrl).origin,
+        STOME_APP_ORIGIN: new URL(pageUrl).origin,
         STOME_PAIRING_TOKEN: token,
         STOME_PROVIDER: 'mock',
         STOME_COMPANION_PORT: String(companionPort),
@@ -893,7 +895,7 @@ async function main() {
     const report = redact({
       ok: true,
       ...runIdentity,
-      url: webUrl,
+      url: pageUrl,
       origin: isolated.origin,
       crossOriginIsolated: isolated.crossOriginIsolated,
       documentHeaders,

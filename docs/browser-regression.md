@@ -17,7 +17,7 @@ cd /path/to/stome
 node scripts/browser-regression.mjs
 ```
 
-Chrome defaults to `/usr/bin/google-chrome`. Override it with `CHROME_PATH`. The page origin is `http://localhost:8081/`, which is the companion's allowed origin. Screenshots and `report.json` go to `/opt/cursor/artifacts/browser-regression/`.
+Chrome defaults to `/usr/bin/google-chrome`. Override it with `CHROME_PATH`. Spawn mode opens `http://127.0.0.1:8081/`, the address the document host binds, and sets the companion origin to that same address. Screenshots and `report.json` go to `/opt/cursor/artifacts/browser-regression/`.
 
 Set `STOME_REGRESSION_NO_SPAWN=1` and `STOME_PAIRING_TOKEN` only when the companion and document host are already running. The script generates the token otherwise. It never prints the token. Screenshots hide the pairing-token field.
 
@@ -43,7 +43,7 @@ Spawn mode refuses to start when port 8081, 8082, or 8787 is already taken. It d
 
 `SIGINT` and `SIGTERM` run one cleanup. Before that handler returns, it kills the Chrome process this script launched and the process groups it spawned (`serve-web.mjs`, including its Expo child, and `companion/server.ts`). It checks `/proc/<pid>/cmdline` and does not signal any other listener. A second signal does not start a second cleanup. A normal exit still asks those groups to stop, then kills them if they stay up.
 
-The report's `checkoutSha` is this working tree. `productHead` is `git merge-base HEAD origin/main`. Spawn mode opens the browser on the same loopback port it serves (`STOME_WEB_URL` must be `localhost` or `127.0.0.1` on `STOME_WEB_PORT`, which defaults to 8081). A different URL is refused before any server starts, and that report has `servedFromCheckout: false` and `servedSha: null`. When the URL matches, `server.mode` is `spawn` and `server.servedFromCheckout` is true. With `STOME_REGRESSION_NO_SPAWN=1`, `server.mode` is `external`, `servedFromCheckout` is false, and `servedSha` is null. That run does not claim the external server is the checkout. A spawn error or a child that exits before ready fails the run instead of accepting another page on the port.
+The report's `checkoutSha` is this working tree. `productHead` is `git merge-base HEAD origin/main`. Spawn mode opens the browser and the companion on exactly `http://127.0.0.1:<port>/`, the IPv4 address readiness checks and `serve-web` binds. It does not navigate to the `localhost` name, which can resolve to a different listener on `::1`. A `STOME_WEB_URL` for another host or port is refused before any server starts, and that report has `servedFromCheckout: false` and `servedSha: null`. When spawn proceeds, `server.mode` is `spawn` and `server.servedFromCheckout` is true. With `STOME_REGRESSION_NO_SPAWN=1`, `server.mode` is `external`, `servedFromCheckout` is false, and `servedSha` is null. That run does not claim the external server is the checkout. A spawn error or a child that exits before ready fails the run instead of accepting another page on the port.
 
 ## What this smoke does not patch
 
