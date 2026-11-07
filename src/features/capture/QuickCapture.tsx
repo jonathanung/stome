@@ -13,6 +13,7 @@ import { expoDriver } from '../../db/expo-driver';
 import { LAST_ROOM_KEY, canSubmit } from './draft';
 import { captureLayerGeometry } from './geometry';
 import { CAPTURE_SHORTCUT_LABEL, isCaptureShortcut } from './shortcut';
+import { onCaptureOpenRequest } from './openSignal';
 import {
   CLEANUP_FAILED_MESSAGE,
   STORAGE_DEGRADED_MESSAGE,
@@ -116,6 +117,8 @@ export function QuickCapture() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  useEffect(() => onCaptureOpenRequest(() => setOpen(true)), []);
 
   useEffect(() => {
     if (!open || !phone || !pathRoom) return;
