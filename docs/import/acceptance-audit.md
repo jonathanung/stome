@@ -123,6 +123,9 @@ specifies that it describes the file, so it remains accurate if a folder is
 supplied later. The screen continues to label every suggestion for review and
 requires confirmation before saving. No numeric confidence score or new
 provenance schema is introduced.
+Folders containing commas are omitted with a specific warning because the
+review field is comma-separated; one folder cannot silently become multiple
+saved subjects or exceed the subject count after serialization.
 
 [`import-review.test.ts`](../../tests/import-review.test.ts) covers supplying,
 changing and removing folders, backslash/whitespace normalization, incomplete

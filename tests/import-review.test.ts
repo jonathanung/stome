@@ -66,6 +66,21 @@ test('folder omission warnings clear after a valid folder, invalid path or expli
   assert.equal(changeSubjects(omitted, 'my subject').folderWarning, null);
 });
 
+test('comma-containing folders cannot become multiple saved subjects or evade count limits', () => {
+  const initial = createSubjectReview('Cells.md', ['Genetics']);
+  const comma = changeSourcePath(initial, 'Genetics, Ecology/Cells.md');
+  assert.equal(comma.subjects, 'Genetics');
+  assert.match(comma.folderWarning ?? '', /comma/);
+  const subjects = Array.from({ length: LIMITS.subjects - 1 }, (_, i) => `subject ${i}`);
+  const almostFull = changeSourcePath(createSubjectReview('Cells.md', subjects), 'Genetics, Ecology/Cells.md');
+  assert.deepEqual(almostFull.subjects.split(', '), subjects);
+  assert.match(almostFull.folderWarning ?? '', /comma/);
+  assert.equal(changeSourcePath(comma, 'Ecology/Cells.md').subjects, 'Genetics, Ecology');
+  assert.equal(changeSourcePath(comma, 'Ecology/Cells.md').folderWarning, null);
+  assert.equal(changeSourcePath(comma, '').folderWarning, null);
+  assert.equal(changeSubjects(comma, '').folderWarning, null);
+});
+
 test('explicit subject overrides, including empty text, survive all later path edits', () => {
   const initial = { ...createSubjectReview('Cells.md', ['revision']), id: 'draft-1', roomId: 'room-1' };
   const withFolder = changeSourcePath(initial, 'Biology/Cells.md');

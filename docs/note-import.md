@@ -74,6 +74,8 @@ parent folder; changing/removing the folder removes its previous automatic
 suggestion. Incomplete or invalid paths do not produce a folder suggestion and
 are still rejected on save. Folder names are normalized, deduplicated without
 case sensitivity and omitted with a warning if subject limits are exceeded.
+Because the review field uses commas to separate subjects, a folder containing
+a comma is also omitted with a warning rather than being split into subjects.
 Manually edited subjects, including an intentionally empty value, stay unchanged
 when the path changes. Choosing another batch starts fresh suggestions.
 Destination selection is explicit: use an existing room or name a

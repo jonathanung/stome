@@ -28,6 +28,10 @@ function suggestedSubjects(fileSubjects: readonly string[], rawPath: string): Pi
   for (const [index, candidate] of candidates.entries()) {
     const subject = candidate.trim().replace(/\s+/g, ' ');
     const key = subject.toLowerCase();
+    if (index === folderIndex && subject.includes(',')) {
+      folderWarning = 'The folder contains a comma and was not suggested because subjects are comma-separated. Review the subjects.';
+      continue;
+    }
     if (!subject || seen.has(key)) continue;
     if (subject.length > LIMITS.subject || subjects.length >= LIMITS.subjects) {
       if (index === folderIndex) folderWarning = 'The folder suggestion exceeds the subject limits and was omitted. Review the subjects.';
