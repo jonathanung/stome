@@ -1,11 +1,12 @@
 import { SQLiteProvider } from 'expo-sqlite';
+import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Component, Suspense, type ReactNode } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
-import { expoDriver } from './src/db/expo-driver';
-import { migrateDb } from './src/db/migrate';
-import { DATABASE_NAME } from './src/db/schema';
+import { expoDriver } from '../db/expo-driver';
+import { migrateDb } from '../db/migrate';
+import { DATABASE_NAME } from '../db/schema';
 
 type BoundaryState = {
   error: Error | null;
@@ -40,16 +41,14 @@ function Opening() {
   );
 }
 
-export default function App() {
+export default function RootLayout() {
   return (
     <View style={styles.root}>
       <StatusBar style="auto" />
       <DatabaseBoundary>
         <Suspense fallback={<Opening />}>
           <SQLiteProvider databaseName={DATABASE_NAME} onInit={(db) => migrateDb(expoDriver(db))} useSuspense>
-            <View style={styles.centered}>
-              <Text>Rooms and chunks are coming in FND.3.</Text>
-            </View>
+            <Stack screenOptions={{ headerTitle: 'stome', headerStyle: { backgroundColor: '#f6f4ee' }, headerTintColor: '#292820' }} />
           </SQLiteProvider>
         </Suspense>
       </DatabaseBoundary>

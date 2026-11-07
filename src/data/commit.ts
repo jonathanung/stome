@@ -118,7 +118,7 @@ function normalize(op: Operation): Normalized {
       const destination = d.roomId !== undefined ? { roomId: requireId(d.roomId, 'roomId') } : { name: roomName(d.name) };
       if (!Array.isArray(p.bodies) || !p.bodies.length || p.bodies.length > LIMITS.bodiesPerOp) reject('invalid', 'invalid import chunk count');
       const bodies = (p.bodies as unknown[]).map((body) => chunkBody(body, { allowEmpty: false }));
-      if (bodies.reduce((size, body) => size + body.length, 0) > 1024 * 1024) reject('invalid', 'import is too large');
+      if (bodies.reduce((size, body) => size + new TextEncoder().encode(body).length, 0) > 1024 * 1024) reject('invalid', 'import is too large');
       return { kind: op.kind, payload: { sourceId: p.sourceId as string, fingerprint: p.fingerprint as string, destination, bodies, subjects: normalizeSubjects(p.subjects) } };
     }
     case 'room.create':
