@@ -2,17 +2,19 @@ import { randomUUID } from 'expo-crypto';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, FlatList, KeyboardAvoidingView, Platform,
   Pressable, Text, TextInput, View,
 } from 'react-native';
 
-import { Button, Screen, useStoneTheme } from '../../design-theme/src/primitives';
+import { Button, Screen, useReduceMotion, useStoneTheme } from '../../design-theme/src/primitives';
 import { createCommit } from '../data/commit';
 import type { Annotation, Chunk, Room } from '../data/models';
 import { getRoom, listChunks, listRoomAnnotations } from '../data/queries';
 import { expoDriver } from '../db/expo-driver';
+import { AnchoredChunkText, PinnedAnswer } from '../features/ask/AnchoredChunkText';
+import type { ChunkFocus } from '../features/ask/citations';
 import { HarnessPanel } from './HarnessPanel';
 
 type ChunkWithAnnotations = Chunk & { annotations: Annotation[] };
@@ -33,6 +35,9 @@ export function RoomScreen() {
   const db = useMemo(() => expoDriver(sqlite), [sqlite]);
   const commit = useMemo(() => createCommit(db, { now: Date.now, newId: randomUUID }), [db]);
   const theme = useStoneTheme();
+  const reduceMotion = useReduceMotion();
+  const listRef = useRef<FlatList<ChunkWithAnnotations>>(null);
+  const [focus, setFocus] = useState<ChunkFocus | null>(null);
   const [room, setRoom] = useState<Room | null>(null);
   const [chunks, setChunks] = useState<ChunkWithAnnotations[]>([]);
   const [content, setContent] = useState('');
@@ -73,6 +78,19 @@ export function RoomScreen() {
     });
     return () => { active = false; };
   }, [load]);
+  const openCitation = useCallback((next: ChunkFocus) => {
+    setFocus(next);
+    const index = chunks.findIndex((chunk) => chunk.id === next.chunkId);
+    if (index < 0) return;
+    const doc = (globalThis as { document?: { querySelector: (selector: string) => { scrollIntoView: (options: { block: 'center'; behavior: 'auto' | 'smooth' }) => void } | null } }).document;
+    if (Platform.OS === 'web' && doc && /^[0-9a-zA-Z-]+$/.test(next.chunkId)) {
+      doc.querySelector(`[data-testid="chunk-${next.chunkId}"]`)?.scrollIntoView({
+        block: 'center',
+        behavior: reduceMotion ? 'auto' : 'smooth',
+      });
+    }
+    listRef.current?.scrollToIndex({ index, animated: !reduceMotion, viewPosition: 0.2 });
+  }, [chunks, reduceMotion]);
   async function action(run: () => Promise<void>) {
     if (busy) return;
     setBusy(true);
@@ -97,7 +115,10 @@ export function RoomScreen() {
 
   return <Screen><SafeAreaView style={{ flex: 1 }}>
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-      <FlatList data={chunks} keyExtractor={(chunk) => chunk.id} keyboardShouldPersistTaps="handled"
+      <FlatList ref={listRef} data={chunks} extraData={focus} keyExtractor={(chunk) => chunk.id} keyboardShouldPersistTaps="handled"
+        onScrollToIndexFailed={({ index }) => {
+          listRef.current?.scrollToOffset({ offset: Math.max(0, index) * 180, animated: !reduceMotion });
+        }}
         contentContainerStyle={{ width: '100%', maxWidth: 760, alignSelf: 'center', padding: 20, paddingBottom: 48, gap: 12 }}
         ListHeaderComponent={<View style={{ gap: 14, marginBottom: 12 }}>
           <Pressable accessibilityRole="button" onPress={() => router.replace('/')}>
@@ -121,15 +142,27 @@ export function RoomScreen() {
           {error ? <Text accessibilityRole="alert" style={{ color: theme.color.status.danger.text }}>{error}</Text> : null}
         </View>}
         ListEmptyComponent={<Text style={{ color: theme.color.text.secondary }}>No notes in this room yet.</Text>}
-        ListFooterComponent={<HarnessPanel roomId={room.id} chunks={chunks} appDb={sqlite} onSaved={() => { void refresh(); }} />}
-        renderItem={({ item, index }) => <View style={{ backgroundColor: theme.color.bg.surface, borderColor: theme.color.border.hairline, borderWidth: 1, borderRadius: theme.radius.card, padding: 16, gap: 10 }}>
+        ListFooterComponent={<HarnessPanel roomId={room.id} chunks={chunks} appDb={sqlite} onOpenCitation={openCitation} onSaved={() => { void refresh(); }} />}
+        renderItem={({ item, index }) => {
+          const cited = focus?.chunkId === item.id ? focus : null;
+          return <View nativeID={`chunk-${item.id}`} testID={`chunk-${item.id}`} style={{ backgroundColor: theme.color.bg.surface, borderColor: cited ? theme.color.status.warning.fill : theme.color.border.hairline, borderWidth: cited ? 2 : 1, borderRadius: theme.radius.card, padding: 16, gap: 10 }}>
           <Text style={{ color: theme.color.text.tertiary }}>Chunk {index + 1} · {new Date(item.createdAt).toLocaleString()}</Text>
-          <Text style={{ color: theme.color.text.primary, fontSize: 16, lineHeight: 24 }}>{item.body}</Text>
+          <AnchoredChunkText body={item.body} focus={cited} />
           {item.subjects.length ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             {item.subjects.map((subject) => <Text key={subject} style={{ color: theme.color.text.secondary, borderColor: theme.color.border.strong, borderWidth: 1, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4 }}>{subject}</Text>)}
           </View> : null}
           {item.sourceLink ? <Text style={{ color: theme.color.text.secondary }}>Source: {item.sourceLink}</Text> : null}
-          {item.annotations.map((annotation) => <Text key={annotation.id} style={{ color: theme.color.text.secondary }}>
+          {item.annotations.map((annotation) => annotation.type === 'ai_answer' ? (
+            <PinnedAnswer
+              key={annotation.id}
+              anchor={annotation.anchor}
+              annotationId={annotation.id}
+              answer={typeof annotation.payload.answer === 'string' ? annotation.payload.answer : ''}
+              chunkBody={item.body}
+              chunkId={item.id}
+              onOpen={openCitation}
+            />
+          ) : <Text key={annotation.id} style={{ color: theme.color.text.secondary }} testID={`annotation-${annotation.id}`}>
             {annotationLabel(annotation)}
           </Text>)}
           {annotating === item.id ? <View style={{ gap: 8 }}>
@@ -146,7 +179,8 @@ export function RoomScreen() {
               <Button label="Cancel" variant="ghost" onPress={() => setAnnotating(null)} />
             </View>
           </View> : <View style={{ alignSelf: 'flex-start' }}><Button label="Annotate" variant="outline" onPress={() => setAnnotating(item.id)} /></View>}
-        </View>}
+        </View>;
+        }}
       />
     </KeyboardAvoidingView>
   </SafeAreaView></Screen>;
