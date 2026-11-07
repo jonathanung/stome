@@ -28,14 +28,18 @@ function assert(condition: unknown, message: string): asserts condition {
   }
 }
 
-function expectFailure(run: () => void, message: string): void {
-  let failed = false;
+function expectConstraintFailure(run: () => void, message: string): void {
   try {
     run();
-  } catch {
-    failed = true;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    assert(
+      /constraint failed/i.test(detail),
+      `${message} (failed for an unexpected reason: ${detail})`,
+    );
+    return;
   }
-  assert(failed, message);
+  throw new Error(`${message} (the write was accepted)`);
 }
 
 function countRows(db: DatabaseSync, table: 'rooms' | 'chunks' | 'annotations'): number {
@@ -249,19 +253,19 @@ try {
   insertRoom(guards);
   insertChunk(guards);
 
-  expectFailure(
+  expectConstraintFailure(
     () => insertAnnotation(guards, CHUNK_ID, 'not_a_type'),
     'an annotation with an invalid type should be rejected',
   );
-  expectFailure(
+  expectConstraintFailure(
     () => insertAnnotation(guards, null, 'highlight'),
     'an annotation without a chunk id should be rejected',
   );
-  expectFailure(
+  expectConstraintFailure(
     () => insertAnnotation(guards, '99999999-9999-4999-8999-999999999999', 'highlight'),
     'an annotation pointing at a missing chunk should be rejected',
   );
-  expectFailure(
+  expectConstraintFailure(
     () =>
       guards
         .prepare('INSERT INTO rooms (id, name, stage, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
@@ -269,12 +273,33 @@ try {
     'a room with an invalid stage should be rejected',
   );
   assert(countRows(guards, 'annotations') === 0, 'rejected annotations should not be stored');
-  guards.close();
 
+  for (const stage of ROOM_STAGES) {
+    guards
+      .prepare('INSERT INTO rooms (id, name, stage, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+      .run(`room-${stage}`, stage, stage, 10, 10);
+    const row = guards
+      .prepare('SELECT * FROM rooms WHERE id = ?')
+      .get(`room-${stage}`) as RoomRow;
+    assert(toRoom(row).stage === stage, `the ${stage} room stage should be accepted`);
+  }
+
+  for (const type of ANNOTATION_TYPES) {
+    guards
+      .prepare(
+        'INSERT INTO annotations (id, chunk_id, type, payload, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+      )
+      .run(`annotation-${type}`, CHUNK_ID, type, '{}', 10, 10);
+    const row = guards
+      .prepare('SELECT * FROM annotations WHERE id = ?')
+      .get(`annotation-${type}`) as AnnotationRow;
+    assert(toAnnotation(row).type === type, `the ${type} annotation type should be accepted`);
+  }
   assert(
-    ROOM_STAGES.length === 2 && ANNOTATION_TYPES.length === 3,
-    'the schema should support exactly two room stages and three annotation types',
+    countRows(guards, 'annotations') === ANNOTATION_TYPES.length,
+    'every annotation type should be storable',
   );
+  guards.close();
 
   console.log('schema checks passed (node:sqlite, not the Expo native driver)');
 } finally {
