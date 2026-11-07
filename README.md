@@ -1,8 +1,6 @@
 # Stome
 
-Minimal Expo app for local study notes. Notes are stored in SQLite on the device. This scaffold has no accounts, server, or document import.
-
-The starting screen uses plain local styles so a separate theme can replace them.
+Stome stores local study rooms and notes in SQLite. Create, open, rename, and confirm deletion of rooms. Each room shows ordered note chunks with subject tags, optional source links, and highlight annotations. The existing Markdown import and original notes/companion screens remain available from the room list. There are no accounts or sync.
 
 ## Run
 

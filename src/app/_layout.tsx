@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Component, Suspense, type ReactNode } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
+import { ThemeProvider } from '../../design-theme/src/primitives';
 import { expoDriver } from '../db/expo-driver';
 import { migrateDb } from '../db/migrate';
 import { DATABASE_NAME } from '../db/schema';
@@ -43,16 +44,21 @@ function Opening() {
 
 export default function RootLayout() {
   return (
+    <ThemeProvider>
     <View style={styles.root}>
       <StatusBar style="auto" />
       <DatabaseBoundary>
         <Suspense fallback={<Opening />}>
           <SQLiteProvider databaseName={DATABASE_NAME} onInit={(db) => migrateDb(expoDriver(db))} useSuspense>
-            <Stack screenOptions={{ headerTitle: 'stome', headerStyle: { backgroundColor: '#f6f4ee' }, headerTintColor: '#292820' }} />
+            <Stack screenOptions={{ headerTitle: 'stome', headerStyle: { backgroundColor: '#f6f4ee' }, headerTintColor: '#292820' }}>
+              <Stack.Screen name="index" options={{ headerShown: false }} />
+              <Stack.Screen name="rooms/[id]" options={{ headerShown: false }} />
+            </Stack>
           </SQLiteProvider>
         </Suspense>
       </DatabaseBoundary>
     </View>
+    </ThemeProvider>
   );
 }
 
