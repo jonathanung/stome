@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, FlatList, KeyboardAvoidingView, Platform,
-  Text, View,
+  Text, useWindowDimensions, View,
 } from 'react-native';
 
 import { Button, Screen, useStoneTheme } from '../../design-theme/src/primitives';
@@ -18,6 +18,7 @@ import { AnchoredChunkText, PinnedAnswer } from '../features/ask/AnchoredChunkTe
 import type { ChunkFocus } from '../features/ask/citations';
 import { ChunkEditor, type EditResult } from '../features/chunks/ChunkEditor';
 import { pastedParagraphs } from '../features/chunks/paste';
+import { PhoneRoomActions, PhoneRoomHeader, RoomTabs, SubjectChips, roomSubjects, type RoomTab } from '../features/room/PhoneRoomChrome';
 import { ReviewEntry } from '../features/review/ReviewEntry';
 import { Icon } from '../ui/Icon';
 import { StageGlyph, stageName } from '../ui/StageGlyph';
@@ -110,6 +111,12 @@ export function RoomScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pasteNotice, setPasteNotice] = useState<string | null>(null);
+  const phone = useWindowDimensions().width < 600;
+  const [tab, setTab] = useState<RoomTab>('notes');
+  const [subject, setSubject] = useState<string | null>(null);
+  const subjects = useMemo(() => roomSubjects(chunks), [chunks]);
+  const activeSubject = subject && subjects.includes(subject) ? subject : null;
+  const visible = useMemo(() => tab !== 'notes' ? [] : activeSubject ? chunks.filter((chunk) => chunk.subjects.includes(activeSubject)) : chunks, [tab, chunks, activeSubject]);
 
   const load = useCallback(async () => {
     if (!id) return { room: null, chunks: [] as ChunkWithAnnotations[] };
@@ -145,7 +152,7 @@ export function RoomScreen() {
   }, []);
   useEffect(() => {
     if (!focus || focus.end <= focus.start) return;
-    const index = chunks.findIndex((chunk) => chunk.id === focus.chunkId);
+    const index = (phone ? visible : chunks).findIndex((chunk) => chunk.id === focus.chunkId);
     let cancelled = false;
     let attempt = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -169,7 +176,7 @@ export function RoomScreen() {
       cancelAnimationFrame(frame);
       clearTimeout(timer);
     };
-  }, [chunks, focus]);
+  }, [chunks, visible, phone, focus]);
   async function action(run: () => Promise<void>) {
     if (busy) return;
     setBusy(true);
@@ -216,7 +223,7 @@ export function RoomScreen() {
 
   return <Screen><SafeAreaView style={{ flex: 1 }}>
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-      <FlatList ref={listRef} data={chunks} extraData={focus} keyExtractor={(chunk) => chunk.id} keyboardShouldPersistTaps="handled" testID="chunk-list"
+      <FlatList ref={listRef} data={phone ? visible : chunks} extraData={focus} keyExtractor={(chunk) => chunk.id} keyboardShouldPersistTaps="handled" testID="chunk-list"
         initialNumToRender={1} maxToRenderPerBatch={1} windowSize={1}
         onScroll={(event) => { scrollY.current = event.nativeEvent.contentOffset.y; }}
         scrollEventThrottle={16}
@@ -228,7 +235,12 @@ export function RoomScreen() {
         }}
         contentContainerStyle={[column, { paddingTop: theme.space.md, paddingBottom: 120, gap: theme.space.xl }]}
         ListHeaderComponent={<View style={{ gap: theme.space.section, marginBottom: theme.space.base }}>
-          <View style={{ gap: theme.space.xs }}>
+          {phone ? <View style={{ gap: theme.space.lg }}>
+            <PhoneRoomHeader name={room.name} status={`${stageName(room.stage)} · ${chunks.length} ${chunks.length === 1 ? 'chunk' : 'chunks'}`}
+              onBack={() => router.replace('/')} onReview={() => router.push(`/rooms/${room.id}/review`)} />
+            <RoomTabs value={tab} onChange={setTab} />
+            {tab === 'notes' ? <SubjectChips subjects={subjects} value={activeSubject} onChange={setSubject} /> : null}
+          </View> : <View style={{ gap: theme.space.xs }}>
             <BackButton label="Rooms" accessibilityLabel="All rooms" onPress={() => router.replace('/')} />
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.base }}>
               <StageGlyph stage={room.stage} size={56} onCanvas />
@@ -239,9 +251,9 @@ export function RoomScreen() {
                 </Text>
               </View>
             </View>
-          </View>
-          <ReviewEntry roomId={room.id} />
-          <View style={{ gap: theme.space.xl, backgroundColor: theme.color.bg.surface, borderRadius: theme.radius.float, borderWidth: 1, borderColor: theme.color.border.hairline, padding: theme.space.base, ...theme.shadow.card }}>
+          </View>}
+          {phone ? null : <ReviewEntry roomId={room.id} />}
+          {phone && tab !== 'notes' ? null : <View style={{ gap: theme.space.xl, backgroundColor: theme.color.bg.surface, borderRadius: theme.radius.float, borderWidth: 1, borderColor: theme.color.border.hairline, padding: theme.space.base, ...theme.shadow.card }}>
             <SectionTitle>New note</SectionTitle>
             <Field accessibilityLabel="Note content" placeholder="Write a note chunk"
               multiline value={content} onChangeText={onContentChange} style={{ minHeight: 112 }} />
@@ -263,12 +275,15 @@ export function RoomScreen() {
               if (!result.ok) throw new Error(result.error.message);
               setContent(''); setTags(''); setSource('');
             })} /></View>
-          </View>
+          </View>}
           {error ? <Notice tone="danger">{error}</Notice> : null}
-          {chunks.length ? <SectionTitle>Notes</SectionTitle> : null}
+          {chunks.length && !phone ? <SectionTitle>Notes</SectionTitle> : null}
         </View>}
-        ListEmptyComponent={<EmptyState title="No notes in this room yet" body="Write your first chunk above, or paste a few paragraphs at once." />}
-        ListFooterComponent={<HarnessPanel roomId={room.id} chunks={chunks} appDb={sqlite} onOpenCitation={openCitation} onSaved={() => { void refresh(); }} />}
+        ListEmptyComponent={phone && tab !== 'notes'
+          ? <EmptyState title={`No ${tab} in this room yet`} body={`${tab === 'slides' ? 'Slides' : 'Boards'} will show up here once they are added.`} />
+          : chunks.length ? <EmptyState title="No notes with this subject" body="Pick another subject, or choose all." />
+          : <EmptyState title="No notes in this room yet" body="Write your first chunk above, or paste a few paragraphs at once." />}
+        ListFooterComponent={phone && tab !== 'notes' ? undefined : <HarnessPanel roomId={room.id} chunks={chunks} appDb={sqlite} onOpenCitation={openCitation} onSaved={() => { void refresh(); }} />}
         renderItem={({ item, index }) => {
           const cited = focus?.chunkId === item.id ? focus : null;
           return <ChunkEditor chunk={item} index={index} count={chunks.length} onError={setError}
@@ -315,6 +330,9 @@ export function RoomScreen() {
         </ChunkEditor>;
         }}
       />
+      {phone ? <PhoneRoomActions
+        onAsk={() => { setTab('notes'); setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 0); }}
+        onAddNote={() => { setTab('notes'); setTimeout(() => listRef.current?.scrollToOffset({ offset: 0, animated: true }), 0); }} /> : null}
     </KeyboardAvoidingView>
   </SafeAreaView></Screen>;
 }
