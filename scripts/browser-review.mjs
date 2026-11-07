@@ -163,11 +163,17 @@ try {
   await clickButton('Missed');
   await page.waitForFunction(() => document.body.innerText.includes('Saved Missed.') && document.body.innerText.includes('beta unclear note'), { timeout: 15000 });
   await clickButton('Unclear');
-  await page.waitForFunction(() => document.body.innerText.includes('Saved Unclear.') && document.body.innerText.includes('gamma got it note'), { timeout: 15000 });
+  await page.waitForFunction(() => {
+    const text = document.body.innerText;
+    return text.includes('Saved Unclear.')
+      && text.includes('gamma got it note')
+      && text.includes('This room is now brick.')
+      && text.includes('Stone stage: brick');
+  }, { timeout: 15000 });
   await clickButton('Got it');
   await page.waitForFunction(() => {
     const text = document.body.innerText;
-    return text.includes('Saved Got it.') && text.includes('This room is now brick.') && text.includes('Stone stage: brick') && text.includes('Nothing is due right now.');
+    return text.includes('Saved Got it.') && text.includes('Stone stage: brick') && text.includes('Nothing is due right now.');
   }, { timeout: 15000 });
   await assertNoPairingToken('review-screen');
   const scheduled = await page.$eval('[data-testid="review-schedule"]', (element) => element.innerText);
