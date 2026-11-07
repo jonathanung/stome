@@ -2,7 +2,7 @@ import { randomUUID } from 'expo-crypto';
 import { Link, usePathname } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
-import { Platform, Pressable, Text, TextInput, View } from 'react-native';
+import { Platform, Pressable, Text, TextInput, View, useWindowDimensions } from 'react-native';
 
 import { useStoneTheme } from '../../../design-theme/src/primitives';
 import { createCommit } from '../../data/commit';
@@ -11,11 +11,13 @@ import { Field, Notice } from '../../ui/kit';
 import { listRooms } from '../../data/queries';
 import { expoDriver } from '../../db/expo-driver';
 import { LAST_ROOM_KEY, canSubmit } from './draft';
+import { captureLayerGeometry } from './geometry';
 import { CAPTURE_SHORTCUT_LABEL, isCaptureShortcut } from './shortcut';
 import {
   CLEANUP_FAILED_MESSAGE,
   STORAGE_DEGRADED_MESSAGE,
   createCaptureController,
+  createMemoryStorage,
   loadCaptureState,
   readStorageItem,
   writeStorageItem,
@@ -24,9 +26,13 @@ import {
 } from './session';
 import { chooseCaptureRoom, roomIdFromPath } from './target';
 
+const nativeStorage = { local: createMemoryStorage(), session: createMemoryStorage() };
+
 // React Native defines `window` as the global object without DOM APIs, so gate on web, not on `window`.
+// Native gets in-memory storage: null would read as a storage failure and show the degraded warning on every launch.
 function browserStorage(kind: 'local' | 'session'): CaptureStorage | null {
-  if (Platform.OS !== 'web' || typeof window === 'undefined') return null;
+  if (Platform.OS !== 'web') return nativeStorage[kind];
+  if (typeof window === 'undefined') return null;
   try {
     return kind === 'local' ? window.localStorage : window.sessionStorage;
   } catch {
@@ -134,13 +140,14 @@ export function QuickCapture() {
       ? CLEANUP_FAILED_MESSAGE
       : null;
   const ready = canSubmit(session.draft, session.busy);
+  const viewportWidth = useWindowDimensions().width;
+  const geometry = captureLayerGeometry(viewportWidth, { inset: theme.space.base });
   const layer = {
     position: (Platform.OS === 'web' ? 'fixed' : 'absolute') as 'absolute',
-    right: theme.space.base,
+    right: geometry.right,
     bottom: theme.space.section,
     zIndex: 30,
-    width: 340,
-    maxWidth: '92%' as const,
+    width: geometry.width,
     gap: theme.space.md,
   };
 
