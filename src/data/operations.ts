@@ -121,7 +121,7 @@ export const NEEDS_REVISION: ReadonlySet<OpKind> = new Set<OpKind>([
 export const PERMISSIONS: Record<Source, ReadonlySet<OpKind>> = {
   human: new Set<OpKind>(OP_KINDS),
   import: new Set<OpKind>(['room.create', 'chunk.create', 'import.note']),
-  ai: new Set<OpKind>(['annotation.create']),
+  ai: new Set<OpKind>(['annotation.create', 'chunk.update']),
 };
 
 export type CommitErrorCode =
