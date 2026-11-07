@@ -17,6 +17,7 @@ import { expoDriver } from '../db/expo-driver';
 import { Icon, type IconName } from '../ui/Icon';
 import { StageGlyph, stageName } from '../ui/StageGlyph';
 import { DueBanner, NewRoomCard, RoomCard, gridColumns } from './RoomsGrid';
+import { RoomsPhone } from './RoomsScreen.phone';
 import { EmptyState, Field, Group, Notice, Row, SectionTitle, useColumn } from '../ui/kit';
 
 function message(reason: unknown): string {
@@ -88,25 +89,26 @@ export function RoomsScreen() {
     return () => { active = false; };
   }, [db, loadExtras]));
 
-  async function action(run: () => Promise<void>) {
-    if (busy) return;
+  async function action(run: () => Promise<void>): Promise<boolean> {
+    if (busy) return false;
     setBusy(true);
     setError(null);
-    try { await run(); await refresh(); }
-    catch (reason) { setError(message(reason)); await refresh().catch(() => undefined); }
+    try { await run(); await refresh(); return true; }
+    catch (reason) { setError(message(reason)); await refresh().catch(() => undefined); return false; }
     finally { setBusy(false); }
   }
 
-  async function create() {
+  async function createNamed(roomName: string) {
     const result = await commit({
       opId: randomUUID(), kind: 'room.create', source: 'human', confirmed: false,
-      payload: { name },
+      payload: { name: roomName },
     });
     if (!result.ok) throw new Error(result.error.message);
     setName('');
     setCreating(false);
     router.push(`/rooms/${result.value.roomId}`);
   }
+  const create = () => createNamed(name);
 
   function closeManage() {
     setManagingId(null);
@@ -168,6 +170,21 @@ export function RoomsScreen() {
         </Pressable>
       </ScrollView>
     </SafeAreaView></Screen>;
+  }
+
+  if (width < 600) {
+    return <RoomsPhone
+      rooms={rooms} stats={stats} loading={loading} error={error} busy={busy}
+      onCreate={(roomName) => action(() => createNamed(roomName))}
+      onRename={(room, roomName) => action(async () => {
+        const result = await commit({ opId: randomUUID(), kind: 'room.rename', source: 'human', confirmed: false, expectedRevision: room.revision, payload: { roomId: room.id, name: roomName } });
+        if (!result.ok) throw new Error(result.error.message);
+      })}
+      onDelete={(room) => action(async () => {
+        const result = await commit({ opId: randomUUID(), kind: 'room.delete', source: 'human', confirmed: true, expectedRevision: room.revision, payload: { roomId: room.id } });
+        if (!result.ok) throw new Error(result.error.message);
+      })}
+    />;
   }
 
   const header = <View style={{ gap: theme.space.section, paddingTop: theme.space.base, marginBottom: theme.space.base }}>
