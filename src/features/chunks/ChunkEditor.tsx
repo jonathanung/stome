@@ -23,13 +23,26 @@ export interface ChunkEditorProps {
   onError(message: string): void;
   /** Extra content for the bottom of the card (source link, annotations). */
   children?: ReactNode;
+  /** Draws the card with the warning border, e.g. when an AI citation points into it. */
+  highlighted?: boolean;
+  /**
+   * A read-only view shown instead of the text field (e.g. the cited passage
+   * highlighted). "Edit text" calls onExitReadView to return to editing.
+   */
+  readView?: ReactNode;
+  onExitReadView?(): void;
+  testID?: string;
+  nativeID?: string;
 }
 
 /**
  * Editable chunk (#38) with autosave (#39). It does not write to the database
  * itself: the room screen passes callbacks that go through the commit boundary.
  */
-export function ChunkEditor({ chunk, index, count, onSaveBody, onSetSubjects, onMove, onDelete, onError, children }: ChunkEditorProps) {
+export function ChunkEditor({
+  chunk, index, count, onSaveBody, onSetSubjects, onMove, onDelete, onError, children,
+  highlighted = false, readView, onExitReadView, testID, nativeID,
+}: ChunkEditorProps) {
   const theme = useStoneTheme();
   const n = index + 1;
 
@@ -99,6 +112,10 @@ export function ChunkEditor({ chunk, index, count, onSaveBody, onSetSubjects, on
     if (!result.ok) onError(result.message);
   };
 
+  // Multiline fields do not grow by themselves (on web they scroll), so size
+  // the field to its content: a chunk is always shown whole.
+  const [contentHeight, setContentHeight] = useState(0);
+
   const [subjectDraft, setSubjectDraft] = useState('');
   const addSubjects = () => {
     const added = subjectDraft.split(',').map((s) => s.trim()).filter(Boolean);
@@ -109,14 +126,24 @@ export function ChunkEditor({ chunk, index, count, onSaveBody, onSetSubjects, on
 
   return (
     <View
+      testID={testID}
+      nativeID={nativeID}
       style={{
         backgroundColor: theme.color.bg.surface,
-        borderColor: theme.color.border.hairline,
-        borderWidth: 1,
+        borderColor: highlighted ? theme.color.status.warning.fill : theme.color.border.hairline,
+        borderWidth: highlighted ? 2 : 1,
         borderRadius: theme.radius.card,
         padding: theme.space.base,
         gap: theme.space.md,
       }}>
+      {readView ? (
+        <View style={{ gap: theme.space.sm }}>
+          {readView}
+          {onExitReadView ? (
+            <TextAction label="Edit text" accessibilityLabel={`Edit chunk ${n} text`} onPress={onExitReadView} />
+          ) : null}
+        </View>
+      ) : (
       <TextInput
         accessibilityLabel={`Chunk ${n}`}
         placeholder="Empty chunk"
@@ -132,8 +159,14 @@ export function ChunkEditor({ chunk, index, count, onSaveBody, onSetSubjects, on
           controller.edit(text);
         }}
         onBlur={() => void controller.flush()}
-        style={[theme.text('reading'), { color: theme.color.text.primary, minHeight: theme.layout.control, padding: 0 }]}
+        onContentSizeChange={(event) => setContentHeight(event.nativeEvent.contentSize.height)}
+        scrollEnabled={false}
+        style={[
+          theme.text('reading'),
+          { color: theme.color.text.primary, minHeight: theme.layout.control, height: Math.max(theme.layout.control, contentHeight), padding: 0 },
+        ]}
       />
+      )}
 
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: theme.space.sm }}>
         {chunk.subjects.map((subject) => (
