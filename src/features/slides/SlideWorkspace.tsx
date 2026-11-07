@@ -29,7 +29,7 @@ function ToolGlyph({ glyph, color }: { glyph: (typeof TOOLS)[number]['glyph']; c
   );
 }
 
-function IconBtn({ label, selected, disabled, onPress, children }: { label: string; selected?: boolean; disabled?: boolean; onPress: () => void; children: (color: string) => React.ReactNode }) {
+export function IconBtn({ label, selected, disabled, onPress, children }: { label: string; selected?: boolean; disabled?: boolean; onPress: () => void; children: (color: string) => React.ReactNode }) {
   const theme = useStoneTheme();
   const color = selected ? theme.color.accent.fg : theme.color.text.secondary;
   return (
@@ -54,7 +54,7 @@ function IconBtn({ label, selected, disabled, onPress, children }: { label: stri
   );
 }
 
-function Eyebrow({ children }: { children: string }) {
+export function Eyebrow({ children }: { children: string }) {
   const theme = useStoneTheme();
   return <Text style={[theme.text('eyebrow'), { color: theme.color.text.tertiary }]}>{children}</Text>;
 }
@@ -106,7 +106,7 @@ function Thumbs({ deck, current, onPick }: { deck: SlideDeck; current: number; o
   );
 }
 
-function SlideTable({ page, onSelect, selected }: { page: SlidePage; onSelect: () => void; selected: boolean }) {
+export function SlideTable({ page, onSelect, selected }: { page: SlidePage; onSelect: () => void; selected: boolean }) {
   const theme = useStoneTheme();
   return (
     <View style={{ flex: 1 }}>
