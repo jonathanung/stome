@@ -129,8 +129,9 @@ test('registry is only notes.proposeAnnotation and rejects a foreign room', asyn
 });
 
 test('migration preserves an existing scaffold note and does not create foundation tables', async () => {
-  assert.equal(SUPPORTED_VERSION, 1);
-  assert.equal(migrationsFor(1).length, 0);
+  assert.equal(SUPPORTED_VERSION, 2);
+  assert.equal(migrationsFor(2).length, 0);
+  assert.equal(migrationsFor(1).length, 1);
   assert.equal(HARNESS_MIGRATION_SQL.includes('CREATE TABLE rooms'), false);
   assert.equal(HARNESS_MIGRATION_SQL.includes('CREATE TABLE chunks'), false);
   assert.equal(HARNESS_MIGRATION_SQL.includes('CREATE TABLE annotations'), false);

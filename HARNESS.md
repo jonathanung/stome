@@ -29,7 +29,7 @@ STOME_APP_ORIGIN=http://localhost:8081 STOME_COMPANION_PORT=8787 npm run compani
 
 | Piece | Where it lives | Status |
 | --- | --- | --- |
-| Saved notes | `stome.db` via Expo SQLite, scaffold table `notes` | Existing app path, unchanged |
+| Saved notes | `stome.db` via Expo SQLite, scaffold table `notes` | Existing write path. FND.1 (#55) added `rooms`, `chunks`, and `annotations` at schema version 2. This harness does not write those tables. |
 | Sessions, messages, operation ids | separate Expo SQLite file `stome-harness.db` | Harness-owned |
 | Confirmed AI answer | `harness_stub_annotations` in `stome-harness.db` | Stub until #36 |
 | Room / chunk / annotation tables | not created | Owned by #35 |
@@ -60,7 +60,7 @@ A companion payload is not a write permission. Confirmation reads the scaffold n
 
 `src/harness/store.ts` `commitStubAnnotation` is the temporary writer. Replace it with the #36 function. The replacement is tracked in #53. Do not treat `harness_stub_annotations` as the shared annotation schema.
 
-That note read is not atomic with the stub write. The two databases are separate files, so a note edit can still commit after the read and before the stub insert. The revision check uses the `updated_at` from that read. It is not the Foundation confirmation gate, and this harness does not claim that gate exists. #53 is where that cross-database limit has to be closed, by one database and the real commit.
+That note read is not atomic with the stub write. The two databases are separate files, so a note edit can still commit after the read and before the stub insert. The revision check uses the `updated_at` from that read. It is not the Foundation confirmation gate, and this harness does not claim that gate exists. Schema version 2 from #55 creates the Foundation tables and leaves them unused here. #53 is where that cross-database limit has to be closed, by writing through the real commit in one database.
 
 ## Session states
 
