@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Platform,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   TextInput,
@@ -238,7 +237,7 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
   const cursor = tool === 'hand' ? 'grab' : tool === 'text' ? 'text' : 'crosshair';
 
   return (
-    <SafeAreaView style={styles.root}>
+    <View style={styles.root}>
       {/* Canvas */}
       <View
         ref={svgContainerRef}
@@ -336,7 +335,7 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
           canRedo={canRedo}
         />
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
