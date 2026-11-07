@@ -1,6 +1,8 @@
 export const DATABASE_NAME = 'stome.db';
 
-export const SUPPORTED_VERSION = 2;
+export const SUPPORTED_VERSION = 4;
+
+export { ROOM_STAGES, ANNOTATION_TYPES, type RoomStage, type AnnotationType } from './models.ts';
 
 export const CONNECTION_PRAGMAS = 'PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;';
 
@@ -15,8 +17,14 @@ export const GET_NOTE_SQL =
 
 export type Migration = {
   version: number;
+  name?: string;
   sql: string;
 };
+
+const SQL_UUID = `lower(
+  hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' ||
+  substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))
+)`;
 
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -65,6 +73,62 @@ export const MIGRATIONS: readonly Migration[] = [
       );
 
       CREATE INDEX annotations_chunk_idx ON annotations (chunk_id);
+    `,
+  },
+  {
+    version: 3,
+    name: 'revisioned commit boundary and normalized subjects',
+    sql: `
+      ALTER TABLE rooms ADD COLUMN revision INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE chunks ADD COLUMN revision INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE annotations ADD COLUMN anchor TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(anchor));
+      CREATE INDEX chunks_updated ON chunks (updated_at DESC);
+      CREATE TABLE chunk_subjects (
+        chunk_id TEXT NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+        subject TEXT NOT NULL CHECK (length(trim(subject)) > 0),
+        position INTEGER NOT NULL,
+        PRIMARY KEY (chunk_id, subject)
+      );
+      CREATE INDEX chunk_subjects_subject ON chunk_subjects(subject);
+      INSERT OR IGNORE INTO chunk_subjects (chunk_id, subject, position)
+        SELECT c.id, j.value, CAST(j.key AS INTEGER) FROM chunks c,
+        json_each(CASE WHEN json_valid(c.subject_tags) THEN
+          CASE WHEN json_type(c.subject_tags) = 'array' THEN c.subject_tags ELSE '[]' END
+          ELSE '[]' END) j
+        WHERE j.type = 'text' AND length(trim(j.value)) > 0;
+      CREATE TABLE applied_ops (
+        op_id TEXT PRIMARY KEY NOT NULL,
+        kind TEXT NOT NULL,
+        source TEXT NOT NULL,
+        result TEXT NOT NULL CHECK (json_valid(result)),
+        committed_at INTEGER NOT NULL
+      );
+      -- Snapshot scaffold notes for the room workspace, retaining the originals
+      -- for the independently shipped notes/harness UI.
+      CREATE TEMP TABLE legacy_room AS SELECT ${SQL_UUID} AS id;
+      INSERT INTO rooms (id, name, stage, created_at, updated_at)
+        SELECT legacy_room.id, 'notes', 'stonehenge', MIN(notes.created_at), MAX(notes.updated_at)
+        FROM legacy_room, notes GROUP BY legacy_room.id HAVING COUNT(notes.id) > 0;
+      INSERT INTO chunks (id, room_id, position, content, created_at, updated_at)
+        SELECT ${SQL_UUID}, legacy_room.id,
+          ROW_NUMBER() OVER (ORDER BY notes.created_at, notes.id) - 1,
+          CASE WHEN notes.body = '' THEN notes.title ELSE notes.title || char(10) || notes.body END,
+          notes.created_at, notes.updated_at FROM notes, legacy_room;
+      DROP TABLE legacy_room;
+    `,
+  },
+  {
+    version: 4,
+    name: 'import source provenance',
+    sql: `
+      CREATE TABLE import_sources (
+        source_id   TEXT PRIMARY KEY NOT NULL,
+        fingerprint TEXT NOT NULL,
+        room_id     TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+        chunk_ids   TEXT NOT NULL CHECK (json_valid(chunk_ids)),
+        imported_at INTEGER NOT NULL
+      );
+      CREATE INDEX import_sources_room ON import_sources (room_id);
     `,
   },
 ];

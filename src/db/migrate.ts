@@ -1,11 +1,24 @@
-import type { SQLiteDatabase } from 'expo-sqlite';
+import type { Db } from './driver.ts';
+import { CONNECTION_PRAGMAS, MIGRATIONS, migrationsFor } from './schema.ts';
 
-import { CONNECTION_PRAGMAS, migrationsFor, SUPPORTED_VERSION } from './schema';
+function assertContiguous(): void {
+  MIGRATIONS.forEach((migration, index) => {
+    if (migration.version !== index + 1) {
+      throw new Error(`Migration "${migration.name}" is version ${migration.version}, expected ${index + 1}`);
+    }
+  });
+}
 
-export async function migrateDb(db: SQLiteDatabase): Promise<void> {
-  await db.execAsync(CONNECTION_PRAGMAS);
+/**
+ * Brings the database to the latest schema. Pending migrations and the
+ * version bump run in one transaction, so a failure leaves the previous
+ * version intact. Running it again on a current database does nothing.
+ */
+export async function migrateDb(db: Db): Promise<void> {
+  assertContiguous();
+  await db.exec(CONNECTION_PRAGMAS);
 
-  const version = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
+  const version = await db.get<{ user_version: number }>('PRAGMA user_version');
   if (version === null) {
     throw new Error('Could not read the database schema version');
   }
@@ -15,10 +28,10 @@ export async function migrateDb(db: SQLiteDatabase): Promise<void> {
     return;
   }
 
-  await db.withTransactionAsync(async () => {
+  await db.transaction(async () => {
     for (const migration of pending) {
-      await db.execAsync(migration.sql);
+      await db.exec(migration.sql);
+      await db.exec(`PRAGMA user_version = ${migration.version}`);
     }
-    await db.execAsync(`PRAGMA user_version = ${SUPPORTED_VERSION}`);
   });
 }
