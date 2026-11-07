@@ -53,6 +53,7 @@ export function WhiteboardScreen() {
     origEl: WhiteboardElement;
     isDragging: boolean;
   } | null>(null);
+  const lastTapRef = useRef<{ time: number; id: string | null } | null>(null);
   const panStartRef = useRef<{ ox: number; oy: number; tx: number; ty: number } | null>(null);
   const pinchRef = useRef<{ dist: number; scale: number; ox: number; oy: number } | null>(null);
   const transformRef = useRef(transform);
@@ -124,6 +125,7 @@ export function WhiteboardScreen() {
       selectedIdRef: selectedIdRef as React.RefObject<string | null>,
       dragRef,
       drawingRef,
+      lastTapRef,
       panStartRef,
       pinchRef,
       pushHistoryRef: pushHistoryRef as React.RefObject<(els: WhiteboardElement[]) => void>,
@@ -179,16 +181,32 @@ export function WhiteboardScreen() {
 
   function commitText(value: string) {
     if (!textEdit) return;
-    if (value.trim().length > 0) {
+    const trimmed = value.trim();
+
+    if (textEdit.isEditing) {
+      // Update existing text element
+      if (trimmed.length > 0) {
+        pushHistory(
+          elements.map((e) =>
+            e.id === textEdit.id
+              ? ({ ...e, text: trimmed, width: trimmed.length * 12 } as TextElement)
+              : e,
+          ),
+        );
+      } else {
+        // Empty → delete the element
+        pushHistory(elements.filter((e) => e.id !== textEdit.id));
+      }
+    } else if (trimmed.length > 0) {
       const el: TextElement = {
         id: textEdit.id,
         type: 'text',
         x: textEdit.x,
         y: textEdit.y,
         angle: 0,
-        text: value,
+        text: trimmed,
         fontSize: 20,
-        width: value.length * 12,
+        width: trimmed.length * 12,
         height: 24,
         strokeColor: currentStyle.strokeColor,
         backgroundColor: 'transparent',
@@ -215,7 +233,10 @@ export function WhiteboardScreen() {
       {/* Canvas */}
       <View
         ref={svgContainerRef}
-        style={[styles.canvas, Platform.OS === 'web' && ({ cursor } as object)]}
+        style={[
+          styles.canvas,
+          Platform.OS === 'web' && ({ cursor, userSelect: 'none', WebkitUserSelect: 'none' } as object),
+        ]}
         onLayout={onLayout}
         {...panHandlers}
       >
@@ -223,7 +244,10 @@ export function WhiteboardScreen() {
           <Rect x={0} y={0} width={canvasSize.width} height={canvasSize.height} fill={EXCALIDRAW_COLORS.canvasBg} />
           <G transform={`translate(${transform.offsetX}, ${transform.offsetY}) scale(${transform.scale})`}>
             {elements.map((el) => (
-              <ElementRenderer key={el.id} element={el} selected={selectedId === el.id} />
+              // Hide the element being edited so the TextInput appears in its place
+              textEdit?.isEditing && el.id === textEdit.id ? null : (
+                <ElementRenderer key={el.id} element={el} selected={selectedId === el.id} />
+              )
             ))}
           </G>
         </Svg>

@@ -2,7 +2,7 @@
 
 import { PanResponder, type PanResponderInstance } from 'react-native';
 
-import { hitTest, moveElement, newId, screenToBoard } from './geometry';
+import { boardToScreen, hitTest, moveElement, newId, screenToBoard } from './geometry';
 import type { ElementStyle } from './StylePanel';
 import type {
   ArrowElement,
@@ -12,6 +12,7 @@ import type {
   FreedrawElement,
   LineElement,
   RectangleElement,
+  TextElement,
   Tool,
   WhiteboardElement,
 } from './types';
@@ -23,11 +24,13 @@ export type TextEditState = {
   screenX: number;
   screenY: number;
   value: string;
+  /** True when editing an existing text element (update), false when creating new. */
+  isEditing: boolean;
 };
 
 type DragState = {
   id: string;
-  /** Board position at the moment the pointer went down — never updated. */
+  /** Board position at pointer-down — never updated. */
   initialBx: number;
   initialBy: number;
   /** Original element position at pointer-down — never updated. */
@@ -38,8 +41,8 @@ type DragState = {
 
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 20;
-// Minimum move in board units before we commit as a drag (not a click)
 const DRAG_THRESHOLD = 4;
+const DOUBLE_TAP_MS = 300;
 
 type Refs = {
   transformRef: React.RefObject<CanvasTransform>;
@@ -49,13 +52,9 @@ type Refs = {
   selectedIdRef: React.RefObject<string | null>;
   drawingRef: React.MutableRefObject<WhiteboardElement | null>;
   dragRef: React.MutableRefObject<DragState | null>;
+  lastTapRef: React.MutableRefObject<{ time: number; id: string | null } | null>;
   panStartRef: React.MutableRefObject<{ ox: number; oy: number; tx: number; ty: number } | null>;
-  pinchRef: React.MutableRefObject<{
-    dist: number;
-    scale: number;
-    ox: number;
-    oy: number;
-  } | null>;
+  pinchRef: React.MutableRefObject<{ dist: number; scale: number; ox: number; oy: number } | null>;
   pushHistoryRef: React.RefObject<(els: WhiteboardElement[]) => void>;
   setSelectedIdRef: React.RefObject<(id: string | null) => void>;
   setTextEditRef: React.RefObject<(state: TextEditState) => void>;
@@ -95,6 +94,33 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
 
       if (activeTool === 'select') {
         const hit = [...refs.elementsRef.current!].reverse().find((el) => hitTest(el, bx, by));
+        const now = Date.now();
+        const last = refs.lastTapRef.current;
+
+        // Double-tap on a text element → open it for editing
+        if (
+          hit?.type === 'text' &&
+          last?.id === hit.id &&
+          now - last.time < DOUBLE_TAP_MS
+        ) {
+          refs.lastTapRef.current = null;
+          const el = hit as TextElement;
+          const [sxEl, syEl] = boardToScreen(el.x, el.y, t);
+          refs.setTextEditRef.current!({
+            id: el.id,
+            x: el.x,
+            y: el.y,
+            screenX: sxEl,
+            screenY: syEl,
+            value: el.text,
+            isEditing: true,
+          });
+          refs.dragRef.current = null;
+          return;
+        }
+
+        refs.lastTapRef.current = { time: now, id: hit?.id ?? null };
+
         if (hit) {
           refs.setSelectedIdRef.current!(hit.id);
           refs.dragRef.current = { id: hit.id, initialBx: bx, initialBy: by, origEl: hit, isDragging: false };
@@ -173,20 +199,16 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
         return;
       }
 
-      // Drag selected element to move it
       if (refs.toolRef.current === 'select' && refs.dragRef.current) {
         const [bx, by] = screenToBoard(sx, sy, t);
         const { initialBx, initialBy, origEl, isDragging } = refs.dragRef.current;
         const totalDx = bx - initialBx;
         const totalDy = by - initialBy;
-        // Use total displacement from original tap position so threshold
-        // only blocks the very first tiny movement, not every subsequent frame.
         if (!isDragging && Math.abs(totalDx) < DRAG_THRESHOLD && Math.abs(totalDy) < DRAG_THRESHOLD) {
           return;
         }
         refs.dragRef.current = { ...refs.dragRef.current, isDragging: true };
         const moved = moveElement(origEl, totalDx, totalDy);
-        // Keep elementsRef in sync so release can read the final position.
         refs.elementsRef.current = refs.elementsRef.current!.map((e) => (e.id === moved.id ? moved : e));
         refs.setElements((prev) => prev.map((e) => (e.id === moved.id ? moved : e)));
         return;
@@ -224,12 +246,10 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
       refs.pinchRef.current = null;
       refs.panStartRef.current = null;
 
-      // Commit drag-move to history
       if (refs.toolRef.current === 'select' && refs.dragRef.current) {
         const { id, isDragging } = refs.dragRef.current;
         refs.dragRef.current = null;
-        if (!isDragging) return; // was just a tap, no move needed
-        // Read the latest element position from React state via elementsRef
+        if (!isDragging) return;
         const finalEl = refs.elementsRef.current!.find((e) => e.id === id);
         if (finalEl) {
           refs.pushHistoryRef.current!([
@@ -245,7 +265,15 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
         const sx = nativeEvent.pageX;
         const sy = nativeEvent.pageY;
         const [bx, by] = screenToBoard(sx, sy, t);
-        refs.setTextEditRef.current!({ id: newId(), x: bx, y: by, screenX: sx, screenY: sy, value: '' });
+        refs.setTextEditRef.current!({
+          id: newId(),
+          x: bx,
+          y: by,
+          screenX: sx,
+          screenY: sy,
+          value: '',
+          isEditing: false,
+        });
         return;
       }
 
