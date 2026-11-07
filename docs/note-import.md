@@ -59,6 +59,8 @@ Suggestions are labeled for review and may be replaced with comma-separated
 subjects. Destination selection is explicit: use an existing room or name a
 new one. No room assignment is silently inferred. No rewards are awarded and
 existing room stages are unchanged (#29).
+Chunk creation/update timestamps record the import time. Source-file modification
+times are not used as study activity and are not preserved by this v1 model.
 
 ## Atomicity, retries and conflicts (#30)
 
@@ -88,3 +90,22 @@ manually check iOS/Android/web: picker cancellation, UTF-8 multi-file selection,
 large/rejected files, review overrides, duplicates, changed-source conflicts,
 restart persistence and room deletion. Web SQLite may need the Expo documented
 COOP/COEP hosting headers. Real export fixtures and vault/ZIP import remain open.
+
+Validation on this branch (2026-11-07):
+
+- `npm run check`: typecheck, lint, all 35 Node tests, write isolation passed.
+- `npx expo export --platform web`: passed, including SQLite WASM/worker assets.
+- `npx expo export --platform android --platform ios --output-dir dist/native`:
+  both Hermes bundles passed.
+- Headless Chrome at 390 × 844 with COOP/COEP headers: system file input selected
+  the synthetic Markdown fixture; all four chunks previewed; a reviewed room
+  name saved; notes persisted across reload; identical import skipped; changed
+  source showed a conflict. No uncaught browser errors. This exercises the Expo
+  web SQLite driver, not the native driver. Native device testing remains open.
+- Local Node was 26.7.0; CI pins the repository's declared Node 22.23.4. Node 22
+  validation was not performed locally.
+
+The feature branch was built in a separate worktree from committed Foundation
+code. Its minimal Router entry replaces the old placeholder screen. When merging
+with the in-progress capture UI, retain that UI's layout/provider and expose
+`NoteImportScreen` through a route; the importer core does not depend on its store.
