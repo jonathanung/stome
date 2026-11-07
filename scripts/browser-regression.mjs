@@ -26,10 +26,10 @@ import { setTimeout as delay } from 'node:timers/promises';
 const repoRoot = new URL('..', import.meta.url).pathname;
 const puppeteerRoot = process.env.STOME_PUPPETEER_ROOT ?? '/tmp/stome-browser/package.json';
 const chromePath = process.env.CHROME_PATH ?? '/usr/bin/google-chrome';
-const webUrl = process.env.STOME_WEB_URL ?? 'http://localhost:8081/';
+const webPort = Number(process.env.STOME_WEB_PORT ?? 8081);
+const webUrl = process.env.STOME_WEB_URL ?? `http://localhost:${webPort}/`;
 const outDir = process.env.STOME_REGRESSION_OUT ?? '/opt/cursor/artifacts/browser-regression';
 const spawnServers = process.env.STOME_REGRESSION_NO_SPAWN !== '1';
-const webPort = Number(process.env.STOME_WEB_PORT ?? 8081);
 const expoPort = Number(process.env.EXPO_INTERNAL_PORT ?? 8082);
 const companionPort = Number(process.env.STOME_COMPANION_PORT ?? 8787);
 const token = process.env.STOME_PAIRING_TOKEN ?? randomBytes(16).toString('hex');
@@ -305,6 +305,24 @@ function requireChild(child, label) {
   }
 }
 
+function loopbackPort(urlString) {
+  let url;
+  try {
+    url = new URL(urlString);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+  if (url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') return null;
+  if (url.port === '') return url.protocol === 'https:' ? 443 : 80;
+  const port = Number(url.port);
+  return Number.isInteger(port) && port > 0 && port < 65536 ? port : null;
+}
+
+function spawnNavigationOwned() {
+  return loopbackPort(webUrl) === webPort;
+}
+
 function identity() {
   const checkoutSha = sha();
   let productHead = 'unknown';
@@ -313,18 +331,25 @@ function identity() {
   } catch {
     productHead = 'unknown';
   }
-  return {
-    checkoutSha,
-    productHead,
-    server: spawnServers
-      ? { mode: 'spawn', servedFromCheckout: true }
-      : {
-          mode: 'external',
-          servedFromCheckout: false,
-          servedSha: null,
-          note: 'An external server was already running. checkoutSha is this working tree, not the code that server is serving.',
-        },
-  };
+  let server;
+  if (!spawnServers) {
+    server = {
+      mode: 'external',
+      servedFromCheckout: false,
+      servedSha: null,
+      note: 'An external server was already running. checkoutSha is this working tree, not the code that server is serving.',
+    };
+  } else if (!spawnNavigationOwned()) {
+    server = {
+      mode: 'spawn',
+      servedFromCheckout: false,
+      servedSha: null,
+      note: 'STOME_WEB_URL does not address the document host this command would spawn. This checkout was not served.',
+    };
+  } else {
+    server = { mode: 'spawn', servedFromCheckout: true };
+  }
+  return { checkoutSha, productHead, server };
 }
 
 async function waitFor(label, predicate, timeoutMs) {
@@ -591,6 +616,12 @@ async function main() {
   const screenshots = [];
   try {
   if (spawnServers) {
+    if (!spawnNavigationOwned()) {
+      const message = `spawn mode refused STOME_WEB_URL ${webUrl}. The browser would not open the document host this command spawns at 127.0.0.1:${webPort}.`;
+      const failure = redact({ ok: false, ...runIdentity, message, steps, pageErrors });
+      writeFileSync(`${outDir}/report.json`, JSON.stringify(failure, null, 2));
+      throw new Error(message);
+    }
     step('start mock companion and expo web');
     await assertPortsFree([webPort, expoPort, companionPort]);
     const companionChild = startProcess(
