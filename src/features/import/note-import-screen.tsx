@@ -10,6 +10,7 @@ import { listChunks, listRooms } from '../../data/queries';
 import { expoDriver } from '../../db/expo-driver';
 import { sourceIdentity } from '../../import/markdown';
 import { onenotePathSubjects, onenoteSourceIdentity } from '../../import/onenote/parse';
+import { pdfPathSubjects, pdfSourceIdentity } from '../../import/pdf/parse';
 import { pickNotes, type PickedNote } from '../../import/pick-notes';
 import { destinationForMapping, unsetRoomMapping, type RoomMapping } from '../../import/room-map';
 import { changeSourcePath, changeSubjects, createSubjectReview, type SubjectReview } from '../../import/review-draft';
@@ -25,7 +26,8 @@ interface Draft extends SubjectReview {
 
 function applyOnenoteFolders<T extends SubjectReview>(note: PickedNote, draft: T): T {
   if (!note.exportFormat || note.exportFormat === 'markdown' || draft.subjectsEdited) return draft;
-  return { ...draft, ...onenotePathSubjects(draft.fileSubjects, draft.path) };
+  const folders = note.exportFormat === 'pdf' ? pdfPathSubjects : onenotePathSubjects;
+  return { ...draft, ...folders(draft.fileSubjects, draft.path) };
 }
 
 function Action({ label, onPress, disabled = false }: { label: string; onPress(): void; disabled?: boolean }) {
@@ -77,7 +79,10 @@ export default function NoteImportScreen() {
     busyRef.current = true;
     setBusy(true);
     try {
-      const sourceId = draft.note.exportFormat && draft.note.exportFormat !== 'markdown' ? onenoteSourceIdentity(collection, draft.path) : sourceIdentity(collection, draft.path);
+      const format = draft.note.exportFormat;
+      const sourceId = format === 'pdf'
+        ? pdfSourceIdentity(collection, draft.path)
+        : format && format !== 'markdown' ? onenoteSourceIdentity(collection, draft.path) : sourceIdentity(collection, draft.path);
       const result = await commit({
         opId: randomUUID(), kind: 'import.note', source: 'import', confirmed: true,
         payload: { sourceId, fingerprint: draft.note.fingerprint, bodies: draft.note.bodies, subjects: draft.subjects.split(','), destination },
@@ -104,10 +109,10 @@ export default function NoteImportScreen() {
           data={drafts} keyExtractor={(item) => item.id} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.page}
           ListHeaderComponent={<View style={styles.section}>
             <Text style={styles.title}>Bring your notes</Text>
-            <Text style={styles.text}>Import Markdown, or an HTML, MHTML, or DOCX file exported from OneNote. Choose up to 20 files, 1 MiB each. PDF, native .one files, images, and ink are not imported.</Text>
+            <Text style={styles.text}>Import Markdown, an HTML, MHTML, or DOCX file exported from OneNote, or a PDF (for example a GoodNotes, OneNote or Freeform export). Choose up to 20 files: 1 MiB each, or 8 MiB for a PDF. From a PDF only selectable text is imported, one chunk per page; handwriting and images are not recognized. Native .one files and ink are not imported.</Text>
             <Field label="Source collection" value={collection} onChangeText={setCollection} disabled={busy} />
             <Text style={styles.hint}>Use the same collection and source paths when re-importing. Review each note before confirming.</Text>
-            <Action label={drafts.length ? 'Choose another batch' : 'Choose Markdown or OneNote exports'} onPress={choose} disabled={busy} />
+            <Action label={drafts.length ? 'Choose another batch' : 'Choose Markdown, OneNote or PDF files'} onPress={choose} disabled={busy} />
             {busy ? <ActivityIndicator accessibilityLabel="Working on notes" /> : null}
             {errors.map((error, i) => <Text key={i} accessibilityRole="alert" style={styles.error}>{error}</Text>)}
           </View>}

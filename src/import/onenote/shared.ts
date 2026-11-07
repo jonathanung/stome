@@ -43,8 +43,15 @@ export function onenoteSourceIdentity(collection: string, path: string): string 
   return identity;
 }
 
-/** Notebook and section folders become reviewable subjects. The page itself is the note. */
-export function onenotePathSubjects(fileSubjects: readonly string[], rawPath: string): { subjects: string; folderWarning: string | null } {
+/**
+ * Folder names in a reviewed source path become subject suggestions after the
+ * file's own subjects. Shared by every file-export route (OneNote, PDF).
+ */
+export function folderSubjects(
+  fileSubjects: readonly string[],
+  folders: readonly string[],
+  missingFolderWarning: string,
+): { subjects: string; folderWarning: string | null } {
   const subjects: string[] = [];
   const seen = new Set<string>();
   let folderWarning: string | null = null;
@@ -64,15 +71,19 @@ export function onenotePathSubjects(fileSubjects: readonly string[], rawPath: st
     subjects.push(subject);
   };
   for (const subject of fileSubjects) push(subject, false);
+  if (!folders.length) folderWarning ??= missingFolderWarning;
+  for (const folder of folders) push(folder, true);
+  return { subjects: subjects.join(', '), folderWarning };
+}
+
+export function onenotePathSubjects(fileSubjects: readonly string[], rawPath: string): { subjects: string; folderWarning: string | null } {
   let folders: string[] = [];
   try {
     folders = normalizeOnenotePath(rawPath).split('/').slice(0, -1);
   } catch {
     folders = [];
   }
-  if (!folders.length) folderWarning ??= 'No notebook or section folder was in the source path. Add Notebook/Section/Page before saving if you want those subjects.';
-  for (const folder of folders) push(folder, true);
-  return { subjects: subjects.join(', '), folderWarning };
+  return folderSubjects(fileSubjects, folders, 'No notebook or section folder was in the source path. Add Notebook/Section/Page before saving if you want those subjects.');
 }
 
 export function packSections(sections: string[][], warnings: Set<string>): string[] {
