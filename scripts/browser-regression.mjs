@@ -412,8 +412,17 @@ async function buttonDisabled(page, name) {
   }, name);
 }
 
+/**
+ * Visible page text. innerText leaves out form fields, and since #38 a saved
+ * chunk is shown in its editor (a textarea labelled "Chunk N"), so the editors'
+ * values are appended. Without them a negative check such as "the note does not
+ * contain Mock edit" would not look at the chunk at all.
+ */
 async function bodyText(page) {
-  return page.evaluate(() => document.body.innerText);
+  return page.evaluate(() => {
+    const editors = [...document.querySelectorAll('textarea[aria-label^="Chunk "]')].map((field) => field.value);
+    return [document.body.innerText, ...editors].join('\n');
+  });
 }
 
 async function leavesOutsideHarness(page) {
@@ -445,7 +454,9 @@ async function textOutsideProposal(page) {
     const clone = document.body.cloneNode(true);
     clone.querySelector('[data-testid="proposal-card"]')?.remove();
     clone.querySelector('[data-testid="harness-panel"]')?.remove();
-    return clone.innerText ?? '';
+    // Chunk editors are outside the proposal and harness; see bodyText.
+    const editors = [...document.querySelectorAll('textarea[aria-label^="Chunk "]')].map((field) => field.value);
+    return [clone.innerText ?? '', ...editors].join('\n');
   });
 }
 
@@ -498,7 +509,15 @@ async function openRoom(page) {
 
 async function reloadSeen(page, needle) {
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
-  await page.waitForFunction((expected) => document.body.innerText.includes(expected), { timeout: 30000 }, needle);
+  await page.waitForFunction(
+    (expected) => {
+      // innerText leaves out form fields; chunk text is in the #38 chunk editors.
+      const editors = [...document.querySelectorAll('textarea[aria-label^="Chunk "]')].map((field) => field.value);
+      return [document.body.innerText, ...editors].join('\n').includes(expected);
+    },
+    { timeout: 30000 },
+    needle,
+  );
 }
 
 async function includeChunk(page) {
