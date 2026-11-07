@@ -193,28 +193,46 @@ async function handle(request: IncomingMessage, response: ServerResponse, option
   }
 }
 
+export function pairingTtlMs(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === '') {
+    return PAIRING_TTL_MS;
+  }
+  const ttl = Number(raw);
+  if (!Number.isFinite(ttl) || ttl <= 0) {
+    throw new Error('STOME_PAIRING_TTL_MS must be a positive finite number of milliseconds');
+  }
+  return ttl;
+}
+
 function main(): void {
   const origin = process.env.STOME_APP_ORIGIN ?? 'http://localhost:8081';
   const token = process.env.STOME_PAIRING_TOKEN ?? randomBytes(16).toString('hex');
-  const ttl = Number(process.env.STOME_PAIRING_TTL_MS ?? PAIRING_TTL_MS);
+  const ttl = pairingTtlMs(process.env.STOME_PAIRING_TTL_MS);
+  const expiresAt = Date.now() + ttl;
   const kind = process.env.STOME_PROVIDER === 'api-key' ? 'api-key' : 'mock';
   const provider = createProvider(kind);
   const server = createServer((request, response) => {
     void handle(request, response, {
       origin,
       token,
-      expiresAt: Date.now() + ttl,
+      expiresAt,
       provider,
     });
   });
   const port = Number(process.env.STOME_COMPANION_PORT ?? 8787);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    throw new Error('STOME_COMPANION_PORT must be a TCP port');
+  }
   server.listen(port, LOOPBACK_HOST, () => {
-    const minutes = Math.round(ttl / 60_000);
+    const address = server.address();
+    const bound = address && typeof address !== 'string' ? address.port : port;
+    const lifetime = ttl >= 60_000 ? `${Math.round(ttl / 60_000)} minutes` : `${Math.max(1, Math.round(ttl / 1000))} seconds`;
     process.stdout.write(
       [
-        `Stome companion listening on http://${LOOPBACK_HOST}:${port}`,
+        `Stome companion listening on http://${LOOPBACK_HOST}:${bound}`,
         `App origin: ${origin}`,
-        `Pairing token (expires in ${minutes} minutes, keep it out of browser storage): ${token}`,
+        `Pairing token (expires in ${lifetime}, keep it out of browser storage): ${token}`,
+        `Pairing deadline: ${expiresAt}`,
         'Provider: deterministic mock. No live model call.',
         '',
       ].join('\n'),

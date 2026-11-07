@@ -17,7 +17,7 @@ npm run web:sqlite
 
 Open the app at `http://localhost:8081` (the companion's default allowed origin). That command proxies Expo, which listens on port 8082, and adds the document headers below. Paste the token into **Pairing token**. Save a note that has body text, tick **Include**, leave the scenario on `success`, choose **Ask**, then **Confirm and save**. Reload the page. The AI answer is still under the note. The note title and body are unchanged.
 
-`cancel` waits until you press Cancel. `timeout`, `error`, and `oversize` fail the question and do not change the note. **Continue** asks again with the saved messages after a failure, a cancellation, or a discarded proposal.
+`cancel` waits until you press Cancel. `timeout`, `error`, and `oversize` fail the question and do not change the note. **Continue** asks again with the saved messages after a confirmed answer, a failure, a cancellation, or a discarded proposal. Each new proposal is confirmed on its own. An old operation id still returns the original save.
 
 The token lives in component memory. It is not written to `localStorage` or `sessionStorage`. There is no provider API key in the browser. `STOME_PROVIDER=api-key` only selects a disabled stub; it does not make a network call.
 
@@ -42,7 +42,7 @@ Until #35 exists, a chunk is a scaffold note:
 - anchor text: the note body
 - expected revision: the note's `updated_at`
 
-The app re-reads that note at confirm time. A companion payload is not a write permission. Confirmation builds this request and the stub stores it:
+A companion payload is not a write permission. Confirmation reads the scaffold note from `stome.db` immediately before it builds this request, and the stub stores it in `stome-harness.db`:
 
 ```ts
 {
@@ -60,11 +60,13 @@ The app re-reads that note at confirm time. A companion payload is not a write p
 
 `src/harness/store.ts` `commitStubAnnotation` is the temporary writer. Replace it with the #36 function. The replacement is tracked in #53. Do not treat `harness_stub_annotations` as the shared annotation schema.
 
+That note read is not atomic with the stub write. The two databases are separate files, so a note edit can still commit after the read and before the stub insert. The revision check uses the `updated_at` from that read. It is not the Foundation confirmation gate, and this harness does not claim that gate exists. #53 is where that cross-database limit has to be closed, by one database and the real commit.
+
 ## Session states
 
 `idle → running → completed | failed | cancelled`
 
-`completed`, `failed`, and `cancelled` can return to `running` only through **Continue**. A completed session with an unconfirmed proposal must be confirmed or discarded first. A session still `running` when the harness database opens is marked `failed` with `interrupted`. A result that arrives after cancel, or after that restart, is discarded.
+`completed`, `failed`, and `cancelled` can return to `running` only through **Continue**. A completed session with an unconfirmed proposal must be confirmed or discarded first. Confirming one proposal does not consume the next one: the confirmation flag applies to the current proposal, and the next turn clears it. The previous proposal stays saved because its proposal id already has a stub row, and its operation id still replays from `harness_operations`. A session still `running` when the harness database opens is marked `failed` with `interrupted`. A result that arrives after cancel, or after that restart, is discarded. If a saved note is missing when a run tries to finish, the run is marked `failed` instead of staying `running`.
 
 ## Tool and provider
 
@@ -85,9 +87,11 @@ Limits: request text 8,000 characters (prompt + selected note bodies + saved mes
 ## Companion
 
 - Binds `127.0.0.1` only.
-- Requires the configured `Origin` and a pairing token that expires (default two hours).
+- Requires the configured `Origin` and a pairing token that expires (default two hours). The deadline is computed once at process start. A later request does not extend it. `STOME_PAIRING_TTL_MS` must be a positive finite number of milliseconds.
 - Rejects a non-loopback socket and a `Host` that is not `127.0.0.1` or `localhost` on its port.
+- The app sends the selected text and the token only after the companion URL is `http` on `127.0.0.1`, `localhost`, or `::1`, with no user or password in the URL. Any other scheme or host is rejected before `fetch`.
 - Responses do not contain the pairing token or `STOME_PROVIDER_API_KEY`.
+- While a confirmation is in progress, Ask, Continue, Cancel, and Discard stay disabled. Cancel is only enabled while a question is running.
 
 Browser requests need the page origin to match. Expo web SQLite needs these headers on the HTML document, not only on the bundle:
 
@@ -96,7 +100,7 @@ Browser requests need the page origin to match. Expo web SQLite needs these head
 
 `metro.config.js` sets them on Metro responses. `npm run web:sqlite` also sets them on the document. A Chrome run at `http://localhost:8081` reported `crossOriginIsolated === true`. The document response carried `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: credentialless`. The pairing token was not in `localStorage` or `sessionStorage`, and the token field was empty after reload.
 
-On that origin, Expo SQLite stored both databases in the origin private file system directory `expo-sqlite`. The file headers identified `/stome.db` (scaffold notes) and `/stome-harness.db` (sessions, messages, operation ids, and stub annotations). The app path uses this real `expo-sqlite` web driver. `npm run check:harness` uses Node's `node:sqlite` and is not a substitute for that browser run. iOS and Android were not run.
+On that origin, Expo SQLite stored both databases in the origin private file system directory `expo-sqlite`. The file headers identified `/stome.db` (scaffold notes) and `/stome-harness.db` (sessions, messages, operation ids, and stub annotations). The app path uses this real `expo-sqlite` web driver. `npm run check:harness` uses Node's `node:sqlite` for the session rules. The production queue itself is covered there by the same serializer the Expo adapter uses, one owner per connection, with the transaction callback on a direct executor. That Node run is still not a substitute for the browser `expo-sqlite` driver. iOS and Android were not run.
 
 ## Checks
 

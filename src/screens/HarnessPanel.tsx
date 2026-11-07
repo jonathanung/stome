@@ -2,6 +2,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { getNote, type Note } from '../db/notes';
 import { companionProvider } from '../harness/companionClient';
 import {
   MOCK_SCENARIOS,
@@ -20,10 +21,11 @@ import {
   type PreparedRun,
 } from '../harness/runTurn';
 import { cancelRun, latestSession, type HarnessSession } from '../harness/store';
-import type { Note } from '../db/notes';
+type Activity = 'idle' | 'asking' | 'confirming' | 'discarding';
 
 type HarnessPanelProps = {
   notes: readonly Note[];
+  notesDb: SQLiteDatabase;
   selectedIds: readonly number[];
   database: SQLiteDatabase | null;
   databaseError: string | null;
@@ -32,7 +34,7 @@ type HarnessPanelProps = {
 
 const DEFAULT_COMPANION_URL = 'http://127.0.0.1:8787';
 
-export function HarnessPanel({ notes, selectedIds, database, databaseError, onSaved }: HarnessPanelProps) {
+export function HarnessPanel({ notes, notesDb, selectedIds, database, databaseError, onSaved }: HarnessPanelProps) {
   const [companionUrl, setCompanionUrl] = useState(DEFAULT_COMPANION_URL);
   const [token, setToken] = useState('');
   const [prompt, setPrompt] = useState('');
@@ -41,10 +43,16 @@ export function HarnessPanel({ notes, selectedIds, database, databaseError, onSa
   const [proposal, setProposal] = useState<StoredProposal | null>(null);
   const [status, setStatus] = useState('idle');
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [activity, setActivityState] = useState<Activity>('idle');
+  const activityRef = useRef<Activity>('idle');
   const runRef = useRef<PreparedRun | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const operationRef = useRef<string | null>(null);
+
+  function setActivity(next: Activity) {
+    activityRef.current = next;
+    setActivityState(next);
+  }
 
   useEffect(() => {
     if (!database) {
@@ -85,7 +93,10 @@ export function HarnessPanel({ notes, selectedIds, database, databaseError, onSa
       setError('Paste the pairing token from the companion. It stays in memory only.');
       return;
     }
-    setBusy(true);
+    if (activityRef.current !== 'idle') {
+      return;
+    }
+    setActivity('asking');
     setError(null);
     setProposal(null);
     const controller = new AbortController();
@@ -120,7 +131,7 @@ export function HarnessPanel({ notes, selectedIds, database, databaseError, onSa
       setStatus('failed');
       setError(caught instanceof Error ? caught.message : 'Could not ask the companion');
     } finally {
-      setBusy(false);
+      setActivity('idle');
       abortRef.current = null;
     }
   }
@@ -143,19 +154,19 @@ export function HarnessPanel({ notes, selectedIds, database, databaseError, onSa
   }
 
   async function onConfirm() {
-    if (!database || !session || !proposal) {
-      return;
-    }
-    const note = notes.find((item) => item.id === proposal.noteId);
-    if (!note) {
-      setError('The note for this proposal is not open');
+    if (!database || !session || !proposal || activityRef.current !== 'idle') {
       return;
     }
     const operationId = operationRef.current ?? globalThis.crypto.randomUUID();
     operationRef.current = operationId;
-    setBusy(true);
+    setActivity('confirming');
     setError(null);
     try {
+      const note = await getNote(notesDb, proposal.noteId);
+      if (!note) {
+        setError('The note for this proposal is not open');
+        return;
+      }
       await confirmQuestion(harnessExecutor(database), {
         sessionId: session.id,
         note,
@@ -169,24 +180,34 @@ export function HarnessPanel({ notes, selectedIds, database, databaseError, onSa
     } catch (caught: unknown) {
       setError(caught instanceof Error ? caught.message : 'Could not save the answer');
     } finally {
-      setBusy(false);
+      setActivity('idle');
     }
   }
 
   async function onDiscard() {
-    if (!database || !session) {
+    if (!database || !session || activityRef.current !== 'idle') {
       return;
     }
-    await discardQuestion(harnessExecutor(database), session.id);
-    setProposal(null);
-    setStatus('completed');
-    setError('Discarded the proposal. Saved notes were not changed.');
+    setActivity('discarding');
+    try {
+      await discardQuestion(harnessExecutor(database), session.id);
+      setProposal(null);
+      setStatus('completed');
+      setError('Discarded the proposal. Saved notes were not changed.');
+    } catch (caught: unknown) {
+      setError(caught instanceof Error ? caught.message : 'Could not discard the proposal');
+    } finally {
+      setActivity('idle');
+    }
   }
 
   const pending = proposal !== null;
+  const busy = activity !== 'idle';
   const askDisabled = busy || !database || selectedIds.length === 0 || prompt.trim().length === 0 || pending;
   const continueDisabled =
     busy || !database || !session || pending || (session.state !== 'failed' && session.state !== 'cancelled' && session.state !== 'completed');
+  const confirmDisabled = busy;
+  const discardDisabled = busy;
 
   return (
     <View style={styles.box} testID="harness-panel">
@@ -258,11 +279,12 @@ export function HarnessPanel({ notes, selectedIds, database, databaseError, onSa
         </Pressable>
         <Pressable
           accessibilityRole="button"
-          disabled={!busy}
+          accessibilityState={{ disabled: activity !== 'asking' }}
+          disabled={activity !== 'asking'}
           onPress={() => {
             void onCancel();
           }}
-          style={[styles.secondary, !busy ? styles.buttonDisabled : null]}
+          style={[styles.secondary, activity !== 'asking' ? styles.buttonDisabled : null]}
           testID="cancel-button"
         >
           <Text style={styles.secondaryText}>Cancel</Text>
@@ -288,21 +310,24 @@ export function HarnessPanel({ notes, selectedIds, database, databaseError, onSa
           <View style={styles.actions}>
             <Pressable
               accessibilityRole="button"
-              disabled={busy}
+              accessibilityState={{ disabled: confirmDisabled }}
+              disabled={confirmDisabled}
               onPress={() => {
                 void onConfirm();
               }}
-              style={styles.button}
+              style={[styles.button, confirmDisabled ? styles.buttonDisabled : null]}
               testID="confirm-button"
             >
               <Text style={styles.buttonText}>Confirm and save</Text>
             </Pressable>
             <Pressable
               accessibilityRole="button"
+              accessibilityState={{ disabled: discardDisabled }}
+              disabled={discardDisabled}
               onPress={() => {
                 void onDiscard();
               }}
-              style={styles.secondary}
+              style={[styles.secondary, discardDisabled ? styles.buttonDisabled : null]}
               testID="discard-button"
             >
               <Text style={styles.secondaryText}>Discard</Text>

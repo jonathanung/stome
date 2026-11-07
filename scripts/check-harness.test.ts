@@ -1,11 +1,17 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
-import { startCompanion } from '../companion/server.ts';
+import { pairingTtlMs, startCompanion } from '../companion/server.ts';
+import { companionProvider } from '../src/harness/companionClient.ts';
+import { serializedExecutor, type RawSql } from '../src/harness/serialized.ts';
 import {
   SCAFFOLD_ROOM_ID,
   TOOL_REGISTRY,
@@ -43,8 +49,8 @@ import {
 
 const SECRET = 'sk-test-do-not-leak-stome';
 
-function openMemory(): SqlExecutor & { close(): void } {
-  const raw = new DatabaseSync(':memory:');
+function openMemory(file = ':memory:'): SqlExecutor & { close(): void } {
+  const raw = new DatabaseSync(file);
   const db: SqlExecutor & { close(): void } = {
     async exec(sql: string) {
       raw.exec(sql);
@@ -59,10 +65,10 @@ function openMemory(): SqlExecutor & { close(): void } {
     async run(sql: string, params: SqlParams = []) {
       raw.prepare(sql).run(...params);
     },
-    async transaction<T>(fn: () => Promise<T>): Promise<T> {
+    async transaction<T>(fn: (tx: SqlExecutor) => Promise<T>): Promise<T> {
       raw.exec('BEGIN IMMEDIATE');
       try {
-        const value = await fn();
+        const value = await fn(db);
         raw.exec('COMMIT');
         return value;
       } catch (error) {
@@ -523,6 +529,451 @@ test('mock scenarios, timeout, output limit, and the disabled api-key provider',
   db.close();
 });
 
+test('a second confirmed turn survives reopen and the first operation id still replays', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'stome-harness-'));
+  const path = join(dir, 'harness.db');
+  const firstDb = openMemory(path);
+  await migrateHarness(firstDb);
+  const selected = chunk(1);
+  const prepared = await beginQuestion(firstDb, { chunks: [selected], prompt: 'First question' });
+  const proposed = await fulfillQuestion(firstDb, prepared, {
+    chunks: [selected],
+    scenario: 'success',
+    provider: mockProvider,
+    signal: new AbortController().signal,
+  });
+  assert.equal(proposed.status, 'proposal');
+  const saved = await confirmQuestion(firstDb, {
+    sessionId: prepared.sessionId,
+    note: noteFor(selected),
+    operationId: 'op-first',
+    confirmed: true,
+  });
+  assert.equal(saved.replayed, false);
+  firstDb.close();
+
+  const reopened = openMemory(path);
+  await migrateHarness(reopened);
+  const interrupted = await failInterruptedSessions(reopened, 50);
+  assert.equal(interrupted, 0);
+  const session = await getSession(reopened, prepared.sessionId);
+  assert.equal(session?.state, 'completed');
+  assert.equal(session?.confirmedOperationId, 'op-first');
+  const continued = await beginQuestion(reopened, {
+    chunks: [selected],
+    prompt: 'Second question',
+    continueSessionId: prepared.sessionId,
+  });
+  const second = await fulfillQuestion(reopened, continued, {
+    chunks: [selected],
+    scenario: 'success',
+    provider: mockProvider,
+    signal: new AbortController().signal,
+  });
+  assert.equal(second.status, 'proposal');
+  assert.notEqual(second.proposal?.id, proposed.proposal?.id);
+  assert.match(second.proposal?.body ?? '', /Second question/);
+  const savedAgain = await confirmQuestion(reopened, {
+    sessionId: continued.sessionId,
+    note: noteFor(selected),
+    operationId: 'op-second',
+    confirmed: true,
+  });
+  assert.equal(savedAgain.replayed, false);
+  const rows = await listStubAnnotations(reopened);
+  assert.equal(rows.length, 2);
+  assert.deepEqual(
+    rows.map((row) => row.operationId),
+    ['op-first', 'op-second'],
+  );
+  const replay = await confirmQuestion(reopened, {
+    sessionId: continued.sessionId,
+    note: noteFor(selected),
+    operationId: 'op-first',
+    confirmed: true,
+  });
+  assert.equal(replay.replayed, true);
+  assert.equal(replay.annotationId, saved.annotationId);
+  await assert.rejects(
+    () =>
+      confirmQuestion(reopened, {
+        sessionId: continued.sessionId,
+        note: noteFor(selected),
+        operationId: 'op-third',
+        confirmed: true,
+      }),
+    /already saved/,
+  );
+  assert.equal((await listStubAnnotations(reopened)).length, 2);
+  reopened.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('a missing saved note fails the run instead of leaving it running', async () => {
+  const db = await harnessDb();
+  const selected = chunk(1);
+  const prepared = await beginQuestion(db, { chunks: [selected], prompt: 'Where is it' });
+  let called = 0;
+  const outcome = await fulfillQuestion(db, prepared, {
+    chunks: [],
+    scenario: 'success',
+    provider: {
+      async complete() {
+        called += 1;
+        throw new Error('the provider must not run');
+      },
+    },
+    signal: new AbortController().signal,
+  });
+  assert.equal(called, 0);
+  assert.equal(outcome.status, 'failed');
+  assert.equal(outcome.errorCode, 'not_found');
+  assert.equal((await getSession(db, prepared.sessionId))?.state, 'failed');
+  db.close();
+});
+
+test('one queue per database keeps unrelated work out of an open transaction', async () => {
+  const rawDb = new DatabaseSync(':memory:');
+  const raw: RawSql = {
+    async exec(sql) {
+      rawDb.exec(sql);
+    },
+    async get<T>(sql: string, params: SqlParams = []) {
+      return (rawDb.prepare(sql).get(...params) as T | undefined) ?? null;
+    },
+    async all<T>(sql: string, params: SqlParams = []) {
+      return rawDb.prepare(sql).all(...params) as T[];
+    },
+    async run(sql, params = []) {
+      rawDb.prepare(sql).run(...params);
+    },
+  };
+  const first = serializedExecutor(raw);
+  const second = serializedExecutor(raw);
+  assert.equal(first, second);
+  await migrateHarness(first);
+  await createSession(first, {
+    id: 'queue-1',
+    roomId: SCAFFOLD_ROOM_ID,
+    selectedChunkIds: ['note:1'],
+    now: 1,
+  });
+  let release: (() => void) | undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let started = false;
+  const held = first.transaction(async (tx) => {
+    await tx.run("UPDATE harness_sessions SET error_message = 'inside' WHERE id = ?", ['queue-1']);
+    started = true;
+    await gate;
+    const row = await tx.get<{ error_message: string | null }>(
+      'SELECT error_message FROM harness_sessions WHERE id = ?',
+      ['queue-1'],
+    );
+    assert.equal(row?.error_message, 'inside');
+  });
+  while (!started) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  let outsiderDone = false;
+  const outsider = second
+    .run("UPDATE harness_sessions SET error_message = 'outside' WHERE id = ?", ['queue-1'])
+    .then(() => {
+      outsiderDone = true;
+    });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(outsiderDone, false);
+  release?.();
+  await held;
+  await outsider;
+  const after = await first.get<{ error_message: string | null }>(
+    'SELECT error_message FROM harness_sessions WHERE id = ?',
+    ['queue-1'],
+  );
+  assert.equal(after?.error_message, 'outside');
+  const expo = readFileSync(new URL('../src/harness/expoDb.ts', import.meta.url), 'utf8');
+  assert.equal(expo.includes('depth'), false);
+  assert.match(expo, /serializedExecutor/);
+  rawDb.close();
+});
+
+test('confirm, discard, and a duplicate operation stay atomic on the shared queue', async () => {
+  const rawDb = new DatabaseSync(':memory:');
+  const db = serializedExecutor({
+    async exec(sql) {
+      rawDb.exec(sql);
+    },
+    async get<T>(sql: string, params: SqlParams = []) {
+      return (rawDb.prepare(sql).get(...params) as T | undefined) ?? null;
+    },
+    async all<T>(sql: string, params: SqlParams = []) {
+      return rawDb.prepare(sql).all(...params) as T[];
+    },
+    async run(sql, params = []) {
+      rawDb.prepare(sql).run(...params);
+    },
+  });
+  await migrateHarness(db);
+  const selected = chunk(1);
+  const prepared = await beginQuestion(db, { chunks: [selected], prompt: 'Race' });
+  const proposed = await fulfillQuestion(db, prepared, {
+    chunks: [selected],
+    scenario: 'success',
+    provider: mockProvider,
+    signal: new AbortController().signal,
+  });
+  assert.equal(proposed.status, 'proposal');
+  const confirmation = confirmQuestion(db, {
+    sessionId: prepared.sessionId,
+    note: noteFor(selected),
+    operationId: 'op-race',
+    confirmed: true,
+  });
+  const duplicate = confirmQuestion(db, {
+    sessionId: prepared.sessionId,
+    note: noteFor(selected),
+    operationId: 'op-race',
+    confirmed: true,
+  });
+  const discard = discardQuestion(db, prepared.sessionId, 80);
+  const settled = await Promise.allSettled([confirmation, duplicate, discard]);
+  const rows = await listStubAnnotations(db);
+  const session = await getSession(db, prepared.sessionId);
+  const operations = await db.get<{ count: number }>('SELECT COUNT(*) AS count FROM harness_operations');
+  assert.ok(rows.length <= 1);
+  assert.equal(operations?.count, rows.length);
+  if (rows.length === 1) {
+    assert.equal(rows[0]?.operationId, 'op-race');
+    assert.equal(session?.confirmedOperationId, 'op-race');
+    assert.equal(session?.proposal?.id, proposed.proposal?.id);
+    const writes = settled.filter((item) => item.status === 'fulfilled' && item.value && typeof item.value === 'object' && 'annotationId' in item.value);
+    assert.equal(writes.length, 2);
+  } else {
+    assert.equal(session?.proposal, null);
+    assert.equal(session?.confirmedOperationId, null);
+  }
+  for (const item of settled) {
+    if (item.status === 'rejected') {
+      assert.match(String(item.reason), /proposal|already saved/);
+    }
+  }
+
+  const other = await harnessDb();
+  const again = chunk(2, 'other note text');
+  const started = await beginQuestion(other, { chunks: [again], prompt: 'Discard wins' });
+  const ready = await fulfillQuestion(other, started, {
+    chunks: [again],
+    scenario: 'success',
+    provider: mockProvider,
+    signal: new AbortController().signal,
+  });
+  assert.equal(ready.status, 'proposal');
+  await discardQuestion(other, started.sessionId, 90);
+  await assert.rejects(
+    () =>
+      confirmQuestion(other, {
+        sessionId: started.sessionId,
+        note: noteFor(again),
+        operationId: 'op-after-discard',
+        confirmed: true,
+      }),
+    /proposal/,
+  );
+  assert.equal((await listStubAnnotations(other)).length, 0);
+  other.close();
+  rawDb.close();
+});
+
+test('completion and cancel on the shared queue leave no annotation', async () => {
+  const rawDb = new DatabaseSync(':memory:');
+  const db = serializedExecutor({
+    async exec(sql) {
+      rawDb.exec(sql);
+    },
+    async get<T>(sql: string, params: SqlParams = []) {
+      return (rawDb.prepare(sql).get(...params) as T | undefined) ?? null;
+    },
+    async all<T>(sql: string, params: SqlParams = []) {
+      return rawDb.prepare(sql).all(...params) as T[];
+    },
+    async run(sql, params = []) {
+      rawDb.prepare(sql).run(...params);
+    },
+  });
+  await migrateHarness(db);
+  const selected = chunk(1);
+  const prepared = await beginQuestion(db, { chunks: [selected], prompt: 'Overlap' });
+  let release: (() => void) | undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const signal = new AbortController();
+  const pending = fulfillQuestion(db, prepared, {
+    chunks: [selected],
+    scenario: 'success',
+    provider: {
+      async complete(request, inner) {
+        await gate;
+        if (inner.aborted) {
+          throw new Error('aborted');
+        }
+        return mockSuccessOutput(request.input as never);
+      },
+    },
+    signal: signal.signal,
+  });
+  const cancelled = cancelRun(db, { sessionId: prepared.sessionId, runToken: prepared.runToken, now: 60 });
+  signal.abort();
+  release?.();
+  const [didCancel, outcome] = await Promise.all([cancelled, pending]);
+  assert.equal(didCancel, true);
+  assert.notEqual(outcome.status, 'proposal');
+  assert.equal((await getSession(db, prepared.sessionId))?.state, 'cancelled');
+  assert.equal((await getSession(db, prepared.sessionId))?.proposal, null);
+  assert.equal((await listStubAnnotations(db)).length, 0);
+  rawDb.close();
+});
+
+test('the companion client sends the token only to loopback http', async () => {
+  let fetches = 0;
+  let seenUrl = '';
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (url: RequestInfo | URL) => {
+    fetches += 1;
+    seenUrl = String(url);
+    return new Response(JSON.stringify({ ok: true, output: { roomId: 'x' } }), { status: 200 });
+  }) as typeof fetch;
+  const input = {
+    tool: 'notes.proposeAnnotation' as const,
+    input: { roomId: SCAFFOLD_ROOM_ID, prompt: 'x', chunks: [], priorMessages: [] },
+    scenario: 'success' as const,
+  };
+  try {
+    for (const baseUrl of [
+      'https://127.0.0.1:8787',
+      'http://evil.example:8787',
+      'http://user:pass@127.0.0.1:8787',
+      'http://127.0.0.1.evil.example:8787',
+      'file:///tmp/stome',
+      'not a url',
+    ]) {
+      await assert.rejects(
+        () => companionProvider({ baseUrl, token: 'secret-token' }).complete(input, new AbortController().signal),
+        /companion/,
+      );
+    }
+    assert.equal(fetches, 0);
+    await companionProvider({ baseUrl: 'http://127.0.0.1:8787/ignored', token: 'secret-token' }).complete(
+      input,
+      new AbortController().signal,
+    );
+    assert.equal(fetches, 1);
+    assert.equal(seenUrl, 'http://127.0.0.1:8787/v1/tool');
+    await companionProvider({ baseUrl: 'http://localhost:8787', token: 'secret-token' }).complete(
+      input,
+      new AbortController().signal,
+    );
+    assert.equal(fetches, 2);
+    assert.equal(seenUrl, 'http://localhost:8787/v1/tool');
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test('the CLI pairing deadline is fixed at startup and a bad ttl does not listen', async () => {
+  assert.equal(pairingTtlMs(undefined), 2 * 60 * 60 * 1000);
+  assert.throws(() => pairingTtlMs('0'), /STOME_PAIRING_TTL_MS/);
+  assert.throws(() => pairingTtlMs('-5'), /STOME_PAIRING_TTL_MS/);
+  assert.throws(() => pairingTtlMs('nope'), /STOME_PAIRING_TTL_MS/);
+  assert.throws(() => pairingTtlMs('Infinity'), /STOME_PAIRING_TTL_MS/);
+
+  const rejected = await runCli({
+    STOME_PAIRING_TTL_MS: '0',
+    STOME_PAIRING_TOKEN: 'should-not-listen',
+    STOME_COMPANION_PORT: '0',
+  });
+  assert.notEqual(rejected.code, 0);
+  assert.equal(rejected.stdout.includes('listening'), false);
+
+  const ttl = 700;
+  const child = spawn(
+    process.execPath,
+    ['--experimental-strip-types', '--import', './scripts/register-harness.mjs', 'companion/server.ts'],
+    {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      env: {
+        ...process.env,
+        STOME_PAIRING_TTL_MS: String(ttl),
+        STOME_PAIRING_TOKEN: 'cli-pair-token',
+        STOME_COMPANION_PORT: '0',
+        STOME_APP_ORIGIN: 'http://localhost:8081',
+        STOME_PROVIDER: 'mock',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
+  let stdout = '';
+  let stderr = '';
+  child.stdout?.on('data', (chunk: Buffer) => {
+    stdout += chunk.toString();
+  });
+  child.stderr?.on('data', (chunk: Buffer) => {
+    stderr += chunk.toString();
+  });
+  const listening = await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`CLI did not listen\n${stdout}\n${stderr}`)), 8000);
+    const poll = setInterval(() => {
+      if (stdout.includes('listening')) {
+        clearTimeout(timer);
+        clearInterval(poll);
+        resolve();
+      }
+    }, 20);
+    child.once('exit', (code) => {
+      clearTimeout(timer);
+      clearInterval(poll);
+      reject(new Error(`CLI exited ${code} before listening\n${stdout}\n${stderr}`));
+    });
+  });
+  assert.equal(listening, undefined);
+  const port = Number(stdout.match(/http:\/\/127\.0\.0\.1:(\d+)/)?.[1]);
+  const deadline = Number(stdout.match(/Pairing deadline: (\d+)/)?.[1]);
+  assert.ok(port > 0);
+  assert.ok(deadline > 0);
+  const body = JSON.stringify({
+    tool: 'notes.proposeAnnotation',
+    scenario: 'success',
+    input: {
+      roomId: SCAFFOLD_ROOM_ID,
+      prompt: 'Why?',
+      chunks: [{ id: 'note:1', roomId: SCAFFOLD_ROOM_ID, text: 'photosynthesis makes sugar' }],
+      priorMessages: [],
+    },
+  });
+  try {
+    const fresh = await post(`http://127.0.0.1:${port}`, {
+      origin: 'http://localhost:8081',
+      token: 'cli-pair-token',
+      body,
+    });
+    assert.equal(fresh.status, 200);
+    const remaining = deadline - Date.now();
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, remaining) + 150));
+    const stale = await post(`http://127.0.0.1:${port}`, {
+      origin: 'http://localhost:8081',
+      token: 'cli-pair-token',
+      body,
+    });
+    assert.equal(stale.status, 401);
+    assert.match(stale.text, /expired/);
+    assert.equal(stale.text.includes('cli-pair-token'), false);
+  } finally {
+    child.kill('SIGTERM');
+    await new Promise((resolve) => child.once('exit', resolve));
+  }
+});
+
 test('companion allows only the configured origin, token, and loopback host', async () => {
   process.env.STOME_PROVIDER_API_KEY = SECRET;
   const companion = await startCompanion({
@@ -597,6 +1048,33 @@ test('companion allows only the configured origin, token, and loopback host', as
   await companion.close();
   await expired.close();
 });
+
+function runCli(env: Record<string, string>): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  const child = spawn(
+    process.execPath,
+    ['--experimental-strip-types', '--import', './scripts/register-harness.mjs', 'companion/server.ts'],
+    {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      env: { ...process.env, STOME_PROVIDER: 'mock', ...env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
+  return new Promise((resolve) => {
+    let stdout = '';
+    let stderr = '';
+    child.stdout?.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    const timer = setTimeout(() => child.kill('SIGTERM'), 4000);
+    child.once('exit', (code) => {
+      clearTimeout(timer);
+      resolve({ code, stdout, stderr });
+    });
+  });
+}
 
 function post(
   url: string,

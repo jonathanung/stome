@@ -342,6 +342,8 @@ export function assessConfirmedAnnotation(input: {
   if (input.sessionState !== 'completed' || input.proposal === null) {
     throw new HarnessError('proposal_mismatch', 'There is no proposal waiting for confirmation');
   }
+  // confirmedOperationId belongs to the proposal currently stored on the session.
+  // A later turn clears it when that proposal is replaced.
   if (input.confirmedOperationId) {
     throw new HarnessError('already_confirmed', 'This proposal was already saved');
   }

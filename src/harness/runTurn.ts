@@ -136,8 +136,8 @@ export async function fulfillQuestion(
   if (!session || session.state !== 'running' || session.runToken !== prepared.runToken) {
     return result('discarded', session, null, null, null);
   }
-  const chunks = chunksForSavedSelection(session.selectedChunkIds, input.chunks);
   try {
+    const chunks = chunksForSavedSelection(session.selectedChunkIds, input.chunks);
     assertSingleRoomSelection(chunks);
     if (chunks[0]?.roomId !== session.roomId) {
       throw new HarnessError('scope_rejected', 'The selected notes are outside this session room');

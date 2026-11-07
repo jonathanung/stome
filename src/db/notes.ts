@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-import { INSERT_NOTE_SQL, LIST_NOTES_SQL } from './schema';
+import { GET_NOTE_SQL, INSERT_NOTE_SQL, LIST_NOTES_SQL } from './schema';
 
 export type Note = {
   id: number;
@@ -31,6 +31,11 @@ function toNote(row: NoteRow): Note {
 export async function listNotes(db: SQLiteDatabase): Promise<Note[]> {
   const rows = await db.getAllAsync<NoteRow>(LIST_NOTES_SQL);
   return rows.map(toNote);
+}
+
+export async function getNote(db: SQLiteDatabase, id: number): Promise<Note | null> {
+  const row = await db.getFirstAsync<NoteRow>(GET_NOTE_SQL, id);
+  return row ? toNote(row) : null;
 }
 
 export async function createNote(

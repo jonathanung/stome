@@ -1,64 +1,38 @@
 import { openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
 
 import { HARNESS_DATABASE_NAME } from './contract';
+import { serializedExecutor, type RawSql } from './serialized';
 import { failInterruptedSessions, migrateHarness, type SqlExecutor, type SqlParams } from './store';
 
-export function expoExecutor(db: SQLiteDatabase): SqlExecutor {
-  let tail: Promise<void> = Promise.resolve();
-  let depth = 0;
+const rawByDatabase = new WeakMap<SQLiteDatabase, RawSql>();
 
-  // Expo web's execAsync('BEGIN') finalizes statements without waiting, which
-  // races the following COMMIT. Serialize access and use awaited statements.
-  function exclusive<T>(fn: () => Promise<T>): Promise<T> {
-    if (depth > 0) {
-      return fn();
-    }
-    const run = tail.then(async () => {
-      depth += 1;
-      try {
-        return await fn();
-      } finally {
-        depth -= 1;
-      }
-    });
-    tail = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    return run;
+function rawFromExpo(db: SQLiteDatabase): RawSql {
+  const existing = rawByDatabase.get(db);
+  if (existing) {
+    return existing;
   }
-
-  return {
+  const raw: RawSql = {
     exec(sql) {
-      return exclusive(() => db.execAsync(sql));
+      return db.execAsync(sql);
     },
     get<T>(sql: string, params: SqlParams = []) {
-      return exclusive(() => db.getFirstAsync<T>(sql, ...params));
+      return db.getFirstAsync<T>(sql, ...params);
     },
     all<T>(sql: string, params: SqlParams = []) {
-      return exclusive(() => db.getAllAsync<T>(sql, ...params));
+      return db.getAllAsync<T>(sql, ...params);
     },
     async run(sql, params = []) {
-      await exclusive(() => db.runAsync(sql, ...params));
-    },
-    transaction(fn) {
-      return exclusive(async () => {
-        await db.runAsync('BEGIN IMMEDIATE');
-        try {
-          const value = await fn();
-          await db.runAsync('COMMIT');
-          return value;
-        } catch (error) {
-          try {
-            await db.runAsync('ROLLBACK');
-          } catch {
-            // The transaction may already have been rolled back.
-          }
-          throw error;
-        }
-      });
+      await db.runAsync(sql, ...params);
     },
   };
+  rawByDatabase.set(db, raw);
+  return raw;
+}
+
+// One owner per Expo connection. BEGIN/COMMIT go through awaited runAsync
+// because Expo web's execAsync('BEGIN') finalizes the statement too early.
+export function expoExecutor(db: SQLiteDatabase): SqlExecutor {
+  return serializedExecutor(rawFromExpo(db));
 }
 
 let opening: Promise<SQLiteDatabase> | null = null;

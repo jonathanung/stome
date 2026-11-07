@@ -27,13 +27,34 @@ function asCode(value: unknown): HarnessErrorCode {
   return 'provider_error';
 }
 
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
+
+export function assertCompanionUrl(baseUrl: string): string {
+  let url: URL;
+  try {
+    url = new URL(baseUrl);
+  } catch {
+    throw new HarnessError('provider_error', 'The companion address is not a URL');
+  }
+  if (url.protocol !== 'http:') {
+    throw new HarnessError('provider_error', 'The companion must use http on this machine');
+  }
+  if (url.username !== '' || url.password !== '') {
+    throw new HarnessError('provider_error', 'The companion address cannot include credentials');
+  }
+  if (!LOOPBACK_HOSTS.has(url.hostname)) {
+    throw new HarnessError('provider_error', 'The companion must stay on loopback');
+  }
+  return url.origin;
+}
+
 export function companionProvider(options: { baseUrl: string; token: string }): Provider {
-  const baseUrl = options.baseUrl.replace(/\/$/, '');
   return {
     async complete(request: ProviderRequest, signal: AbortSignal): Promise<unknown> {
+      const origin = assertCompanionUrl(options.baseUrl);
       let response: Response;
       try {
-        response = await fetch(`${baseUrl}/v1/tool`, {
+        response = await fetch(`${origin}/v1/tool`, {
           method: 'POST',
           credentials: 'omit',
           signal,

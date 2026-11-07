@@ -249,6 +249,7 @@ export function NotesScreen() {
                 database={harnessDb}
                 databaseError={harnessError}
                 notes={notes}
+                notesDb={db}
                 onSaved={() => {
                   void refresh().then(() => reloadAnnotations());
                 }}

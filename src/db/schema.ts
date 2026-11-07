@@ -10,6 +10,9 @@ export const INSERT_NOTE_SQL =
 export const LIST_NOTES_SQL =
   'SELECT id, title, body, created_at, updated_at FROM notes ORDER BY created_at DESC, id DESC';
 
+export const GET_NOTE_SQL =
+  'SELECT id, title, body, created_at, updated_at FROM notes WHERE id = ?';
+
 export type Migration = {
   version: number;
   sql: string;

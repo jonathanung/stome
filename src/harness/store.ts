@@ -18,7 +18,7 @@ export type SqlExecutor = {
   get<T>(sql: string, params?: SqlParams): Promise<T | null>;
   all<T>(sql: string, params?: SqlParams): Promise<T[]>;
   run(sql: string, params?: SqlParams): Promise<void>;
-  transaction<T>(fn: () => Promise<T>): Promise<T>;
+  transaction<T>(fn: (tx: SqlExecutor) => Promise<T>): Promise<T>;
 };
 
 export const HARNESS_SCHEMA_VERSION = 1;
@@ -195,9 +195,9 @@ export async function migrateHarness(db: SqlExecutor): Promise<void> {
   if (version === HARNESS_SCHEMA_VERSION) {
     return;
   }
-  await db.transaction(async () => {
-    await db.exec(HARNESS_MIGRATION_SQL);
-    await db.exec(`PRAGMA user_version = ${HARNESS_SCHEMA_VERSION}`);
+  await db.transaction(async (tx) => {
+    await tx.exec(HARNESS_MIGRATION_SQL);
+    await tx.exec(`PRAGMA user_version = ${HARNESS_SCHEMA_VERSION}`);
   });
 }
 
@@ -246,8 +246,8 @@ export async function startRun(
   db: SqlExecutor,
   input: { sessionId: string; runToken: string; prompt: string; messageId: string; now: number },
 ): Promise<HarnessSession> {
-  return db.transaction(async () => {
-    const session = await requireSession(db, input.sessionId);
+  return db.transaction(async (tx) => {
+    const session = await requireSession(tx, input.sessionId);
     if (session.state === 'running') {
       throw new HarnessError('busy', 'This session is already asking');
     }
@@ -258,17 +258,21 @@ export async function startRun(
     } else {
       throw new HarnessError('invalid_shape', 'This session cannot start a run');
     }
-    await db.run(
+    // The confirmation flag belongs to the current proposal only. Clearing it
+    // lets the next proposal be confirmed. The previous operation id still
+    // replays, and that proposal id still has its stub row.
+    await tx.run(
       `UPDATE harness_sessions
-       SET state = 'running', run_token = ?, error_code = NULL, error_message = NULL, updated_at = ?
+       SET state = 'running', run_token = ?, error_code = NULL, error_message = NULL,
+           confirmed_operation_id = NULL, updated_at = ?
        WHERE id = ?`,
       [input.runToken, input.now, input.sessionId],
     );
-    await db.run(
+    await tx.run(
       'INSERT INTO harness_messages (id, session_id, role, body, created_at) VALUES (?, ?, ?, ?, ?)',
       [input.messageId, input.sessionId, 'user', input.prompt, input.now],
     );
-    return requireSession(db, input.sessionId);
+    return requireSession(tx, input.sessionId);
   });
 }
 
@@ -276,22 +280,26 @@ export async function completeRun(
   db: SqlExecutor,
   input: { sessionId: string; runToken: string; proposal: StoredProposal; messageId: string; now: number },
 ): Promise<'stored' | 'discarded'> {
-  return db.transaction(async () => {
-    const session = await requireSession(db, input.sessionId);
+  return db.transaction(async (tx) => {
+    const session = await requireSession(tx, input.sessionId);
     if (session.state !== 'running' || session.runToken !== input.runToken) {
       return 'discarded';
     }
-    await db.run(
+    await tx.run(
       `UPDATE harness_sessions
-       SET state = 'completed', run_token = NULL, proposal_json = ?, error_code = NULL, error_message = NULL, updated_at = ?
+       SET state = 'completed', run_token = NULL, proposal_json = ?,
+           confirmed_operation_id = NULL, error_code = NULL, error_message = NULL, updated_at = ?
        WHERE id = ? AND state = 'running' AND run_token = ?`,
       [JSON.stringify(input.proposal), input.now, input.sessionId, input.runToken],
     );
-    const stored = await requireSession(db, input.sessionId);
+    const stored = await requireSession(tx, input.sessionId);
     if (stored.state !== 'completed' || stored.runToken !== null) {
       return 'discarded';
     }
-    await db.run(
+    if (stored.confirmedOperationId !== null) {
+      throw new HarnessError('invalid_shape', 'The new proposal kept a previous confirmation');
+    }
+    await tx.run(
       'INSERT INTO harness_messages (id, session_id, role, body, created_at) VALUES (?, ?, ?, ?, ?)',
       [input.messageId, input.sessionId, 'assistant', input.proposal.body, input.now],
     );
@@ -303,18 +311,18 @@ export async function failRun(
   db: SqlExecutor,
   input: { sessionId: string; runToken: string; code: string; message: string; now: number },
 ): Promise<'stored' | 'discarded'> {
-  return db.transaction(async () => {
-    const session = await requireSession(db, input.sessionId);
+  return db.transaction(async (tx) => {
+    const session = await requireSession(tx, input.sessionId);
     if (session.state !== 'running' || session.runToken !== input.runToken) {
       return 'discarded';
     }
-    await db.run(
+    await tx.run(
       `UPDATE harness_sessions
        SET state = 'failed', run_token = NULL, error_code = ?, error_message = ?, updated_at = ?
        WHERE id = ? AND state = 'running' AND run_token = ?`,
       [input.code, input.message, input.now, input.sessionId, input.runToken],
     );
-    const stored = await requireSession(db, input.sessionId);
+    const stored = await requireSession(tx, input.sessionId);
     return stored.state === 'failed' ? 'stored' : 'discarded';
   });
 }
@@ -323,12 +331,12 @@ export async function cancelRun(
   db: SqlExecutor,
   input: { sessionId: string; runToken: string; now: number },
 ): Promise<boolean> {
-  return db.transaction(async () => {
-    const session = await requireSession(db, input.sessionId);
+  return db.transaction(async (tx) => {
+    const session = await requireSession(tx, input.sessionId);
     if (session.state !== 'running' || session.runToken !== input.runToken) {
       return false;
     }
-    await db.run(
+    await tx.run(
       `UPDATE harness_sessions
        SET state = 'cancelled', run_token = NULL, error_code = 'cancelled', error_message = 'You cancelled this question.', updated_at = ?
        WHERE id = ? AND state = 'running' AND run_token = ?`,
@@ -403,21 +411,28 @@ export async function commitStubAnnotation(
   }
   const annotationId = `stub-${request.opId}`;
   try {
-    return await db.transaction(async () => {
-      const again = await db.get<OperationRow>('SELECT result_json FROM harness_operations WHERE id = ?', [
+    return await db.transaction(async (tx) => {
+      const again = await tx.get<OperationRow>('SELECT result_json FROM harness_operations WHERE id = ?', [
         request.opId,
       ]);
       if (again) {
         return resultFromOperation(again);
       }
-      const session = await requireSession(db, sessionId);
+      const session = await requireSession(tx, sessionId);
       if (session.confirmedOperationId) {
         throw new HarnessError('already_confirmed', 'This proposal was already saved');
       }
       if (session.proposal?.id !== request.payload.proposalId) {
         throw new HarnessError('proposal_mismatch', 'The saved proposal does not match this confirmation');
       }
-      await db.run(
+      const consumed = await tx.get<{ id: string }>(
+        'SELECT id FROM harness_stub_annotations WHERE proposal_id = ?',
+        [request.payload.proposalId],
+      );
+      if (consumed) {
+        throw new HarnessError('already_confirmed', 'This proposal was already saved');
+      }
+      await tx.run(
         `INSERT INTO harness_stub_annotations (
           id, proposal_id, operation_id, room_id, chunk_id, note_id, type, body,
           anchor_start, anchor_end, chunk_revision, created_at
@@ -441,17 +456,24 @@ export async function commitStubAnnotation(
         annotationId,
         operationId: request.opId,
       };
-      await db.run('INSERT INTO harness_operations (id, result_json, created_at) VALUES (?, ?, ?)', [
+      await tx.run('INSERT INTO harness_operations (id, result_json, created_at) VALUES (?, ?, ?)', [
         request.opId,
         JSON.stringify({ ...result }),
         now,
       ]);
-      await db.run(
+      await tx.run(
         `UPDATE harness_sessions
          SET confirmed_operation_id = ?, updated_at = ?
-         WHERE id = ? AND confirmed_operation_id IS NULL`,
+         WHERE id = ? AND confirmed_operation_id IS NULL AND proposal_json IS NOT NULL`,
         [request.opId, now, sessionId],
       );
+      const saved = await tx.get<{ confirmed_operation_id: string | null }>(
+        'SELECT confirmed_operation_id FROM harness_sessions WHERE id = ?',
+        [sessionId],
+      );
+      if (saved?.confirmed_operation_id !== request.opId) {
+        throw new HarnessError('already_confirmed', 'This proposal was already saved');
+      }
       return result;
     });
   } catch (error) {
