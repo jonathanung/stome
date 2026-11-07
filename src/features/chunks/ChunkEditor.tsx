@@ -1,9 +1,11 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 
 import { Button, StoneText, useStoneTheme } from '../../../design-theme/src/primitives';
 import type { Chunk } from '../../data/models';
-import type { AutosaveState } from './autosave';
+import { deleteAfterFlush, type AutosaveController, type AutosaveState } from './autosave';
+import { DraftRevision, saveBodyWithBase } from './draft-revision';
+import { readDraft, syncChunkDraft } from './draft-store';
 import { useAutosave } from './use-autosave';
 
 /** What a parent returns after trying a change: the chunk's new revision, or why it failed. */
@@ -31,34 +33,69 @@ export function ChunkEditor({ chunk, index, count, onSaveBody, onSetSubjects, on
   const theme = useStoneTheme();
   const n = index + 1;
 
-  // The newest revision this editor has written. Ops send max(this, the
-  // revision on screen) so a save that just landed is not reported as stale.
-  const written = useRef(0);
-  const [savedRevision, setSavedRevision] = useState(0);
-  const expected = () => Math.max(chunk.revision, written.current);
-  const wrote = (result: EditResult) => {
-    if (result.ok && result.revision !== undefined) {
-      written.current = Math.max(written.current, result.revision);
-      setSavedRevision(written.current);
-    }
-  };
+  // Draft base is frozen on the first keystroke. Render reads `view`, which
+  // is state copied from that record after each edit or save.
+  const [boot] = useState(() => readDraft(chunk.id));
+  const revisionsRef = useRef<DraftRevision | null>(null);
+  if (revisionsRef.current == null) {
+    const created = new DraftRevision();
+    if (boot) created.restore(boot);
+    revisionsRef.current = created;
+  }
+  const chunkRevision = useRef(chunk.revision);
+  const controllerRef = useRef<AutosaveController | null>(null);
+  const [view, setView] = useState(() => ({
+    written: boot?.writtenRevision ?? 0,
+    frozen: boot?.baseRevision ?? null,
+  }));
+  useEffect(() => {
+    chunkRevision.current = chunk.revision;
+  }, [chunk.revision]);
 
-  const { state, controller } = useAutosave(async (body) => {
-    const result = await onSaveBody(body, expected());
-    wrote(result);
-    return result.ok ? { ok: true } : result;
-  });
+  const onPersist = useCallback((next: AutosaveState) => {
+    const revisions = revisionsRef.current;
+    if (!revisions) return;
+    syncChunkDraft(chunk.id, next, revisions.snapshot());
+  }, [chunk.id]);
+  const { state, controller } = useAutosave(
+    async (body) => {
+      const revisions = revisionsRef.current;
+      if (!revisions) return { ok: false, message: 'editor is not ready' };
+      const outcome = await saveBodyWithBase(
+        revisions,
+        chunkRevision.current,
+        body,
+        () => controllerRef.current?.current.text ?? null,
+        (expected) => onSaveBody(body, expected),
+      );
+      setView({ written: revisions.written, frozen: revisions.frozen });
+      return outcome;
+    },
+    {
+      initial: boot ? { status: boot.status, text: boot.text, error: boot.error } : undefined,
+      onPersist,
+    },
+  );
+  useEffect(() => {
+    controllerRef.current = controller;
+  }, [controller]);
 
-  // Show the typed text until the database has caught up with it; after that
-  // the saved text shows, so a later change made elsewhere is not hidden.
-  const showTyped = state.text !== null && (state.status !== 'saved' || chunk.revision <= savedRevision);
+  // Show the typed text until the database has caught up with it. A dirty or
+  // failed draft stays on screen even when a newer body arrives in props.
+  const showTyped = state.text !== null && (state.status !== 'saved' || chunk.revision <= view.written);
   const body = showTyped ? state.text! : chunk.body;
 
-  /** Tag, move and delete wait for pending text first, so revisions never collide. */
+  /** Tag and move wait for pending text, then use the revision that flush produced. */
   const run = async (change: (rev: number) => Promise<EditResult>) => {
+    const revisions = revisionsRef.current;
+    if (!revisions) return;
     await controller.flush();
-    const result = await change(expected());
-    wrote(result);
+    const sent = revisions.expectedStructural(chunkRevision.current);
+    const result = await change(sent);
+    if (result.ok && result.revision !== undefined) {
+      revisions.noteStructural(sent, result.revision);
+      setView({ written: revisions.written, frozen: revisions.frozen });
+    }
     if (!result.ok) onError(result.message);
   };
 
@@ -87,7 +124,13 @@ export function ChunkEditor({ chunk, index, count, onSaveBody, onSetSubjects, on
         multiline
         textAlignVertical="top"
         value={body}
-        onChangeText={(text) => controller.edit(text)}
+        onChangeText={(text) => {
+          const revisions = revisionsRef.current;
+          if (!revisions) return;
+          revisions.noteEdit(chunk.revision);
+          setView({ written: revisions.written, frozen: revisions.frozen });
+          controller.edit(text);
+        }}
         onBlur={() => void controller.flush()}
         style={[theme.text('reading'), { color: theme.color.text.primary, minHeight: theme.layout.control, padding: 0 }]}
       />
@@ -129,6 +172,11 @@ export function ChunkEditor({ chunk, index, count, onSaveBody, onSetSubjects, on
       </View>
 
       <SaveStatus state={state} onRetry={() => void controller.retry()} />
+      {state.status === 'error' && view.frozen !== null && chunk.revision !== view.frozen ? (
+        <Text style={[theme.text('bodySmall'), { color: theme.color.text.secondary }]}>
+          {`Latest saved note: ${chunk.body}`}
+        </Text>
+      ) : null}
       {children}
 
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: theme.space.md }}>
@@ -143,8 +191,13 @@ export function ChunkEditor({ chunk, index, count, onSaveBody, onSetSubjects, on
             accessibilityLabel={`Delete chunk ${n}`}
             tone="danger"
             onPress={() => {
-              controller.discard();
-              void onDelete(expected()).then((result) => !result.ok && onError(result.message));
+              void deleteAfterFlush(
+                controller,
+                () => revisionsRef.current?.expectedStructural(chunkRevision.current) ?? chunk.revision,
+                onDelete,
+              ).then((result) => {
+                if (!result.ok) onError(result.message);
+              });
             }}
           />
         </View>

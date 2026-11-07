@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { AutosaveController, type AutosaveState, type SaveOutcome } from '../src/features/chunks/autosave.ts';
+import { AutosaveController, settleOnUnmount, type AutosaveState, type SaveOutcome } from '../src/features/chunks/autosave.ts';
 
 /** A fake clock: timers run only when `advance` passes their due time. */
 function fakeTimers() {
@@ -134,4 +134,88 @@ test('discard drops unsaved edits so a later flush saves nothing', async () => {
   await s.clock.advance(800);
   assert.deepEqual(s.saves, []);
   assert.equal(s.last().status, 'saved');
+});
+
+test('flush waits for a draft typed during an in-flight save', async () => {
+  let release!: (outcome: SaveOutcome) => void;
+  const s = setup(() => new Promise<SaveOutcome>((resolve) => {
+    release = resolve;
+  }));
+  s.ctl.edit('A');
+  await s.clock.advance(800);
+  assert.equal(s.saves.length, 1);
+  s.ctl.edit('B');
+
+  let flushed = false;
+  const done = s.ctl.flush().then(() => {
+    flushed = true;
+  });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(flushed, false, 'flush must not resolve when only A has finished');
+
+  release({ ok: true });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(flushed, false, 'B is still in flight');
+  assert.deepEqual(s.saves, ['A', 'B']);
+
+  release({ ok: true });
+  await done;
+  assert.equal(flushed, true);
+  assert.equal(s.last().status, 'saved');
+  assert.equal(s.last().text, 'B');
+  assert.equal(s.clock.pending(), 0);
+});
+
+test('dispose does not reschedule a draft typed during an in-flight save', async () => {
+  let release!: (outcome: SaveOutcome) => void;
+  const s = setup(() => new Promise<SaveOutcome>((resolve) => {
+    release = resolve;
+  }));
+  s.ctl.edit('A');
+  await s.clock.advance(800);
+  s.ctl.edit('B');
+  s.ctl.dispose();
+  release({ ok: true });
+  await new Promise((r) => setImmediate(r));
+
+  assert.deepEqual(s.saves, ['A']);
+  assert.equal(s.last().status, 'unsaved');
+  assert.equal(s.last().text, 'B');
+  assert.equal(s.clock.pending(), 0);
+  await s.clock.advance(60_000);
+  assert.deepEqual(s.saves, ['A'], 'no silent save after dispose');
+});
+
+test('flush of a failed save does not retry, and the text stays', async () => {
+  const s = setup(async () => ({ ok: false, message: 'disk is full' }));
+  s.ctl.edit('keep me');
+  await s.clock.advance(800);
+  assert.equal(s.last().status, 'error');
+
+  await s.ctl.flush();
+  await s.clock.advance(60_000);
+  assert.deepEqual(s.saves, ['keep me']);
+  assert.deepEqual(s.last(), { status: 'error', text: 'keep me', error: 'disk is full' });
+});
+
+test('unmount flush saves a newer draft once and does not arm another timer', async () => {
+  let release!: (outcome: SaveOutcome) => void;
+  const s = setup(() => new Promise<SaveOutcome>((resolve) => {
+    release = resolve;
+  }));
+  s.ctl.edit('A');
+  await s.clock.advance(800);
+  s.ctl.edit('B');
+  const done = settleOnUnmount(s.ctl);
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(s.saves, ['A']);
+  release({ ok: true });
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(s.saves, ['A', 'B']);
+  release({ ok: true });
+  await done;
+  assert.equal(s.last().text, 'B');
+  assert.equal(s.clock.pending(), 0);
+  await s.clock.advance(60_000);
+  assert.equal(s.saves.length, 2);
 });
