@@ -16,6 +16,8 @@ export type ProposedAnswer = {
 export type RoomAskPanelProps = {
   /** e.g. "your ink + 2 chunks". */
   subtitle: string;
+  /** e.g. "Anthropic · claude-opus-5-5 · live". Null while the companion is unknown. */
+  providerLabel?: string | null;
   messages: readonly AskMessage[];
   proposal: ProposedAnswer | null;
   onSend: (text: string) => void;
@@ -38,7 +40,7 @@ export function SourceBadge({ n }: { n: number }) {
 }
 
 /** The right-hand "ask" column of the iPad room split view. */
-export function RoomAskPanel({ subtitle, messages, proposal, onSend, onPin, onDecline, onClose }: RoomAskPanelProps) {
+export function RoomAskPanel({ subtitle, providerLabel, messages, proposal, onSend, onPin, onDecline, onClose }: RoomAskPanelProps) {
   const theme = useStoneTheme();
   const [draft, setDraft] = useState('');
   const send = () => {
@@ -61,6 +63,7 @@ export function RoomAskPanel({ subtitle, messages, proposal, onSend, onPin, onDe
         <View>
           <Text accessibilityRole="header" style={[theme.text('actionTitle'), { color: theme.color.text.primary }]}>ask</Text>
           <Text style={[theme.text('meta'), { color: theme.color.text.tertiary }]}>{subtitle}</Text>
+          {providerLabel ? <Text testID="room-ask-provider" style={[theme.text('meta'), { color: theme.color.text.tertiary }]}>{providerLabel}</Text> : null}
         </View>
         <Pressable accessibilityRole="button" accessibilityLabel="close ask panel" onPress={onClose}
           style={{ width: control, height: control, alignItems: 'center', justifyContent: 'center' }}>
