@@ -1,6 +1,7 @@
 import { randomUUID } from 'expo-crypto';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator, FlatList, KeyboardAvoidingView, Platform,
@@ -87,13 +88,13 @@ export function RoomScreen() {
     color: theme.color.text.primary, fontSize: 16, padding: 12,
   };
 
-  if (loading) return <Screen><ActivityIndicator style={{ marginTop: 40 }} /></Screen>;
-  if (!room) return <Screen><View style={{ padding: 24, gap: 16 }}>
+  if (loading) return <Screen><SafeAreaView style={{ flex: 1 }}><ActivityIndicator style={{ marginTop: 40 }} /></SafeAreaView></Screen>;
+  if (!room) return <Screen><SafeAreaView style={{ flex: 1 }}><View style={{ padding: 24, gap: 16 }}>
     <Text accessibilityRole="alert" style={{ color: theme.color.text.primary }}>This room was not found.</Text>
     <Button label="Back to rooms" onPress={() => router.replace('/')} />
-  </View></Screen>;
+  </View></SafeAreaView></Screen>;
 
-  return <Screen>
+  return <Screen><SafeAreaView style={{ flex: 1 }}>
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
       <FlatList data={chunks} keyExtractor={(chunk) => chunk.id} keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ width: '100%', maxWidth: 760, alignSelf: 'center', padding: 20, paddingBottom: 48, gap: 12 }}
@@ -145,5 +146,5 @@ export function RoomScreen() {
         </View>}
       />
     </KeyboardAvoidingView>
-  </Screen>;
+  </SafeAreaView></Screen>;
 }

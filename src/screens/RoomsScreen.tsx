@@ -1,6 +1,7 @@
 import { randomUUID } from 'expo-crypto';
 import { Link, router, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator, FlatList, KeyboardAvoidingView, Platform,
@@ -68,7 +69,7 @@ export function RoomsScreen() {
     fontSize: 16, minWidth: 0 as const,
   };
 
-  return <Screen>
+  return <Screen><SafeAreaView style={{ flex: 1 }}>
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
       <FlatList
         data={rooms}
@@ -127,5 +128,5 @@ export function RoomsScreen() {
         </View>}
       />
     </KeyboardAvoidingView>
-  </Screen>;
+  </SafeAreaView></Screen>;
 }
