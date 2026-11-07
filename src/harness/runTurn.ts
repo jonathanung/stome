@@ -301,7 +301,7 @@ function gateFailure(code: string, message: string): HarnessError {
   return new HarnessError('invalid_shape', message);
 }
 
-function operationFromAssessment(request: FoundationAnnotationRequest) {
+function operationFromAssessment(request: FoundationAnnotationRequest, quote: string) {
   return {
     opId: request.opId,
     kind: 'annotation.create' as const,
@@ -312,7 +312,12 @@ function operationFromAssessment(request: FoundationAnnotationRequest) {
       chunkId: request.payload.chunkId,
       type: 'ai_answer' as const,
       anchor: { start: request.payload.anchorStart, end: request.payload.anchorEnd },
-      payload: { answer: request.payload.body, proposalId: request.payload.proposalId },
+      payload: {
+        answer: request.payload.body,
+        proposalId: request.payload.proposalId,
+        quote,
+        chunkRevision: request.expectedRevision,
+      },
     },
   };
 }
@@ -393,11 +398,12 @@ export async function confirmFoundationQuestion(
     confirmedOperationId: session.confirmedOperationId,
     chunk: chunkViewFromFoundation(current),
   });
+  const quote = current.body.slice(request.payload.anchorStart, request.payload.anchorEnd);
   const commit = createCommit(app, {
     now: () => now,
     newId: () => globalThis.crypto.randomUUID(),
   });
-  const saved = await commit(operationFromAssessment(request));
+  const saved = await commit(operationFromAssessment(request, quote));
   if (!saved.ok) {
     throw gateFailure(saved.error.code, saved.error.message);
   }
