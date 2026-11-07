@@ -89,7 +89,7 @@ Limits: request text 8,000 characters (prompt + selected note bodies + saved mes
 - Binds `127.0.0.1` only.
 - Requires the configured `Origin` and a pairing token that expires (default two hours). The deadline is computed once at process start. A later request does not extend it. `STOME_PAIRING_TTL_MS` must be a positive finite number of milliseconds.
 - Rejects a non-loopback socket and a `Host` that is not `127.0.0.1` or `localhost` on its port.
-- The app sends the selected text and the token only after the companion URL is `http` on `127.0.0.1`, `localhost`, or `::1`, with no user or password in the URL. Any other scheme or host is rejected before `fetch`.
+- The app sends the selected text and the token only after the companion URL is `http` on `127.0.0.1`, `localhost`, or literal IPv6 loopback, with no user or password in the URL. `http://[::1]` is accepted: the hostname still includes the brackets, and the check reads the address inside them. An IPv4-mapped address such as `::ffff:127.0.0.1` is rejected before `fetch`. The companion process still listens on `127.0.0.1` only.
 - Responses do not contain the pairing token or `STOME_PROVIDER_API_KEY`.
 - While a confirmation is in progress, Ask, Continue, Cancel, and Discard stay disabled. Cancel is only enabled while a question is running.
 

@@ -853,9 +853,15 @@ test('the companion client sends the token only to loopback http', async () => {
   try {
     for (const baseUrl of [
       'https://127.0.0.1:8787',
+      'https://[::1]:8787',
       'http://evil.example:8787',
       'http://user:pass@127.0.0.1:8787',
+      'http://user:pass@[::1]:8787',
       'http://127.0.0.1.evil.example:8787',
+      'http://[2001:db8::1]:8787',
+      'http://[::ffff:127.0.0.1]:8787',
+      'http://[::ffff:7f00:1]:8787',
+      'http://[::2]:8787',
       'file:///tmp/stome',
       'not a url',
     ]) {
@@ -877,6 +883,18 @@ test('the companion client sends the token only to loopback http', async () => {
     );
     assert.equal(fetches, 2);
     assert.equal(seenUrl, 'http://localhost:8787/v1/tool');
+    await companionProvider({ baseUrl: 'http://[::1]:8787/ignored', token: 'secret-token' }).complete(
+      input,
+      new AbortController().signal,
+    );
+    assert.equal(fetches, 3);
+    assert.equal(seenUrl, 'http://[::1]:8787/v1/tool');
+    await companionProvider({ baseUrl: 'http://[0:0:0:0:0:0:0:1]:8787', token: 'secret-token' }).complete(
+      input,
+      new AbortController().signal,
+    );
+    assert.equal(fetches, 4);
+    assert.equal(seenUrl, 'http://[::1]:8787/v1/tool');
   } finally {
     globalThis.fetch = original;
   }
