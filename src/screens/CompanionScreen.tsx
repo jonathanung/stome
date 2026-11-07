@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Badge, Button, Card, Screen, useStoneTheme } from '../../design-theme/src/primitives';
 import { listRooms } from '../data/queries';
 import { expoDriver } from '../db/expo-driver';
-import { DEFAULT_COMPANION_URL, companionLabel, isLiveCompanion, refreshCompanionStatus, updateCompanionSettings, useCompanionSettings } from '../harness/companionSettings';
+import { DEFAULT_COMPANION_URL, PROVIDER_NAMES, companionLabel, isLiveCompanion, refreshCompanionStatus, updateCompanionSettings, useCompanionSettings } from '../harness/companionSettings';
 import { MOCK_SCENARIOS, PROVIDER_LIMITS, type SessionState } from '../harness/contract';
 import { harnessExecutor, openHarnessDatabase } from '../harness/expoDb';
 import { listSessionSummaries, type HarnessSessionSummary } from '../harness/store';
@@ -136,7 +136,7 @@ export function CompanionScreen() {
               {statusLabel ?? 'Not checked yet'}
             </Text>
             {live ? (
-              <Text style={meta}>Live questions go to Anthropic from the companion and cost money. The API key never leaves the companion.</Text>
+              <Text style={meta}>{`Live questions go to ${settings.status ? PROVIDER_NAMES[settings.status.provider] : 'the provider'} from the companion and cost money.`} The API key never leaves the companion.</Text>
             ) : (
               <>
                 <Text style={meta}>{statusLabel ? 'Deterministic, for building and demos. Pick what it does:' : 'Test the connection to see which model answers. Until then the mock scenarios apply:'}</Text>

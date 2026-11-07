@@ -34,7 +34,7 @@ STOME_APP_ORIGIN=http://localhost:8081 STOME_COMPANION_PORT=8787 npm run compani
 | Confirmed AI answer | `annotations` in `stome.db` | `source: 'ai'`, `confirmed: true`. `expectedRevision` is the revision stored on the proposal when it was created. A newer chunk revision rejects the confirm. Replay of that operation id does not insert again |
 | Confirmed AI note edit | `chunks.content` in `stome.db` | `chunk.update`, `source: 'ai'`, `confirmed: true`. The proposal stores the body it read and that revision. Confirm sends that revision, not a newer read. Cancel, discard, refusal, and a stale revision leave the saved text unchanged. Replay does not write again |
 | Legacy demo rows | `stome-harness.db` | Removed by the v3 harness migration. A `note:*` selection still fails confirm and is never copied into `annotations` |
-| Model calls | deterministic mock by default; live Anthropic model when the companion starts with `STOME_PROVIDER=anthropic` | The key stays in the companion process. `npm run check` and CI always use the mock. See [Live mode](#live-mode) |
+| Model calls | deterministic mock by default; a live Anthropic, OpenAI, or xAI model when the companion starts with `STOME_PROVIDER=anthropic`, `openai`, or `xai` | The key stays in the companion process. `npm run check` and CI always use the mock. See [Live mode](#live-mode) |
 
 A companion payload is not a write permission. Confirmation re-reads the chunk, then calls `createCommit`:
 
@@ -58,25 +58,32 @@ A companion payload is not a write permission. Confirmation re-reads the chunk, 
 
 ## Live mode
 
-The companion can answer with a real model. It is opt-in, and every question costs money.
+The companion can answer with a real model from Anthropic (Claude), OpenAI (ChatGPT), or xAI (Grok). It is opt-in, and every question costs money. Pick one vendor per companion process:
 
 ```bash
-ANTHROPIC_API_KEY=... STOME_PROVIDER=anthropic npm run companion
+ANTHROPIC_API_KEY=... STOME_PROVIDER=anthropic npm run companion   # Claude
+OPENAI_API_KEY=...    STOME_PROVIDER=openai    npm run companion   # ChatGPT
+XAI_API_KEY=...       STOME_PROVIDER=xai       npm run companion   # Grok
 ```
 
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `STOME_PROVIDER` | unset (mock) | `anthropic` selects the live provider. `api-key` is a legacy alias. Anything else is the mock. |
-| `STOME_MODEL` | `claude-opus-5-5` | Exact model id, no date suffix. |
-| `STOME_EFFORT` | `medium` | `low`, `medium`, `high`, `xhigh`, or `max`. Sent as `output_config.effort`. |
-| `ANTHROPIC_API_KEY` | none | Resolved by the official SDK, as is an `ant auth login` profile. |
+| `STOME_PROVIDER` | Key | Default `STOME_MODEL` | `STOME_EFFORT` | SDK and API |
+| --- | --- | --- | --- | --- |
+| unset or anything else | none | mock | n/a | deterministic mock |
+| `anthropic` (legacy alias `api-key`) | `ANTHROPIC_API_KEY` or an `ant auth login` profile | `claude-opus-5-5` | `low` … `max`, default `medium`, sent as `output_config.effort` | `@anthropic-ai/sdk`, Messages API |
+| `openai` | `OPENAI_API_KEY` | `gpt-6-astra` | `none` … `max`, default `medium`, sent as `reasoning.effort` | `openai`, Responses API |
+| `xai` | `XAI_API_KEY` | `grok-4.7` | not sent unless set | `openai` SDK at `https://api.x.ai/v1`, Responses API |
 
-- The key and any login profile live only in the companion process. The app never sees them: it holds the pairing token, and `GET /v1/status` reports `{provider, model, live, tools}` and nothing secret. The startup log names the provider and model and says whether the env var is set, never its value.
-- With no credential the first request fails with a `provider_error` ("No Anthropic credentials: set ANTHROPIC_API_KEY or run ant auth login"). The companion does not crash.
-- The provider is `companion/providers/anthropic.ts`, built on `@anthropic-ai/sdk`. It lives under `companion/` so Metro never bundles the SDK. It serves all five tools with structured outputs (`output_config.format`), no `thinking`, no sampling parameters, no forced tool use, and the server-side refusal fallback beta. Retries are capped at 1 so they cannot outlast the 30 s limit; Cancel and the limit abort the HTTP call.
+`STOME_MODEL` overrides the model id for any vendor (for example `gpt-6.1-sol` or `grok-build-0.1`).
+
+- The key lives only in the companion process. The app never sees it: it holds the pairing token, and `GET /v1/status` reports `{provider, model, live, tools}` and nothing secret. The startup log names the provider and model and says whether the key env var is set, never its value.
+- With no key the first question fails with a `provider_error` naming the missing variable. The companion does not crash.
+- The providers live under `companion/providers/` so Metro never bundles an SDK. `shared.ts` holds the vendor-neutral half: one stable system prompt and one JSON schema per tool, quote anchoring, and the tool dispatch. `anthropic.ts` and `openai.ts` (OpenAI and xAI) each make one structured-output call and map their SDK errors.
+- Structured outputs: Anthropic uses `output_config.format`; OpenAI and xAI use `text.format` with `type: 'json_schema'` and `strict: true`. No sampling parameters and no forced tool use. Anthropic also turns on the server-side refusal fallback beta; OpenAI requests send `store: false`. A refusal, content filter, or truncated answer becomes a normalized error.
+- Retries are capped at 1 so they cannot outlast the 30 s limit. Cancel and the limit abort the HTTP call.
 - Note, board, and import text is wrapped in `<content>` delimiters and the model is told it is data, not instructions. Output still goes through the same parsers and scope checks as the mock, and nothing is written without a human confirm.
 - `notes.proposeAnnotation` asks the model for a verbatim quote and computes `anchorStart`/`anchorEnd` with `indexOf`. If the quote is not found, the first sentence (or the whole chunk, if short) is anchored.
-- `npm run check` and CI use the mock and a fake client in `scripts/check-live-provider.test.ts`. No test calls the network.
+- Subscription sign-in (ChatGPT/Codex or Grok plans through OAuth) is not supported; the companion uses API keys only. Codex models are reachable through `STOME_PROVIDER=openai` with `STOME_MODEL` set to a Codex model id.
+- `npm run check` and CI use the mock and fake clients in `scripts/check-live-provider.test.ts` and `scripts/check-openai-provider.test.ts`. No test calls the network.
 
 ## Session states
 

@@ -61,11 +61,19 @@ export async function refreshCompanionStatus(signal?: AbortSignal): Promise<stri
   }
 }
 
+/** Display name per provider; the vendor that receives live questions. */
+export const PROVIDER_NAMES: Record<CompanionStatus['provider'], string> = {
+  mock: 'Deterministic mock',
+  anthropic: 'Anthropic',
+  openai: 'OpenAI',
+  xai: 'xAI',
+};
+
 /** "Anthropic · claude-opus-5-5 · live", "Deterministic mock", or null while unknown. */
 export function companionLabel(status: CompanionStatus | null): string | null {
   if (!status) return null;
   if (!status.live) return 'Deterministic mock';
-  const provider = status.provider === 'anthropic' ? 'Anthropic' : status.provider;
+  const provider = PROVIDER_NAMES[status.provider] ?? status.provider;
   return [provider, status.model, 'live'].filter(Boolean).join(' · ');
 }
 

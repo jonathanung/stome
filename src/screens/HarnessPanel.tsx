@@ -6,6 +6,7 @@ import { createStyles } from '../../design-theme/src/primitives';
 import { expoDriver } from '../db/expo-driver';
 import { companionProvider } from '../harness/companionClient';
 import {
+  PROVIDER_NAMES,
   companionLabel,
   getCompanionSettings,
   isLiveCompanion,
@@ -336,7 +337,7 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
         </Pressable>
       ) : null}
       <Text style={styles.runtime} testID="harness-runtime">
-        {live ? `${providerLabel}. Questions go to Anthropic from the companion and cost money.` : 'Mock companion.'} A confirmed answer is saved on the chunk. An edit replaces one whole note and stays marked AI. Older demo pins stay in the harness file and are not copied.
+        {live ? `${providerLabel}. Questions go to ${companionStatus ? PROVIDER_NAMES[companionStatus.provider] : 'the provider'} from the companion and cost money.` : 'Mock companion.'} A confirmed answer is saved on the chunk. An edit replaces one whole note and stays marked AI. Older demo pins stay in the harness file and are not copied.
       </Text>
       <Text style={styles.help}>Tick chunks in this room. Paste the pairing token here; it is not saved in browser storage.</Text>
       {chunks.length === 0 ? <Text style={styles.help}>Add a note in this room before asking.</Text> : null}

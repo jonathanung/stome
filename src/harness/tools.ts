@@ -307,7 +307,7 @@ export function mockReadToolOutput(tool: ReadToolName, input: unknown): unknown 
 // Companion status, served by GET /v1/status (token required, no secrets).
 
 /** Another vendor is a new member here plus a provider in companion/providers/. */
-export type ProviderKind = 'mock' | 'anthropic';
+export type ProviderKind = 'mock' | 'anthropic' | 'openai' | 'xai';
 
 export type CompanionStatus = {
   provider: ProviderKind;

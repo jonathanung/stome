@@ -229,6 +229,22 @@ export type LiveConfig = { provider: Provider; status: CompanionStatus; banner: 
 
 /** STOME_PROVIDER=anthropic (alias api-key) selects the live provider. Anything else is the mock. */
 export async function liveConfigFromEnv(env: Record<string, string | undefined>): Promise<LiveConfig | null> {
+  if (env.STOME_PROVIDER === 'openai' || env.STOME_PROVIDER === 'xai') {
+    const vendor = env.STOME_PROVIDER;
+    const { createCompatibleProvider, sdkResponsesClient, parseOpenAiEffort, VENDORS } = await import('./providers/openai.ts');
+    const info = VENDORS[vendor];
+    const model = env.STOME_MODEL?.trim() || info.defaultModel;
+    const effort = parseOpenAiEffort(env.STOME_EFFORT);
+    const key = env[info.keyEnv]?.trim() || undefined;
+    const shownEffort = effort ?? (info.sendsEffort ? 'medium' : 'provider default');
+    return {
+      provider: createCompatibleProvider({ vendor, client: sdkResponsesClient(vendor, key), model, effort }),
+      status: { provider: vendor, model, live: true, tools: [...ALLOWED_TOOL_NAMES] },
+      banner: `Provider: ${info.label} ${model} (effort ${shownEffort}). Live model calls cost money. ${info.keyEnv} env var: ${
+        key ? 'set' : 'not set, so every question will fail until it is'
+      }.`,
+    };
+  }
   if (env.STOME_PROVIDER !== 'anthropic' && env.STOME_PROVIDER !== 'api-key') {
     return null;
   }
