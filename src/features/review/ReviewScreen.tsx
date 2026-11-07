@@ -14,6 +14,7 @@ import type { ReviewMark, Room, RoomStage } from '../../data/models';
 import { getChunk, getRoom, latestReviewMark, listChunks } from '../../data/queries';
 import type { ReviewState } from '../../db/schema';
 import { expoDriver } from '../../db/expo-driver';
+import { EMPTY_TALLY, ReviewDone, nextUpSummary, type ReviewTally } from './ReviewDone';
 import { reviewMarkController } from './mark-attempt';
 import { acknowledgeDisplayedCards, reviewQueueOnOpen } from './mark-progress';
 import {
@@ -87,6 +88,11 @@ export function ReviewScreen() {
   const [missing, setMissing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [tally, setTally] = useState<ReviewTally>(EMPTY_TALLY);
+  const [promotedNow, setPromotedNow] = useState(false);
+  const [sessionDue, setSessionDue] = useState<number[]>([]);
+  const [startedAt, setStartedAt] = useState(() => Date.now());
+  const [finishedAt, setFinishedAt] = useState(() => Date.now());
 
   const load = useCallback(async () => {
     if (!roomId) return { missing: true, room: null, cards: [] as ReviewQueueChunk[], scheduled: [] as Scheduled[] };
@@ -127,6 +133,10 @@ export function ReviewScreen() {
         setTotal(next.cards.length);
         setDone(0);
         setOutcomes([]);
+        setTally(EMPTY_TALLY);
+        setPromotedNow(false);
+        setSessionDue([]);
+        setStartedAt(Date.now());
         setScheduled(next.scheduled);
         setSaved(null);
         setError(null);
@@ -208,6 +218,10 @@ export function ReviewScreen() {
           setCards((current) => current.filter((item) => item.id !== seen.id));
           setDone((count) => count + 1);
           setOutcomes((current) => [...current, result.value.state]);
+          setTally((current) => ({ ...current, [result.value.state]: current[result.value.state] + 1 }));
+          setSessionDue((current) => [...current, result.value.dueAt]);
+          setFinishedAt(Date.now());
+          if (promoted) setPromotedNow(true);
         },
       });
       if (reviewMarkController.generation() !== gen) return;
@@ -357,6 +371,17 @@ export function ReviewScreen() {
                       <Text style={[theme.text('nav'), { color: muted }]}>Skip this note</Text>
                     </Pressable>
                   </>
+                ) : total > 0 && done > 0 && tally.got_it + tally.unclear + tally.missed > 0 ? (
+                  <ReviewDone
+                    roomName={room.name}
+                    stage={stage}
+                    promoted={promotedNow}
+                    tally={tally}
+                    minutes={Math.round((finishedAt - startedAt) / 60000)}
+                    nextUp={nextUpSummary(sessionDue, finishedAt)}
+                    onToday={() => router.replace('/today')}
+                    onHome={() => router.replace('/stone')}
+                  />
                 ) : (
                   <EmptyState
                     testID="review-empty"
