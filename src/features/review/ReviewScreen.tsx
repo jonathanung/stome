@@ -83,6 +83,7 @@ export function ReviewScreen() {
   const [done, setDone] = useState(0);
   const [outcomes, setOutcomes] = useState<(ReviewState | 'skipped')[]>([]);
   const [scheduled, setScheduled] = useState<Scheduled[]>([]);
+  const [lastState, setLastState] = useState<Record<string, ReviewState>>({});
   const [saved, setSaved] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [missing, setMissing] = useState(false);
@@ -117,7 +118,9 @@ export function ReviewScreen() {
         dueAt: mark.dueAt,
       }))
       .sort((left, right) => left.dueAt - right.dueAt || left.chunkId.localeCompare(right.chunkId));
-    return { missing: false, room: found, cards, scheduled };
+    const last: Record<string, ReviewState> = {};
+    latest.forEach((mark, id) => { last[id] = mark.state; });
+    return { missing: false, room: found, cards, scheduled, last };
   }, [db, roomId, startChunkId]);
 
   useFocusEffect(useCallback(() => {
@@ -138,6 +141,7 @@ export function ReviewScreen() {
         setSessionDue([]);
         setStartedAt(Date.now());
         setScheduled(next.scheduled);
+        setLastState(next.last ?? {});
         setSaved(null);
         setError(null);
         setLoading(false);
@@ -319,7 +323,7 @@ export function ReviewScreen() {
               </View>
               {card ? (
                 <Text testID="review-progress" style={[theme.text('caption'), { color: tertiary, minWidth: 44, textAlign: 'center', fontVariant: ['tabular-nums'] }]}>
-                  {`Note ${Math.min(done + 1, total)} of ${total}`}
+                  {`${Math.min(done + 1, total)} / ${total}`}
                 </Text>
               ) : null}
             </View>
@@ -338,10 +342,11 @@ export function ReviewScreen() {
                     <View accessibilityLabel="Question" style={[cardStyle, theme.shadow.card]}>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: theme.space.md }}>
                         <Text testID="review-stage" numberOfLines={1} style={[theme.text('eyebrow'), { flex: 1, color: tertiary }]}>
-                          {`${room.name} · Stone stage: ${stage}`}
+                          {lastState[card.id] ? `${room.name} · ${REVIEW_LABEL[lastState[card.id]].toLowerCase()} last time` : `${room.name} · new note`}
                         </Text>
                         <Text testID="review-revision" style={[theme.text('caption'), { color: tertiary }]}>{`Revision ${card.revision}`}</Text>
                       </View>
+                      <Text style={[theme.text('caption'), { color: tertiary }]}>Practice question</Text>
                       {asked.ok ? (
                         <Text testID="review-question" accessibilityRole="header" style={[theme.text('actionTitle'), { color: ink, fontSize: 22, lineHeight: 28, letterSpacing: -0.4 }]}>
                           {asked.question.split('\n')[0]}
