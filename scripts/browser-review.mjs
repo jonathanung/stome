@@ -114,7 +114,7 @@ try {
   await page.click('[aria-label="New room name"]');
   await page.type('[aria-label="New room name"]', 'Biology');
   await clickButton('Create');
-  await page.waitForFunction(() => document.body.innerText.includes('Stone stage: stonehenge'), { timeout: 20000 });
+  await page.waitForFunction(() => document.body.innerText.includes('Stonehenge ·'), { timeout: 20000 });
   const roomUrl = page.url();
 
   await addNote('recover me');
@@ -187,7 +187,7 @@ try {
   await page.waitForFunction(() => {
     const text = document.body.innerText;
     return !location.pathname.includes('/review')
-      && text.includes('Stone stage: brick')
+      && text.includes('Brick ·')
       && text.includes('Review notes')
       && text.includes('Add note');
   }, { timeout: 15000 });
