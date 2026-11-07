@@ -8,12 +8,17 @@ recommendation below. It selects bounded **export routes** for implementation;
 it does not claim that their parsers, assets or device paths have shipped.
 The revised decision for #28 is recorded on parent #17 before #28 closes.
 
-| Source | Selected route and reason | Fidelity and remaining validation |
-| --- | --- | --- |
-| Obsidian / Markdown | Keep individual UTF-8 `.md` imports and reconcile #23 against the existing parser/tests. This remains the lowest-effort text route. | Existing literal-markup behavior and vault/plugin limitations remain. Full vault/ZIP traversal is outside this expansion. |
-| Generic PDF, including GoodNotes PDF exports (#24) | Extract selectable text per page and retain the original as a visual reference. One shared PDF engine avoids separate source-specific PDF implementations. | Positioned text can have incorrect reading order or omit ink. Files without usable text need a clear message or an explicit reference-only route, not fabricated extracted notes. Handwriting/OCR and GoodNotes-export fidelity are not established by this decision. |
-| OneNote offline exports (#25) | Add DOCX, MHT/MHTML and HTML/HTM adapters; route PDF exports through the shared PDF engine. Offline files can be reviewed without registering an OAuth app or connecting a Microsoft account. | Preserve available typed structure and embedded resources, and warn about missing hierarchy, layout, ink or attachments. Export menus vary by client; this is not a promise that each client offers every format. Authentic notebook exports remain acceptance evidence for #25. |
-| Freeform exports (#26) | Route whole-board/scene PDFs and user-provided PNG/JPEG artifacts into visual reference/background imports. | Preserve board/page/scene identity when supplied; exported pixels are not reconstructed editable shapes, connectors or strokes. Authentic board exports and crop/order checks remain acceptance evidence for #26. |
+| Source | Selected route and reason | Effort / risk | Fidelity and remaining validation |
+| --- | --- | --- | --- |
+| Obsidian / Markdown | Keep individual UTF-8 `.md` imports and reconcile #23 against the existing parser/tests. This remains the lowest-effort text route. | Low / low (implemented in #59) | Existing literal-markup behavior and vault/plugin limitations remain. Full vault/ZIP traversal is outside this expansion. |
+| Generic PDF, including GoodNotes PDF exports (#24) | Extract selectable text per page and retain the original as a visual reference. One shared PDF engine avoids separate source-specific PDF implementations. | Medium / medium: a bounded text-layer reader is moderate work; reading order and image-only pages are the main fidelity risks | Positioned text can have incorrect reading order or omit ink. Files without usable text need a clear message or an explicit reference-only route, not fabricated extracted notes. Handwriting/OCR and GoodNotes-export fidelity are not established by this decision; authentic samples are tracked on #72 for #19. |
+| OneNote offline exports (#25) | Add DOCX, MHT/MHTML and HTML/HTM adapters; route PDF exports through the shared PDF engine. Offline files can be reviewed without registering an OAuth app or connecting a Microsoft account. | Medium / medium: three document formats, and export contents vary by client | Preserve available typed structure and embedded resources, and warn about missing hierarchy, layout, ink or attachments. Export menus vary by client; this is not a promise that each client offers every format. Authentic notebook exports remain acceptance evidence for #25. |
+| Freeform exports (#26) | Route whole-board/scene PDFs and user-provided PNG/JPEG artifacts into visual reference/background imports. | Low–medium / low: references reuse the PDF engine and asset storage; no board reconstruction is attempted | Preserve board/page/scene identity when supplied; exported pixels are not reconstructed editable shapes, connectors or strokes. Authentic board exports and crop/order checks remain acceptance evidence for #26. |
+
+All four routes are offline file formats with a specifiable structure, so each
+is parsed deterministically with no model in the loop: the same file always
+yields the same chunks and source fingerprint. The review-before-commit flow
+and the deduplication and conflict rules (#30) depend on that.
 
 These choices follow the documented format routes in the source reports and
 the new user direction. They accept visual references as a useful outcome when
