@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import zlib from "node:zlib";
 import { fileURLToPath } from "node:url";
-import { renderPreview } from "./preview";
+import { previewLede, renderPreview } from "./preview";
 import {
   createTheme,
   navigationTheme,
@@ -323,8 +323,23 @@ test("theme objects and the navigation map follow the palette", () => {
 
 test("preview.html is generated from the tokens", () => {
   const committed = readFileSync(path.join(root, "preview.html"), "utf8");
-  assert.equal(committed, renderPreview());
+  const generated = renderPreview();
+  assert.equal(committed, generated);
   for (const hex of [...Object.values(stoneLight), ...Object.values(stoneDark), paper.slide, sheet.background]) {
     assert.ok(committed.includes(hex), hex);
   }
+  const blanket =
+    "every text token clears 4.5:1 on every background, borders and fills clear 3:1";
+  assert.equal(themeTemplate.includes(blanket), true);
+  assert.equal(generated.includes(blanket), false);
+  assert.equal(generated.includes("every text token"), false);
+  assert.equal(generated.includes("on every background"), false);
+  assert.equal(generated.includes("borders and fills clear 3:1"), false);
+  assert.match(
+    generated,
+    /primary, secondary, and tertiary text clear 4\.5:1 on canvas, surface, surface-alt, and inset/,
+  );
+  assert.match(generated, /hairline borders and disabled text do not meet those ratios/);
+  assert.equal(generated.includes(previewLede), true);
+  assert.equal(previewLede.includes(blanket), false);
 });
