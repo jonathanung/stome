@@ -131,6 +131,15 @@ try {
     }, { timeout: 15000 });
   }
 
+  // Adding a note scrolls to the composer below the notes, so search from the top.
+  await page.evaluate(() => {
+    let node = document.querySelector('[data-testid="chunk-list"]');
+    while (node) {
+      if (node.scrollHeight > node.clientHeight + 40) node.scrollTop = 0;
+      node = node.parentElement;
+    }
+  });
+  await new Promise((resolve) => setTimeout(resolve, 300));
   let targetId = '';
   for (let attempt = 0; attempt < 10 && !targetId; attempt += 1) {
     targetId = await page.evaluate(() => {
