@@ -2,7 +2,7 @@ import { randomUUID } from 'expo-crypto';
 import { Link, usePathname } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
-import { Platform, Pressable, Text, TextInput, View } from 'react-native';
+import { Platform, Pressable, Text, TextInput, View, useWindowDimensions } from 'react-native';
 
 import { useStoneTheme } from '../../../design-theme/src/primitives';
 import { createCommit } from '../../data/commit';
@@ -11,6 +11,7 @@ import { Field, Notice } from '../../ui/kit';
 import { listRooms } from '../../data/queries';
 import { expoDriver } from '../../db/expo-driver';
 import { LAST_ROOM_KEY, canSubmit } from './draft';
+import { captureLayerGeometry } from './geometry';
 import { CAPTURE_SHORTCUT_LABEL, isCaptureShortcut } from './shortcut';
 import {
   CLEANUP_FAILED_MESSAGE,
@@ -134,13 +135,14 @@ export function QuickCapture() {
       ? CLEANUP_FAILED_MESSAGE
       : null;
   const ready = canSubmit(session.draft, session.busy);
+  const viewportWidth = useWindowDimensions().width;
+  const geometry = captureLayerGeometry(viewportWidth, { inset: theme.space.base });
   const layer = {
     position: (Platform.OS === 'web' ? 'fixed' : 'absolute') as 'absolute',
-    right: theme.space.base,
+    right: geometry.right,
     bottom: theme.space.section,
     zIndex: 30,
-    width: 340,
-    maxWidth: '92%' as const,
+    width: geometry.width,
     gap: theme.space.md,
   };
 
