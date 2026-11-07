@@ -60,11 +60,10 @@ export function orderReviewQueue<T extends { id: string }>(
 }
 
 /**
- * Partial stand-in for the review question. HAR.3's mock provider has no
- * review-question tool, and this screen does not invent that contract.
+ * Local fallback question, used when the companion is not paired or fails.
  * The same note text always yields the same local prompt. An empty note errors.
  */
-export function mockReviewQuestion(chunk: { id: string; body: string }):
+export function localReviewQuestion(chunk: { id: string; body: string }):
   | { ok: true; question: string }
   | { ok: false; message: string } {
   const text = chunk.body.trim();
