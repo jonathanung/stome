@@ -7,6 +7,7 @@ import {
   type CitationProposal,
   type SourceChunk,
 } from './citations';
+import { harnessColors } from './harnessColors';
 
 type AnswerCitationsProps = {
   selectedChunkIds: readonly string[];
@@ -17,10 +18,11 @@ type AnswerCitationsProps = {
 
 export function AnswerCitations({ selectedChunkIds, chunks, proposal, onOpen }: AnswerCitationsProps) {
   const theme = useStoneTheme();
+  const colors = harnessColors(theme.color);
   const { citations, problems } = citationsForProposal(selectedChunkIds, chunks, proposal);
   return (
     <View style={{ gap: 6 }}>
-      <Text style={[theme.text('eyebrow'), { color: theme.color.text.tertiary }]}>SOURCES</Text>
+      <Text style={[theme.text('eyebrow'), { color: colors.sourceLabel }]}>SOURCES</Text>
       {citations.map((citation, index) => {
         const label = citation.anchored
           ? `Show cited passage in ${citation.label}`
@@ -60,16 +62,16 @@ export function AnswerCitations({ selectedChunkIds, chunks, proposal, onOpen }: 
               <Text style={{ color: theme.color.text.onFill, fontSize: 11, fontWeight: '700', lineHeight: 14 }}>{index + 1}</Text>
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={[theme.text('label'), { color: theme.color.text.primary, fontWeight: '400', lineHeight: 18 }]}>
+              <Text style={[theme.text('label'), { color: colors.citationLabel, fontWeight: '400', lineHeight: 18 }]}>
                 <Text style={{ fontWeight: '600' }}>{`chunk ${index + 1}`}</Text>
                 {` · ${citation.label}`}
               </Text>
               {citation.anchored ? (
-                <Text style={[theme.text('label'), { color: theme.color.text.secondary, fontWeight: '400', lineHeight: 18 }]} testID={`citation-quote-${citation.chunkId}`}>
+                <Text style={[theme.text('label'), { color: colors.citationQuote, fontWeight: '400', lineHeight: 18 }]} testID={`citation-quote-${citation.chunkId}`}>
                   {`Cited passage: ${citation.quote}`}
                 </Text>
               ) : (
-                <Text style={[theme.text('label'), { color: theme.color.text.secondary, fontWeight: '400', lineHeight: 18 }]}>Included in this question</Text>
+                <Text style={[theme.text('label'), { color: colors.citationQuote, fontWeight: '400', lineHeight: 18 }]}>Included in this question</Text>
               )}
             </View>
           </Pressable>
