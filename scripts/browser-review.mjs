@@ -117,6 +117,36 @@ try {
   await page.waitForFunction(() => document.body.innerText.includes('Stone stage: stonehenge'), { timeout: 20000 });
   const roomUrl = page.url();
 
+  await addNote('recover me');
+  await page.click('[data-testid="open-review"]');
+  await page.waitForFunction(() => document.body.innerText.includes('recover me') && document.body.innerText.includes('Revision 1'), { timeout: 15000 });
+  await page.evaluate(() => { globalThis.__stomeLoseNextReviewReport = true; });
+  await clickButton('Missed');
+  await page.waitForFunction(() => document.body.innerText.includes('Retry the same choice'), { timeout: 15000 });
+  await execSql("UPDATE chunks SET content = 'recover me edited', revision = revision + 1 WHERE content = 'recover me'");
+  await page.click('[data-testid="review-back"]');
+  await page.waitForSelector('[data-testid="open-review"]', { timeout: 15000 });
+  await page.click('[data-testid="open-review"]');
+  await page.waitForFunction(() => document.body.innerText.includes('recover me edited') && document.body.innerText.includes('Revision 2'), { timeout: 15000 });
+  await assertNoPairingToken('review-screen');
+  await shotScreen('review-r2-open', 'review-screen');
+  await clickButton('Missed');
+  await page.waitForFunction(() => {
+    const text = document.body.innerText;
+    return text.includes('recover me edited')
+      && text.includes('Revision 2')
+      && text.includes('This note is still open.')
+      && text.includes('Note 1 of 1');
+  }, { timeout: 15000 });
+  await shotScreen('review-r2-still-open', 'review-screen');
+  await clickButton('Got it');
+  await page.waitForFunction(() => {
+    const text = document.body.innerText;
+    return text.includes('Saved Got it.') && !text.includes('recover me edited');
+  }, { timeout: 15000 });
+  await page.click('[data-testid="review-back"]');
+  await page.waitForSelector('[aria-label="Note content"]', { timeout: 15000 });
+
   await addNote('alpha missed note');
   await addNote('beta unclear note');
   await addNote('gamma got it note');
@@ -268,6 +298,8 @@ try {
     scheduled,
     today: page.url(),
     screenshots: [
+      'review-r2-open.png',
+      'review-r2-still-open.png',
       'review-question.png',
       'review-brick.png',
       'review-reloaded.png',

@@ -12,13 +12,13 @@ import { getChunk, getRoom, latestReviewMark, listChunks } from '../../data/quer
 import type { ReviewState } from '../../db/schema';
 import { expoDriver } from '../../db/expo-driver';
 import { reviewMarkController } from './mark-attempt';
+import { acknowledgeDisplayedCards, reviewQueueOnOpen } from './mark-progress';
 import {
   REVIEW_LABEL,
   chunksReadyToReview,
   deviceTimeZone,
   formatDueAt,
   mockReviewQuestion,
-  orderReviewQueue,
   type ReviewQueueChunk,
 } from './session';
 
@@ -43,6 +43,13 @@ function deferredReviewMark(): Promise<void> | undefined {
   if (!gate) return undefined;
   host.__stomeDeferReviewMarkEntered = true;
   return gate;
+}
+
+function consumeLostReviewReport(): boolean {
+  const host = globalThis as typeof globalThis & { __stomeLoseNextReviewReport?: boolean };
+  if (!host.__stomeLoseNextReviewReport) return false;
+  host.__stomeLoseNextReviewReport = false;
+  return true;
 }
 
 function toCard(chunk: ReviewQueueChunk): ReviewQueueChunk {
@@ -88,7 +95,8 @@ export function ReviewScreen() {
       if (mark) latest.set(chunk.id, mark);
     });
     const ready = chunksReadyToReview(chunks, latest, Date.now());
-    const cards = orderReviewQueue(ready, startChunkId, chunks).map(toCard);
+    const retainedIds = chunks.filter((chunk) => reviewMarkController.retained(chunk.id)).map((chunk) => chunk.id);
+    const cards = reviewQueueOnOpen({ ready, all: chunks, startId: startChunkId, retainedIds }).map(toCard);
     const scheduled = [...latest.values()]
       .filter((mark) => mark.dueAt > Date.now())
       .map((mark) => ({
@@ -162,12 +170,19 @@ export function ReviewScreen() {
           return commit(attempt);
         },
         request: { chunkId: seen.id, state, expectedRevision: seen.revision },
-        report: (result) => {
+        report: (result, attempt) => {
+          if (consumeLostReviewReport()) throw new Error('response lost');
           const was = stageRef.current;
           stageRef.current = result.value.stage;
           const promoted = was === 'stonehenge' && result.value.stage === 'brick' ? ' This room is now brick.' : '';
+          const progress = acknowledgeDisplayedCards({
+            cards: [seen],
+            done: 0,
+            displayedId: seen.id,
+            displayedRevision: seen.revision,
+            markedRevision: attempt.expectedRevision,
+          });
           setStage(result.value.stage);
-          setSaved(`Saved ${REVIEW_LABEL[result.value.state]}. Due ${formatDueAt(result.value.dueAt)}.${promoted}`);
           setScheduled((current) => {
             const next = current.filter((item) => item.chunkId !== result.value.chunkId);
             next.push({
@@ -179,6 +194,11 @@ export function ReviewScreen() {
             next.sort((left, right) => left.dueAt - right.dueAt || left.chunkId.localeCompare(right.chunkId));
             return next;
           });
+          if (!progress.reviewedDisplayedRevision) {
+            setSaved(`The earlier ${REVIEW_LABEL[result.value.state]} mark was saved. This note is still open.`);
+            return;
+          }
+          setSaved(`Saved ${REVIEW_LABEL[result.value.state]}. Due ${formatDueAt(result.value.dueAt)}.${promoted}`);
           setCards((current) => current.filter((item) => item.id !== seen.id));
           setDone((count) => count + 1);
         },

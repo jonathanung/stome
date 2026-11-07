@@ -54,7 +54,7 @@ export function createMarkController() {
     timeZone: () => string;
     commit: (attempt: MarkAttempt) => Promise<CommitResult<'review.mark'>>;
     request: MarkRequest;
-    report: (result: Saved) => void;
+    report: (result: Saved, attempt: MarkAttempt) => void;
   }): Promise<MarkOutcome> {
     const { request } = input;
     if (flights.has(request.chunkId)) return Promise.resolve({ status: 'busy' });
@@ -97,7 +97,7 @@ export function createMarkController() {
           return;
         }
         try {
-          input.report(result);
+          input.report(result, attempt);
         } catch (error) {
           settle({ status: 'ambiguous', error });
           return;
