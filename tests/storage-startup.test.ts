@@ -29,6 +29,26 @@ test('a DOMException name for the same lock is busy even without the Chrome mess
   assert.equal(failure.diagnostic, 'locked');
 });
 
+test('a missing createSyncAccessHandle method is not a competing window', () => {
+  const failure = classifyStorageFailure(new TypeError('handle.createSyncAccessHandle is not a function'));
+  assert.equal(failure.kind, 'unknown');
+  assert.equal(failure.canRetry, true);
+  assert.equal(failure.diagnostic, 'handle.createSyncAccessHandle is not a function');
+  assert.equal(failure.title.includes('another window'), false);
+  assert.equal(failure.title.includes("can't store"), false);
+});
+
+test('a permission or security failure that names the method is not busy', () => {
+  const message =
+    "Failed to execute 'createSyncAccessHandle' on 'FileSystemFileHandle': The request is not allowed by the user agent or the platform in the current context.";
+  const failure = classifyStorageFailure({ name: 'NotAllowedError', message });
+  assert.equal(failure.kind, 'unknown');
+  assert.equal(failure.canRetry, true);
+  assert.equal(failure.diagnostic, message);
+  assert.equal(failure.title.includes('another window'), false);
+  assert.equal(failure.message.includes('unsupported'), false);
+});
+
 test('a page without navigator.storage is unsupported and has no retry', () => {
   const failure = classifyStorageFailure(new Error(UNSUPPORTED_MESSAGE));
   assert.equal(failure.kind, 'unsupported');

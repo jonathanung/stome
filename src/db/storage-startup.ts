@@ -6,6 +6,9 @@
  * "Failed to execute 'createSyncAccessHandle' on 'FileSystemFileHandle':
  * Access Handles cannot be created if there is another open Access Handle
  * or Writable stream associated with the same file."
+ * Busy matches that lock sentence, or the name NoModificationAllowedError.
+ * Mentioning createSyncAccessHandle is not enough: a missing method or a
+ * permission failure can name it without being that lock.
  *
  * Unsupported: Chromium threw this on an insecure origin, where
  * `navigator.storage` is missing:
@@ -27,7 +30,9 @@ export type StorageFailure = {
   canRetry: boolean;
 };
 
-const BUSY_SNIPPETS = ['createSyncAccessHandle', 'Access Handles cannot be created'] as const;
+/** The lock sentence Chromium attached to the failed sync-access call. The method name alone is not this lock. */
+const BUSY_LOCK_MESSAGE =
+  'Access Handles cannot be created if there is another open Access Handle or Writable stream associated with the same file.';
 
 const UNSUPPORTED_SNIPPETS = [
   'navigator.storage not available',
@@ -60,7 +65,7 @@ function includesSnippet(text: string, snippets: readonly string[]): boolean {
 export function classifyStorageFailure(error: unknown): StorageFailure {
   const { name, message } = errorParts(error);
   const diagnostic = message || name || 'Unknown error';
-  const busy = name === 'NoModificationAllowedError' || includesSnippet(message, BUSY_SNIPPETS);
+  const busy = name === 'NoModificationAllowedError' || message.includes(BUSY_LOCK_MESSAGE);
   if (busy) {
     return {
       kind: 'busy',
