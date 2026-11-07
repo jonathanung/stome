@@ -206,6 +206,9 @@ const REVIEW_DUE_MS: Record<ReviewState, number> = {
   got_it: 3 * DAY_MS,
 };
 
+/** One review_marks row is one credit: a chunk on one local day. */
+const BRICK_CREDIT_COUNT = 3;
+
 function timeZone(value: unknown): string {
   if (typeof value !== 'string') return reject('invalid', 'time zone must be text');
   const zone = value.trim();
@@ -401,7 +404,7 @@ async function apply(db: Db, op: Operation, n: Normalized, deps: CommitDeps): Pr
     }
     case 'review.mark': {
       const { chunkId, state, timeZone: zone } = n.payload;
-      const chunk = await db.get<RevisionRow>('SELECT revision FROM chunks WHERE id = ?', [chunkId]);
+      const chunk = await db.get<RevisionRow & { room_id: string }>('SELECT revision, room_id FROM chunks WHERE id = ?', [chunkId]);
       await expectRevision(chunk, op.expectedRevision, 'chunk');
       const day = localDay(now, zone);
       const dueAt = now + REVIEW_DUE_MS[state];
@@ -415,7 +418,21 @@ async function apply(db: Db, op: Operation, n: Normalized, deps: CommitDeps): Pr
            time_zone = excluded.time_zone`,
         [chunkId, day, state, now, dueAt, zone],
       );
-      return { chunkId, state, localDay: day, markedAt: now, dueAt, timeZone: zone };
+      const credits = await db.get<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM review_marks
+         JOIN chunks ON chunks.id = review_marks.chunk_id
+         WHERE chunks.room_id = ?`,
+        [chunk!.room_id],
+      );
+      const room = await db.get<{ stage: string }>('SELECT stage FROM rooms WHERE id = ?', [chunk!.room_id]);
+      if (!room) reject('not_found', 'room does not exist');
+      if (room!.stage !== 'stonehenge' && room!.stage !== 'brick') reject('not_found', 'room does not exist');
+      let stage: 'stonehenge' | 'brick' = room!.stage === 'brick' ? 'brick' : 'stonehenge';
+      if ((credits?.n ?? 0) >= BRICK_CREDIT_COUNT && stage === 'stonehenge') {
+        await run(`UPDATE rooms SET stage = 'brick', updated_at = ? WHERE id = ? AND stage = 'stonehenge'`, [now, chunk!.room_id]);
+        stage = 'brick';
+      }
+      return { chunkId, state, localDay: day, markedAt: now, dueAt, timeZone: zone, stage };
     }
   }
 }
