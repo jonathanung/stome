@@ -25,8 +25,9 @@
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
-    "check": "npm run typecheck && npm run lint && npm test",
-    "test": "node --experimental-sqlite --experimental-strip-types --disable-warning=ExperimentalWarning --test \"tests/**/*.test.ts\""
+    "check": "npm run typecheck && npm run lint && npm test && npm run check:writes",
+    "test": "node --experimental-sqlite --experimental-strip-types --disable-warning=ExperimentalWarning --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test \"tests/**/*.test.ts\"",
+    "check:writes": "node --experimental-strip-types --disable-warning=ExperimentalWarning --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-writes.ts"
   },
   "engines": {
     "node": "22.23.4"
