@@ -10,7 +10,7 @@
  */
 
 import type { Db, SqlValue } from '../db/driver.ts';
-import { ANNOTATION_TYPES } from '../db/schema.ts';
+import { ANNOTATION_TYPES, REVIEW_STATES, type ReviewState } from '../db/schema.ts';
 import {
   LIMITS,
   NEEDS_REVISION,
@@ -185,7 +185,52 @@ function normalize(op: Operation): Normalized {
     }
     case 'annotation.delete':
       return { kind: op.kind, payload: { annotationId: requireId(p.annotationId, 'annotationId') } };
+    case 'review.mark':
+      if (!(REVIEW_STATES as readonly string[]).includes(String(p.state))) reject('invalid', 'review state must be missed, unclear, or got_it');
+      return {
+        kind: op.kind,
+        payload: {
+          chunkId: requireId(p.chunkId, 'chunkId'),
+          state: p.state as ReviewState,
+          timeZone: timeZone(p.timeZone),
+        },
+      };
   }
+}
+
+const MINUTE_MS = 60_000;
+const DAY_MS = 24 * 60 * MINUTE_MS;
+const REVIEW_DUE_MS: Record<ReviewState, number> = {
+  missed: 10 * MINUTE_MS,
+  unclear: DAY_MS,
+  got_it: 3 * DAY_MS,
+};
+
+function timeZone(value: unknown): string {
+  if (typeof value !== 'string') return reject('invalid', 'time zone must be text');
+  const zone = value.trim();
+  if (zone.length === 0 || zone.length > 64) return reject('invalid', 'time zone must be a recognized IANA name');
+  try {
+    Intl.DateTimeFormat('en-US', { timeZone: zone }).format();
+  } catch {
+    return reject('invalid', 'time zone must be a recognized IANA name');
+  }
+  return zone;
+}
+
+/** Calendar day of `now` in `zone`, as YYYY-MM-DD. */
+function localDay(now: number, zone: string): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: zone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(now));
+  const year = parts.find((part) => part.type === 'year')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+  const day = parts.find((part) => part.type === 'day')?.value;
+  if (!year || !month || !day) return reject('invalid', 'time zone must be a recognized IANA name');
+  return `${year}-${month}-${day}`;
 }
 
 function checkAnchor(type: string, anchor: Record<string, unknown>, body: string): void {
@@ -353,6 +398,24 @@ async function apply(db: Db, op: Operation, n: Normalized, deps: CommitDeps): Pr
       const deleted = await run('DELETE FROM annotations WHERE id = ?', [annotationId]);
       if (deleted.changes === 0) reject('not_found', 'annotation does not exist');
       return { annotationId };
+    }
+    case 'review.mark': {
+      const { chunkId, state, timeZone: zone } = n.payload;
+      const chunk = await db.get<RevisionRow>('SELECT revision FROM chunks WHERE id = ?', [chunkId]);
+      await expectRevision(chunk, op.expectedRevision, 'chunk');
+      const day = localDay(now, zone);
+      const dueAt = now + REVIEW_DUE_MS[state];
+      await run(
+        `INSERT INTO review_marks (chunk_id, local_day, state, marked_at, due_at, time_zone)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (chunk_id, local_day) DO UPDATE SET
+           state = excluded.state,
+           marked_at = excluded.marked_at,
+           due_at = excluded.due_at,
+           time_zone = excluded.time_zone`,
+        [chunkId, day, state, now, dueAt, zone],
+      );
+      return { chunkId, state, localDay: day, markedAt: now, dueAt, timeZone: zone };
     }
   }
 }
