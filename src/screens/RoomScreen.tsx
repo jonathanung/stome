@@ -4,7 +4,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
 import {
-  ActivityIndicator, FlatList, KeyboardAvoidingView, Platform,
+  ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Platform,
   Text, TextInput, View, useWindowDimensions,
 } from 'react-native';
 
@@ -250,8 +250,14 @@ export function RoomScreen() {
         contentContainerStyle={[column, { paddingTop: theme.space.md, paddingBottom: 120, gap: theme.space.xl }]}
         ListHeaderComponent={<View style={{ gap: theme.space.section, marginBottom: theme.space.base }}>
           {phone ? <View style={{ gap: theme.space.lg }}>
-            <PhoneRoomHeader name={room.name} status={`${stageName(room.stage)} · ${chunks.length} ${chunks.length === 1 ? 'chunk' : 'chunks'}`}
-              onBack={() => router.replace('/')} onReview={() => router.push(`/rooms/${room.id}/review`)} />
+            <PhoneRoomHeader name={room.name} status={`${stageName(room.stage)} · saved`}
+              onBack={() => router.replace('/')} onReview={() => router.push(`/rooms/${room.id}/review`)}
+              onOptions={() => Alert.alert(room.name, undefined, [
+                { text: 'Review this room', onPress: () => router.push(`/rooms/${room.id}/review`) },
+                { text: 'Slides', onPress: () => router.push(`/rooms/${room.id}/slides`) },
+                { text: 'Whiteboard', onPress: () => router.push(`/rooms/${room.id}/whiteboard`) },
+                { text: 'Cancel', style: 'cancel' },
+              ])} />
             <RoomTabs value={tab} onChange={setTab} />
             {tab === 'notes' ? <SubjectChips subjects={subjects} value={activeSubject} onChange={setSubject} /> : null}
           </View> : <>
