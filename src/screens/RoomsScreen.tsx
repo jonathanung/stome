@@ -110,6 +110,7 @@ export function RoomsScreen() {
     <Group>
       <Shortcut icon="today" title="Today" subtitle="Notes due for review" onPress={() => router.push('/today')} testID="open-today" />
       <Shortcut icon="clock" title="Recent notes" subtitle="What you edited last, across rooms" onPress={() => router.push('/recent')} />
+      <Shortcut icon="spark" title="AI companion" subtitle="Pair, pick a model, see saved sessions" onPress={() => router.push('/companion')} />
       <Shortcut icon="upload" title="Import Markdown" subtitle="Bring notes in from .md files" onPress={() => router.push('/import')} />
     </Group>
 

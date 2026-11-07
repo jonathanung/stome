@@ -5,6 +5,7 @@ import { createStyles } from '../../design-theme/src/primitives';
 
 import { expoDriver } from '../db/expo-driver';
 import { companionProvider } from '../harness/companionClient';
+import { updateCompanionSettings, useCompanionSettings } from '../harness/companionSettings';
 import {
   MOCK_SCENARIOS,
   chunkViewFromFoundation,
@@ -42,18 +43,17 @@ type HarnessPanelProps = {
 
 type Activity = 'idle' | 'asking' | 'confirming' | 'discarding';
 
-const DEFAULT_COMPANION_URL = 'http://127.0.0.1:8787';
-
 export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }: HarnessPanelProps) {
   const styles = useStyles();
   const [database, setDatabase] = useState<SQLiteDatabase | null>(null);
   const [databaseError, setDatabaseError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [companionUrl, setCompanionUrl] = useState(DEFAULT_COMPANION_URL);
-  const [token, setToken] = useState('');
+  const { url: companionUrl, token, scenario } = useCompanionSettings();
+  const setCompanionUrl = (url: string) => updateCompanionSettings({ url });
+  const setToken = (next: string) => updateCompanionSettings({ token: next });
+  const setScenario = (next: MockScenario) => updateCompanionSettings({ scenario: next });
   const [prompt, setPrompt] = useState('');
   const [purpose, setPurpose] = useState<NotePurpose>('answer');
-  const [scenario, setScenario] = useState<MockScenario>('success');
   const [session, setSession] = useState<HarnessSession | null>(null);
   const [proposal, setProposal] = useState<StoredProposal | null>(null);
   const [status, setStatus] = useState('idle');
