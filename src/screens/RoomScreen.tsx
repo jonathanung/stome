@@ -103,6 +103,7 @@ export function RoomScreen() {
             <Text style={{ color: theme.color.text.secondary }}>← All rooms</Text>
           </Pressable>
           <Text accessibilityRole="header" style={{ color: theme.color.text.primary, fontSize: 32, fontWeight: '700' }}>{room.name}</Text>
+          <Text style={{ color: theme.color.text.secondary }}>Stone stage: {room.stage}</Text>
           <Text style={{ color: theme.color.text.primary, fontSize: 20, fontWeight: '600', marginTop: 8 }}>Notes</Text>
           <TextInput accessibilityLabel="Note content" placeholder="Write a note chunk" placeholderTextColor={theme.color.text.tertiary}
             multiline textAlignVertical="top" value={content} onChangeText={setContent} style={[input, { minHeight: 100 }]} />
