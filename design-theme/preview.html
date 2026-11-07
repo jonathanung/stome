@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stome design theme</title>
+<style>
+@font-face{font-family:Inter;src:url("fonts/inter-latin.woff2") format("woff2");font-weight:100 900;font-display:swap}
+@font-face{font-family:Outfit;src:url("fonts/outfit-latin.woff2") format("woff2");font-weight:700 900;font-display:swap}
+@font-face{font-family:Caveat;src:url("fonts/caveat-500-latin.woff2") format("woff2");font-weight:500;font-display:swap}
+@font-face{font-family:Caveat;src:url("fonts/caveat-700-latin.woff") format("woff");font-weight:700;font-display:swap}
+*{box-sizing:border-box}
+body{margin:0;background:#b9b3a6;color:#24221e;font-family:Inter,sans-serif}
+.sheet{position:relative;width:1440px;box-sizing:border-box;padding:64px;display:flex;flex-direction:column;gap:40px;overflow:hidden}
+.sheet>svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;mix-blend-mode:multiply;opacity:0.28}
+header{position:relative;display:flex;justify-content:space-between;align-items:flex-end;gap:40px}
+.kicker{margin:0;font:600 11px/14px Inter,sans-serif;letter-spacing:0.8px;color:#3a3731}
+h1{margin:0;font:900 64px/68px Outfit,sans-serif;letter-spacing:-2px}
+.lede{margin:0;max-width:680px;font:400 17px/24px Inter,sans-serif;color:#3a3731}
+.intro{display:flex;flex-direction:column;gap:12px}
+.compare{display:flex;gap:12px}
+.swatchcol{display:flex;flex-direction:column;gap:6px;align-items:center}
+.strip{display:flex;border-radius:14px;overflow:hidden;border:1px solid #8f897c}
+.strip i{width:40px;height:64px;display:block}
+.swatchcol span{font:500 12px/16px Inter,sans-serif;color:#3a3731}
+.panels{position:relative;display:flex;gap:32px;align-items:stretch}
+.light{--canvas:#d8d3c8;--surface:#e8e4da;--alt:#cfc9bd;--inset:#c8c2b5;--inverse:#24221e;--primary:#24221e;--secondary:#46423b;--tertiary:#524d44;--disabled:#a39d90;--hair:#c2bcaf;--strong:#6a6458;--accent:#33302a;--accentfg:#e8e4da;--sf:#4a6e36;--st:#365428;--sw:#cdd5ba;--wf:#8a6410;--wt:#5f4506;--ww:#e2d4a8;--df:#a3472a;--dt:#843219;--dw:#e4cbbd;--onfill:#f3f0e8;--shadow:0 2px 12px rgba(36,34,30,0.08);--grain:multiply;--grainop:0.22}
+.dark{--canvas:#1b1c1a;--surface:#252622;--alt:#2f302b;--inset:#383933;--inverse:#e6e2d8;--primary:#e6e2d8;--secondary:#bdb8ad;--tertiary:#aaa59a;--disabled:#4c4b45;--hair:#383933;--strong:#8c887e;--accent:#e6e2d8;--accentfg:#1b1c1a;--sf:#8fb06a;--st:#aecb8e;--sw:#232d1c;--wf:#d6a63a;--wt:#e8c46a;--ww:#312910;--df:#e27a52;--dt:#f2987c;--dw:#382119;--onfill:#141412;--shadow:none;--grain:screen;--grainop:0.1}
+.panel{position:relative;overflow:hidden;background:var(--canvas);color:var(--primary);border-radius:28px;flex:1;min-width:0}
+.grain{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;mix-blend-mode:var(--grain);opacity:var(--grainop)}
+.inner{position:relative;padding:32px;display:flex;flex-direction:column;gap:24px}
+.panel h2{margin:0;font:800 26px/32px Outfit,sans-serif;letter-spacing:-0.6px}
+.eyebrow{font:600 11px/14px Inter,sans-serif;letter-spacing:0.8px;color:var(--tertiary);margin:0}
+.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+.thirds{grid-template-columns:repeat(3,1fr)}
+.sw{display:flex;flex-direction:column;gap:6px}
+.chip{height:64px;border-radius:14px;border:1px solid var(--hair)}
+.nm{font:500 12px/16px Inter,sans-serif;color:var(--primary)}
+.hx{font:400 12px/16px Inter,sans-serif;color:var(--tertiary);font-variant-numeric:tabular-nums}
+.aa{height:64px;border-radius:14px;background:var(--surface);border:1px solid var(--hair);display:flex;align-items:center;justify-content:center;font:800 26px/32px Outfit,sans-serif}
+.card{background:var(--surface);border-radius:24px;padding:20px;box-shadow:var(--shadow);border:1px solid var(--hair);display:flex;flex-direction:column;gap:16px}
+.row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:2px 10px 2px 8px;border-radius:999px;font:500 12px/16px Inter,sans-serif}
+.tile{width:28px;height:28px;border-radius:7px}
+.ghost{border:1px solid var(--hair)}
+.btn{min-height:44px;padding:0 20px;border-radius:14px;border:0;font:600 17px/24px Inter,sans-serif}
+.ghostbtn{background:transparent;color:var(--primary);border:1px solid var(--strong)}
+.stat{display:flex;height:64px;border-radius:14px;overflow:hidden}
+.stat span{flex:1;display:flex;align-items:center;justify-content:center;font:700 15px/20px Inter,sans-serif}
+.label{display:flex;align-items:center;justify-content:center;font:600 15px/20px Inter,sans-serif}
+.split{display:flex;justify-content:space-between;align-items:baseline}
+h3{margin:0;font:700 22px/28px Outfit,sans-serif;letter-spacing:-0.4px;color:var(--primary)}
+.quiet{font:400 15px/20px Inter,sans-serif;color:var(--tertiary)}
+.surfaces{position:relative;display:grid;grid-template-columns:1.1fr 0.9fr 0.9fr;gap:16px}
+.paper{background:#e8e4da;border:1px solid #c2bcaf;border-radius:24px;box-shadow:0 2px 12px rgba(36,34,30,0.08);padding:28px 32px}
+.paper h2{margin:0 0 8px;font:800 32px/38px Outfit,sans-serif;letter-spacing:-0.8px}
+.paper p{margin:0 0 12px;font:400 17px/28px Inter,sans-serif}
+mark{background:#e2d4a8;color:inherit;border-radius:4px;padding:1px 2px;box-shadow:inset 0 -2px 0 #8a6410}
+.ask{display:flex;align-items:center;gap:12px;padding:8px 8px 8px 20px;background:#e8e4da;border:1px solid #c2bcaf;border-radius:24px;box-shadow:0 2px 12px rgba(36,34,30,0.08)}
+.ask span{flex:1;font:400 17px/24px Inter,sans-serif;color:#524d44}
+.ask button{min-height:44px;padding:0 18px;border-radius:14px;border:0;background:#33302a;color:#e8e4da;font:600 15px/20px Inter,sans-serif}
+.sticky{padding:14px 16px;border-radius:6px;font:500 22px/26px Caveat,cursive;color:#24221e;box-shadow:0 3px 8px rgba(36,34,30,0.14)}
+.note{background:#e8e4da;border:1px solid #c2bcaf;border-radius:20px;box-shadow:0 8px 28px rgba(36,34,30,0.16);padding:16px;display:flex;flex-direction:column;gap:10px;font:400 14px/20px Inter,sans-serif}
+.q{align-self:flex-end;max-width:90%;background:#33302a;color:#e8e4da;padding:10px 14px;border-radius:16px 16px 4px 16px;font:400 15px/21px Inter,sans-serif}
+.slide{background:#f3f0e8;border-radius:10px;box-shadow:0 8px 28px rgba(36,34,30,0.16);padding:28px 32px}
+.slide b{display:block;font:800 30px/36px Outfit,sans-serif;color:#24221e}
+.slide p{margin:8px 0 0;font:400 14px/19px Inter,sans-serif;color:#24221e}
+.hd{margin-top:12px;background:#e0dcd2;color:#46423b;font:600 13px/18px Inter,sans-serif;padding:8px 10px;border-radius:6px}
+.col{display:flex;flex-direction:column;gap:12px}
+.cap{font:600 11px/14px Inter,sans-serif;letter-spacing:0.8px;color:#3a3731;margin:0}
+</style>
+</head>
+<body>
+<div class="sheet">
+<svg aria-hidden="true"><filter id="bgGrain"><feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="3" stitchTiles="stitch"></feTurbulence><feColorMatrix values="0 0 0 0 0.2 0 0 0 0 0.19 0 0 0 0 0.16 0 0 0 0.7 0"></feColorMatrix></filter><filter id="bgMottle"><feTurbulence type="fractalNoise" baseFrequency="0.008" numOctaves="4" seed="7"></feTurbulence><feColorMatrix values="0 0 0 0 0.35 0 0 0 0 0.38 0 0 0 0 0.28 0 0 0 1.4 -0.55"></feColorMatrix></filter><rect width="100%" height="100%" filter="url(#bgMottle)"></rect><rect width="100%" height="100%" filter="url(#bgGrain)"></rect></svg>
+<header>
+<div class="intro">
+<svg width="72" height="48" viewBox="0 0 72 48" role="img" aria-label="trilithon mark"><rect x="4" y="2" width="64" height="11" rx="2" fill="#33302a"></rect><rect x="9" y="16" width="16" height="32" rx="2" fill="#33302a"></rect><rect x="47" y="16" width="16" height="32" rx="2" fill="#33302a"></rect></svg>
+<p class="kicker">fork of daily · stonehenge</p>
+<h1>daily stone</h1>
+<p class="lede">sarsen and chalk under an overcast sky. the neutrals are weathered stone, and status borrows from the field around it: moss for done, yellow lichen for at risk, iron rust for missed. emphasis is still inversion. every text token clears 4.5:1 on every background, borders and fills clear 3:1.</p>
+</div>
+<div class="compare">
+<div class="swatchcol"><div class="strip"><i style="background:#f7f7f5"></i><i style="background:#ffffff"></i><i style="background:#12a150"></i><i style="background:#0c0c0d"></i></div><span>daily</span></div>
+<div class="swatchcol"><div class="strip"><i style="background:#d8d3c8"></i><i style="background:#e8e4da"></i><i style="background:#4a6e36"></i><i style="background:#1b1c1a"></i></div><span>stone</span></div>
+</div>
+</header>
+<div class="panels">
+<section class="panel light" aria-label="stone light">
+<svg class="grain" aria-hidden="true"><filter id="lGrain"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="3" stitchTiles="stitch"></feTurbulence><feColorMatrix values="0 0 0 0 0.2 0 0 0 0 0.19 0 0 0 0 0.16 0 0 0 0.6 0"></feColorMatrix></filter><rect width="100%" height="100%" filter="url(#lGrain)"></rect></svg>
+<div class="inner">
+<h2>overcast</h2>
+<p class="eyebrow">backgrounds</p>
+<div class="grid"><div class="sw"><div class="chip" style="background:#d8d3c8"></div><span class="nm">bg-canvas</span><span class="hx">#d8d3c8</span></div><div class="sw"><div class="chip" style="background:#e8e4da"></div><span class="nm">bg-surface</span><span class="hx">#e8e4da</span></div><div class="sw"><div class="chip" style="background:#cfc9bd"></div><span class="nm">bg-surface-alt</span><span class="hx">#cfc9bd</span></div><div class="sw"><div class="chip" style="background:#c8c2b5"></div><span class="nm">bg-inset</span><span class="hx">#c8c2b5</span></div><div class="sw"><div class="chip" style="background:#24221e"></div><span class="nm">bg-inverse</span><span class="hx">#24221e</span></div></div>
+<p class="eyebrow">text, on surface</p>
+<div class="grid"><div class="sw"><div class="aa" style="color:#24221e">Aa</div><span class="nm">text-primary</span><span class="hx">#24221e</span></div><div class="sw"><div class="aa" style="color:#46423b">Aa</div><span class="nm">text-secondary</span><span class="hx">#46423b</span></div><div class="sw"><div class="aa" style="color:#524d44">Aa</div><span class="nm">text-tertiary</span><span class="hx">#524d44</span></div><div class="sw"><div class="aa" style="color:#a39d90">Aa</div><span class="nm">text-disabled</span><span class="hx">#a39d90</span></div><div class="sw"><div class="aa" style="background:#33302a;color:#e8e4da;border-color:#33302a">Aa</div><span class="nm">accent bg / fg</span><span class="hx">#33302a / #e8e4da</span></div></div>
+<p class="eyebrow">lines</p>
+<div class="grid">
+<div class="sw"><div class="chip" style="background:#e8e4da;border:2px solid #c2bcaf"></div><span class="nm">border-hairline</span><span class="hx">#c2bcaf</span></div>
+<div class="sw"><div class="chip" style="background:#e8e4da;border:2px solid #6a6458"></div><span class="nm">border-strong</span><span class="hx">#6a6458</span></div>
+<div class="sw"><div class="chip label" style="background:#4a6e36;color:#f3f0e8;border-color:#4a6e36">label</div><span class="nm">status-on-fill</span><span class="hx">#f3f0e8</span></div>
+</div>
+<p class="eyebrow">status · fill, text, wash</p>
+<div class="grid thirds">
+<div class="sw"><div class="stat"><span style="background:#4a6e36;color:#f3f0e8">moss</span><span style="background:#cdd5ba;color:#365428">done</span></div><span class="nm">success</span><span class="hx">#4a6e36 · #365428 · #cdd5ba</span></div>
+<div class="sw"><div class="stat"><span style="background:#8a6410;color:#f3f0e8">lichen</span><span style="background:#e2d4a8;color:#5f4506">at risk</span></div><span class="nm">warning</span><span class="hx">#8a6410 · #5f4506 · #e2d4a8</span></div>
+<div class="sw"><div class="stat"><span style="background:#a3472a;color:#f3f0e8">rust</span><span style="background:#e4cbbd;color:#843219">missed</span></div><span class="nm">danger</span><span class="hx">#a3472a · #843219 · #e4cbbd</span></div>
+</div>
+<p class="eyebrow">in use</p>
+<div class="card">
+<div class="split"><h3>read 20 pages</h3><span class="quiet">3 of 5</span></div>
+<div class="row">
+<div class="tile" style="background:#33302a"></div>
+<div class="tile" style="background:#33302a"></div>
+<div class="tile" style="background:#33302a"></div>
+<div class="tile" style="background:#e2d4a8;border:1.5px solid #8a6410"></div>
+<div class="tile" style="background:#c8c2b5"></div>
+<div class="tile ghost"></div>
+<div class="tile ghost"></div>
+</div>
+<div class="row">
+<span class="badge" style="background:#cdd5ba;color:#365428">on track</span>
+<span class="badge" style="background:#e2d4a8;color:#5f4506">streak at risk</span>
+<span class="badge" style="background:#e4cbbd;color:#843219">missed</span>
+</div>
+<div class="row">
+<button class="btn" type="button" style="background:#33302a;color:#e8e4da">log today</button>
+<button class="btn ghostbtn" type="button">edit goal</button>
+<button class="btn" type="button" style="background:#a3472a;color:#f3f0e8">delete</button>
+</div>
+</div>
+</div>
+</section>
+<section class="panel dark" aria-label="stone dark">
+<svg class="grain" aria-hidden="true"><filter id="dGrain"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="3" stitchTiles="stitch"></feTurbulence><feColorMatrix values="0 0 0 0 0.9 0 0 0 0 0.88 0 0 0 0 0.84 0 0 0 0.6 0"></feColorMatrix></filter><rect width="100%" height="100%" filter="url(#dGrain)"></rect></svg>
+<div class="inner">
+<h2>dusk</h2>
+<p class="eyebrow">backgrounds</p>
+<div class="grid"><div class="sw"><div class="chip" style="background:#1b1c1a"></div><span class="nm">bg-canvas</span><span class="hx">#1b1c1a</span></div><div class="sw"><div class="chip" style="background:#252622"></div><span class="nm">bg-surface</span><span class="hx">#252622</span></div><div class="sw"><div class="chip" style="background:#2f302b"></div><span class="nm">bg-surface-alt</span><span class="hx">#2f302b</span></div><div class="sw"><div class="chip" style="background:#383933"></div><span class="nm">bg-inset</span><span class="hx">#383933</span></div><div class="sw"><div class="chip" style="background:#e6e2d8"></div><span class="nm">bg-inverse</span><span class="hx">#e6e2d8</span></div></div>
+<p class="eyebrow">text, on surface</p>
+<div class="grid"><div class="sw"><div class="aa" style="color:#e6e2d8">Aa</div><span class="nm">text-primary</span><span class="hx">#e6e2d8</span></div><div class="sw"><div class="aa" style="color:#bdb8ad">Aa</div><span class="nm">text-secondary</span><span class="hx">#bdb8ad</span></div><div class="sw"><div class="aa" style="color:#aaa59a">Aa</div><span class="nm">text-tertiary</span><span class="hx">#aaa59a</span></div><div class="sw"><div class="aa" style="color:#4c4b45">Aa</div><span class="nm">text-disabled</span><span class="hx">#4c4b45</span></div><div class="sw"><div class="aa" style="background:#e6e2d8;color:#1b1c1a;border-color:#e6e2d8">Aa</div><span class="nm">accent bg / fg</span><span class="hx">#e6e2d8 / #1b1c1a</span></div></div>
+<p class="eyebrow">lines</p>
+<div class="grid">
+<div class="sw"><div class="chip" style="background:#252622;border:2px solid #383933"></div><span class="nm">border-hairline</span><span class="hx">#383933</span></div>
+<div class="sw"><div class="chip" style="background:#252622;border:2px solid #8c887e"></div><span class="nm">border-strong</span><span class="hx">#8c887e</span></div>
+<div class="sw"><div class="chip label" style="background:#8fb06a;color:#141412;border-color:#8fb06a">label</div><span class="nm">status-on-fill</span><span class="hx">#141412</span></div>
+</div>
+<p class="eyebrow">status · fill, text, wash</p>
+<div class="grid thirds">
+<div class="sw"><div class="stat"><span style="background:#8fb06a;color:#141412">moss</span><span style="background:#232d1c;color:#aecb8e">done</span></div><span class="nm">success</span><span class="hx">#8fb06a · #aecb8e · #232d1c</span></div>
+<div class="sw"><div class="stat"><span style="background:#d6a63a;color:#141412">lichen</span><span style="background:#312910;color:#e8c46a">at risk</span></div><span class="nm">warning</span><span class="hx">#d6a63a · #e8c46a · #312910</span></div>
+<div class="sw"><div class="stat"><span style="background:#e27a52;color:#141412">rust</span><span style="background:#382119;color:#f2987c">missed</span></div><span class="nm">danger</span><span class="hx">#e27a52 · #f2987c · #382119</span></div>
+</div>
+<p class="eyebrow">in use</p>
+<div class="card">
+<div class="split"><h3>read 20 pages</h3><span class="quiet">3 of 5</span></div>
+<div class="row">
+<div class="tile" style="background:#e6e2d8"></div>
+<div class="tile" style="background:#e6e2d8"></div>
+<div class="tile" style="background:#e6e2d8"></div>
+<div class="tile" style="background:#312910;border:1.5px solid #d6a63a"></div>
+<div class="tile" style="background:#383933"></div>
+<div class="tile ghost"></div>
+<div class="tile ghost"></div>
+</div>
+<div class="row">
+<span class="badge" style="background:#232d1c;color:#aecb8e">on track</span>
+<span class="badge" style="background:#312910;color:#e8c46a">streak at risk</span>
+<span class="badge" style="background:#382119;color:#f2987c">missed</span>
+</div>
+<div class="row">
+<button class="btn" type="button" style="background:#e6e2d8;color:#1b1c1a">log today</button>
+<button class="btn ghostbtn" type="button">edit goal</button>
+<button class="btn" type="button" style="background:#e27a52;color:#141412">delete</button>
+</div>
+</div>
+</div>
+</section>
+</div>
+<section class="surfaces" aria-label="stome surfaces">
+<div class="ask" style="grid-column:1 / -1"><span>ask anything across your notes, boards and decks</span><button type="button">ask</button></div>
+<div class="col">
+<p class="cap">notes</p>
+<article class="paper">
+<p class="kicker" style="color:#524d44">biology 101 / notes</p>
+<h2>cellular respiration</h2>
+<p>it makes 4 atp but spends 2 getting started, so the net is <mark>2 atp</mark>, plus 2 nadh.</p>
+</article>
+</div>
+<div class="col">
+<p class="cap">whiteboard</p>
+<div class="sticky" style="background:#e2d4a8">per glucose the cycle runs twice!</div>
+<div class="sticky" style="background:#cdd5ba">where does the co₂ we breathe out come from?</div>
+<div class="note"><span class="badge" style="background:#e4cbbd;color:#843219">check this</span><span>citrate has 6 carbons: acetyl-coa (2) joins oxaloacetate (4).</span></div>
+</div>
+<div class="col">
+<p class="cap">deck and ask thread</p>
+<div class="slide"><b>Type I and Type II errors</b><p>false alarm</p><div class="hd">H₀ true</div></div>
+<div class="q">why is glycolysis net 2 atp and not 4?</div>
+</div>
+</section>
+</div>
+</body>
+</html>
