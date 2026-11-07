@@ -147,6 +147,23 @@ try {
   await shotScreen('review-brick', 'review-screen');
 
   const reviewUrl = page.url();
+  await page.click('[data-testid="review-back"]');
+  await page.waitForFunction(() => {
+    const text = document.body.innerText;
+    return !location.pathname.includes('/review')
+      && text.includes('Stone stage: brick')
+      && text.includes('Review notes')
+      && text.includes('Add note');
+  }, { timeout: 15000 });
+  const token = await page.$('[data-testid="pairing-token"]');
+  if (token) {
+    const box = await token.boundingBox();
+    if (box && box.y < 640) throw new Error('pairing token is inside the room stage shot');
+  }
+  await shot('room-stage', { clip: { x: 0, y: 0, width: 1280, height: 640 } });
+  await page.click('[data-testid="open-review"]');
+  await page.waitForSelector('[data-testid="review-schedule"]', { timeout: 15000 });
+
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForSelector('[data-testid="review-stage"]', { timeout: 20000 });
   await page.waitForFunction(() => document.body.innerText.includes('Nothing is due right now.') && document.body.innerText.includes('Stone stage: brick'), { timeout: 15000 });
@@ -155,7 +172,7 @@ try {
   await assertNoPairingToken('review-screen');
   await shotScreen('review-reloaded', 'review-screen');
 
-  await page.goto(roomUrl, { waitUntil: 'domcontentloaded' });
+  await page.click('[data-testid="review-back"]');
   await page.waitForSelector('[aria-label="Note content"]', { timeout: 20000 });
   await addNote('delta stale note');
   await page.click('[data-testid="open-review"]');
@@ -218,10 +235,6 @@ try {
   if (todayAfter.includes('alpha missed note')) throw new Error('the reviewed note is still due');
   await assertNoPairingToken('today-screen');
   await shotScreen('today-refreshed', 'today-screen');
-
-  await page.goto(roomUrl, { waitUntil: 'domcontentloaded' });
-  await page.waitForFunction(() => document.body.innerText.includes('Stone stage: brick'), { timeout: 15000 });
-  await shot('room-stage', { clip: { x: 0, y: 0, width: 1280, height: 640 } });
 
   const pageErrors = logs.filter((line) => line.startsWith('pageerror:'));
   if (pageErrors.length) throw new Error(pageErrors.join('\n'));

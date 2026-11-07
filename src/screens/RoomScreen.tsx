@@ -1,8 +1,8 @@
 import { randomUUID } from 'expo-crypto';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator, FlatList, KeyboardAvoidingView, Platform,
   Pressable, Text, TextInput, View,
@@ -65,7 +65,7 @@ export function RoomScreen() {
     setRoom(next.room);
     setChunks(next.chunks);
   }, [load]);
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     let active = true;
     load().then((next) => {
       if (active) { setRoom(next.room); setChunks(next.chunks); setLoading(false); }
@@ -73,7 +73,7 @@ export function RoomScreen() {
       if (active) { setError(reason instanceof Error ? reason.message : 'Could not load room'); setLoading(false); }
     });
     return () => { active = false; };
-  }, [load]);
+  }, [load]));
   async function action(run: () => Promise<void>) {
     if (busy) return;
     setBusy(true);

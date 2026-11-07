@@ -60,9 +60,9 @@ export function orderReviewQueue<T extends { id: string }>(
 }
 
 /**
- * Deterministic question from the note text. The harness mock provider has no
- * review-question tool, so this stays local and never calls a network.
- * An empty note is the error case; the session can still mark or skip it.
+ * Partial stand-in for the review question. HAR.3's mock provider has no
+ * review-question tool, and this screen does not invent that contract.
+ * The same note text always yields the same local prompt. An empty note errors.
  */
 export function mockReviewQuestion(chunk: { id: string; body: string }):
   | { ok: true; question: string }

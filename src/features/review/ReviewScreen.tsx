@@ -1,7 +1,7 @@
 import { randomUUID } from 'expo-crypto';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -11,6 +11,7 @@ import type { ReviewMark, Room, RoomStage } from '../../data/models';
 import { getChunk, getRoom, latestReviewMark, listChunks } from '../../data/queries';
 import type { ReviewState } from '../../db/schema';
 import { expoDriver } from '../../db/expo-driver';
+import { reviewMarkController } from './mark-attempt';
 import {
   REVIEW_LABEL,
   chunksReadyToReview,
@@ -18,7 +19,6 @@ import {
   formatDueAt,
   mockReviewQuestion,
   orderReviewQueue,
-  reviewMarkOperation,
   type ReviewQueueChunk,
 } from './session';
 
@@ -52,6 +52,8 @@ export function ReviewScreen() {
   const theme = useStoneTheme();
   const [room, setRoom] = useState<Room | null>(null);
   const [stage, setStage] = useState<RoomStage>('stonehenge');
+  const stageRef = useRef<RoomStage>('stonehenge');
+  const marking = useRef(false);
   const [cards, setCards] = useState<ReviewQueueChunk[]>([]);
   const [total, setTotal] = useState(0);
   const [done, setDone] = useState(0);
@@ -94,7 +96,8 @@ export function ReviewScreen() {
         if (!active) return;
         setMissing(next.missing);
         setRoom(next.room);
-        setStage(next.room?.stage ?? 'stonehenge');
+        stageRef.current = next.room?.stage ?? 'stonehenge';
+        setStage(stageRef.current);
         setCards(next.cards);
         setTotal(next.cards.length);
         setDone(0);
@@ -114,72 +117,93 @@ export function ReviewScreen() {
   }, [load]));
 
   function leave() {
-    if (router.canGoBack()) router.back();
-    else if (roomId) router.replace(`/rooms/${roomId}`);
-    else router.replace('/');
+    const go = () => {
+      if (router.canGoBack()) router.back();
+      else if (roomId) router.replace(`/rooms/${roomId}`);
+      else router.replace('/');
+    };
+    void reviewMarkController.requestLeave(go);
   }
 
   const card = cards[0];
   const asked = card ? mockReviewQuestion(card) : null;
 
   async function mark(state: ReviewState) {
-    if (!card || busy || !roomId) return;
+    if (!card || !roomId || marking.current) return;
     const seen = card;
+    const gen = reviewMarkController.generation();
+    marking.current = true;
     setBusy(true);
     setError(null);
     try {
-      const result = await commit(reviewMarkOperation({
-        opId: randomUUID(),
-        chunkId: seen.id,
-        state,
-        expectedRevision: seen.revision,
-        timeZone: deviceTimeZone(),
-      }));
-      if (!result.ok) {
-        if (result.error.code === 'stale_revision') {
-          setError('This note changed since you opened it. Nothing was saved and it did not count. Read the current note, then mark it again.');
-          const fresh = await getChunk(db, seen.id);
-          if (fresh && fresh.roomId === roomId) {
-            setCards((current) => current.map((item) => (item.id === seen.id ? toCard(fresh) : item)));
-          } else {
-            setCards((current) => current.filter((item) => item.id !== seen.id));
-          }
-          return;
-        }
-        if (result.error.code === 'not_found') {
-          setError('This note no longer exists.');
+      const outcome = await reviewMarkController.submit({
+        newId: randomUUID,
+        timeZone: deviceTimeZone,
+        commit: (attempt) => commit(attempt),
+        request: { chunkId: seen.id, state, expectedRevision: seen.revision },
+        report: (result) => {
+          const was = stageRef.current;
+          stageRef.current = result.value.stage;
+          const promoted = was === 'stonehenge' && result.value.stage === 'brick' ? ' This room is now brick.' : '';
+          setStage(result.value.stage);
+          setSaved(`Saved ${REVIEW_LABEL[result.value.state]}. Due ${formatDueAt(result.value.dueAt)}.${promoted}`);
+          setScheduled((current) => {
+            const next = current.filter((item) => item.chunkId !== result.value.chunkId);
+            next.push({
+              chunkId: result.value.chunkId,
+              state: result.value.state,
+              localDay: result.value.localDay,
+              dueAt: result.value.dueAt,
+            });
+            next.sort((left, right) => left.dueAt - right.dueAt || left.chunkId.localeCompare(right.chunkId));
+            return next;
+          });
           setCards((current) => current.filter((item) => item.id !== seen.id));
           setDone((count) => count + 1);
-          return;
-        }
-        setError(result.error.message);
+        },
+      });
+      if (reviewMarkController.generation() !== gen) return;
+      if (outcome.status === 'busy') return;
+      if (outcome.status === 'blocked') {
+        const held = REVIEW_LABEL[outcome.attempt.payload.state];
+        setError(`The previous ${held} mark did not finish. Retry that choice. It will not be counted twice.`);
         return;
       }
-      const promoted = stage === 'stonehenge' && result.value.stage === 'brick' ? ' This room is now brick.' : '';
-      setStage(result.value.stage);
-      setSaved(`Saved ${REVIEW_LABEL[result.value.state]}. Due ${formatDueAt(result.value.dueAt)}.${promoted}`);
-      setScheduled((current) => {
-        const next = current.filter((item) => item.chunkId !== result.value.chunkId);
-        next.push({
-          chunkId: result.value.chunkId,
-          state: result.value.state,
-          localDay: result.value.localDay,
-          dueAt: result.value.dueAt,
-        });
-        next.sort((left, right) => left.dueAt - right.dueAt || left.chunkId.localeCompare(right.chunkId));
-        return next;
-      });
-      setCards((current) => current.filter((item) => item.id !== seen.id));
-      setDone((count) => count + 1);
+      if (outcome.status === 'ambiguous') {
+        setError('That mark may have saved. Retry the same choice. It will not be counted twice.');
+        return;
+      }
+      if (outcome.status !== 'rejected') return;
+      const failure = outcome.result.error;
+      if (failure.code === 'stale_revision') {
+        setError('This note changed since you opened it. Nothing was saved and it did not count. Read the current note, then mark it again.');
+        const fresh = await getChunk(db, seen.id);
+        if (reviewMarkController.generation() !== gen) return;
+        if (fresh && fresh.roomId === roomId) {
+          setCards((current) => current.map((item) => (item.id === seen.id ? toCard(fresh) : item)));
+        } else {
+          setCards((current) => current.filter((item) => item.id !== seen.id));
+        }
+        return;
+      }
+      if (failure.code === 'not_found') {
+        setError('This note no longer exists.');
+        setCards((current) => current.filter((item) => item.id !== seen.id));
+        setDone((count) => count + 1);
+        return;
+      }
+      setError(failure.message);
     } catch (reason) {
+      if (reviewMarkController.generation() !== gen) return;
       setError(reason instanceof Error ? reason.message : 'Could not save the mark');
     } finally {
-      setBusy(false);
+      marking.current = false;
+      if (reviewMarkController.generation() === gen) setBusy(false);
     }
   }
 
   function skip() {
-    if (!card || busy) return;
+    if (!card || marking.current) return;
     setCards((current) => current.filter((item) => item.id !== card.id));
     setDone((count) => count + 1);
     setError(null);
