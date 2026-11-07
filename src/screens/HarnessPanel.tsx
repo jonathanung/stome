@@ -473,6 +473,7 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
         <EditProposalReview
           proposal={proposal}
           title={`${chunks.find((chunk) => chunk.id === proposal.chunkId)?.body.split('\n')[0]?.slice(0, 60) || 'Chunk'}`}
+          asked={askedPrompt || undefined}
           confirmDisabled={confirmDisabled}
           busy={busy}
           onConfirm={() => { void onConfirm(); }}
