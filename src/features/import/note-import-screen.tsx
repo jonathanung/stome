@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, ScrollView, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { createStyles } from '../../../design-theme/src/primitives';
+import { Badge, createStyles } from '../../../design-theme/src/primitives';
 import { createCommit } from '../../data/commit';
 import type { Room } from '../../data/models';
 import { listChunks, listRooms } from '../../data/queries';
@@ -35,6 +35,12 @@ function Field({ label, value, onChangeText, disabled = false }: { label: string
   return <View style={styles.field}><Text style={styles.label}>{label}</Text><TextInput accessibilityLabel={label} value={value} onChangeText={onChangeText} editable={!disabled} autoCapitalize="none" autoCorrect={false} style={styles.input} /></View>;
 }
 
+function destinationLabel(mapping: RoomMapping, rooms: readonly Room[]): string {
+  const destination = destinationForMapping(mapping);
+  if (destination && 'roomId' in destination) return rooms.find((room) => room.id === destination.roomId)?.name ?? 'unavailable';
+  return destination?.name ?? '';
+}
+
 export default function NoteImportScreen() {
   const styles = useStyles();
   const sqlite = useSQLiteContext();
@@ -49,6 +55,8 @@ export default function NoteImportScreen() {
   const [stage, setStage] = useState<'choose' | 'review'>('choose');
   const [preview, setPreview] = useState<{ title: string; bodies: string[] } | null>(null);
 
+  const mapped = drafts.filter((draft) => destinationForMapping(draft.mapping)).length;
+  const needRoom = drafts.length - mapped;
   const refresh = useCallback(async () => setRooms(await listRooms(db)), [db]);
   useEffect(() => {
     let active = true;
@@ -128,7 +136,7 @@ export default function NoteImportScreen() {
           ListHeaderComponent={<View style={styles.section}>
             <ImportSteps current={2} />
             <Action label="Back to files" onPress={() => setStage('choose')} />
-            <Text style={styles.title}>Bring your notes</Text>
+            <Text style={styles.title}>Review and pick rooms</Text>
             <Text style={styles.text}>Import Markdown from Obsidian or another app. Choose up to 20 .md files, 1 MiB each. PDF and native notebook files are not supported yet.</Text>
             <Field label="Source collection" value={collection} onChangeText={setCollection} disabled={busy} />
             <Text style={styles.hint}>Use the same collection and source paths when re-importing. Review each note before confirming.</Text>
@@ -138,6 +146,7 @@ export default function NoteImportScreen() {
           </View>}
           renderItem={({ item }) => <View style={styles.card}>
             <Text style={styles.heading}>{item.note.title}</Text>
+            {item.done ? <Badge tone="success" label="imported" /> : destinationForMapping(item.mapping) ? <Badge tone="success" label={`→ ${destinationLabel(item.mapping, rooms)}`} /> : <Badge tone="danger" label="needs a room" />}
             <Text style={styles.text}>{item.note.bodies.length} chunks · suggested subjects need review</Text>
             {item.note.warnings.map((warning) => <Text key={warning} style={styles.hint}>{warning}</Text>)}
             {item.folderWarning ? <Text style={styles.hint}>{item.folderWarning}</Text> : null}
@@ -150,6 +159,7 @@ export default function NoteImportScreen() {
             {item.result ? <Text accessibilityLiveRegion="polite" style={item.done ? styles.text : styles.error}>{item.result}</Text> : null}
           </View>}
           ListFooterComponent={<View style={styles.section}>
+            {drafts.length ? <Text style={styles.hint}>{`${mapped} of ${drafts.length} notes have a room${needRoom ? ` · ${needRoom} need a room before you can save` : ''}`}</Text> : null}
             <Text style={styles.heading}>Your rooms</Text>
             {rooms.length ? rooms.map((room) => <Action key={room.id} label={`View ${room.name}`} onPress={() => showRoom(room)} />) : <Text style={styles.hint}>Imported notes will appear here. Imports do not award study rewards.</Text>}
           </View>}
