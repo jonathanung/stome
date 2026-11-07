@@ -1,6 +1,6 @@
 # Stome
 
-Stome stores local study rooms and notes in SQLite. Create, open, rename, and confirm deletion of rooms. Each room shows ordered note chunks with subject tags, optional source links, and highlight annotations. Rooms also have a whiteboard with text, shapes, arrows, and pencil strokes. On web, a paired local companion can explain, check, or quiz on the board. Suggested text corrections are saved only after acceptance. A board can be summarized into a room note. The existing Markdown import and original notes/companion screens remain available from the room list. There are no accounts or sync.
+Stome stores local study rooms and notes in SQLite. Create, open, rename, and confirm deletion of rooms. Each room shows ordered note chunks with subject tags, optional source links, and highlight annotations. Rooms also have a whiteboard with text, shapes, arrows, and pencil strokes. A paired board service can explain, check, or quiz on it. Suggested text corrections are saved only after acceptance. A board can be summarized into a room note. The existing Markdown import and original notes/companion screens remain available from the room list. There are no accounts or sync.
 
 ## Run
 
@@ -15,7 +15,7 @@ npx expo start
 - To use a live model for the whiteboard, start the companion with `STOME_BOARD_PROVIDER=openai` and `STOME_BOARD_API_KEY` (or `OPENAI_API_KEY`) set in the server environment. `STOME_BOARD_MODEL` defaults to `gpt-4o-mini`. The app never receives the API key. Pair the web whiteboard with the printed token. The model sees the board objects you submit, including text and geometry; it does not receive a screenshot.
 - `npm run ios` and `npm run android` open a simulator or Expo Go when that tooling is installed.
 
-The board canvas works on iOS, Android, and web. The paired companion listens on laptop loopback and requires the web app origin, so board AI is available from the web app on the same computer. Native board AI needs a separately hosted, authenticated service.
+The board canvas works on iOS, Android, and web. On web, the local companion works on the same computer. For iOS or Android, run `npm run board:service` behind a trusted HTTPS address, then enter that address and its pairing token in the app. The service requires `STOME_BOARD_TLS_KEY_FILE` and `STOME_BOARD_TLS_CERT_FILE`; set `STOME_BOARD_HOST=0.0.0.0` only when the host is protected by the intended network and certificate. It defaults to an OpenAI provider and requires `STOME_BOARD_API_KEY` or `OPENAI_API_KEY`; `STOME_BOARD_PROVIDER=mock` runs a deterministic test mode. The model key remains on the server. A self-signed certificate must be trusted by the device before its HTTPS requests can succeed.
 
 Standard `expo-sqlite` is included in Expo Go. This project does not commit `ios/` or `android/` directories.
 

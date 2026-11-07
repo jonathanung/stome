@@ -20,6 +20,18 @@ export interface BoardReply {
 export const BOARD_REQUEST_LIMIT = 30_000;
 export const NO_CORRECTION: BoardCorrection = { kind: 'none', targetId: '', text: '', x: 0, y: 0 };
 
+export function boardServiceOrigin(raw: string, platform: 'web' | 'native'): string {
+  let url: URL;
+  try { url = new URL(raw); } catch { throw new Error('Board service address is not a URL'); }
+  if (url.username || url.password || url.search || url.hash || (url.pathname !== '/' && url.pathname !== '')) throw new Error('Board service address must be an origin without credentials or a path');
+  const host = url.hostname.startsWith('[') && url.hostname.endsWith(']') ? url.hostname.slice(1, -1) : url.hostname;
+  const loopback = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+  if (url.protocol !== 'https:' && !(platform === 'web' && url.protocol === 'http:' && loopback)) {
+    throw new Error(platform === 'native' ? 'Mobile board AI needs an HTTPS service' : 'Board service must use HTTPS or local loopback HTTP');
+  }
+  return url.origin;
+}
+
 export function parseBoardRequest(raw: unknown): BoardRequest {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Board request must be an object');
   const value = raw as Record<string, unknown>;

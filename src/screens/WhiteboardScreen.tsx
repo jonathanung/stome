@@ -11,8 +11,7 @@ import { createCommit } from '../data/commit';
 import { getBoard, getRoom } from '../data/queries';
 import type { Room } from '../data/models';
 import { expoDriver } from '../db/expo-driver';
-import { assertCompanionUrl } from '../harness/companionClient';
-import { applyBoardCorrection, parseBoardReply, type BoardAction, type BoardReply, type BoardRequest } from '../whiteboard/assistant';
+import { applyBoardCorrection, boardServiceOrigin, parseBoardReply, type BoardAction, type BoardReply, type BoardRequest } from '../whiteboard/assistant';
 import { BOARD_HEIGHT, BOARD_WIDTH, boardToNote, type Board, type BoardItem, type Point } from '../whiteboard/model';
 
 type Tool = 'pencil' | 'rect' | 'ellipse' | 'arrow' | 'text';
@@ -34,7 +33,7 @@ export function WhiteboardScreen() {
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [label, setLabel] = useState('');
   const [study, setStudy] = useState<{ reply: BoardReply; revision: number; provider: string } | null>(null);
-  const [companionUrl, setCompanionUrl] = useState('http://127.0.0.1:8787');
+  const [companionUrl, setCompanionUrl] = useState(Platform.OS === 'web' ? 'http://127.0.0.1:8787' : '');
   const [pairingToken, setPairingToken] = useState('');
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -79,11 +78,13 @@ export function WhiteboardScreen() {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 30_000);
     try {
-      const origin = assertCompanionUrl(companionUrl);
+      const origin = boardServiceOrigin(companionUrl, Platform.OS === 'web' ? 'web' : 'native');
       const response = await fetch(`${origin}/v1/board`, { method: 'POST', signal: controller.signal, credentials: 'omit',
         headers: { 'content-type': 'application/json', 'x-stome-token': pairingToken.trim() }, body: JSON.stringify(input) });
-      const result = await response.json() as { ok?: boolean; provider?: string; output?: unknown; error?: { message?: string } };
-      if (!response.ok || !result.ok) throw new Error(result.error?.message ?? `Board assistant failed (${response.status})`);
+      const result = await response.json() as { ok?: boolean; provider?: string; output?: unknown; error?: string | { message?: string } };
+      if (!response.ok || !result.ok) throw new Error(
+        typeof result.error === 'string' ? result.error : result.error?.message ?? `Board assistant failed (${response.status})`,
+      );
       const reply = parseBoardReply(result.output, input);
       setStudy({ reply, revision: input.revision, provider: result.provider ?? 'unknown' });
     } catch (reason) {
@@ -139,12 +140,12 @@ export function WhiteboardScreen() {
   }
 
   if (!board) return <Screen><SafeAreaView style={{ flex: 1, justifyContent: 'center', padding: 24 }}>
-    {error ? <><Text accessibilityRole="alert">{error}</Text><Button label="Back to room" onPress={() => router.back()} /></> : <ActivityIndicator />}
+    {error ? <><Text accessibilityRole="alert">{error}</Text><Button label="Back to rooms" onPress={() => router.replace('/')} /></> : <ActivityIndicator />}
   </SafeAreaView></Screen>;
   if (!room) return <Screen><SafeAreaView><Text>Room not found.</Text></SafeAreaView></Screen>;
   const buttons: Tool[] = ['pencil', 'text', 'rect', 'ellipse', 'arrow'];
   return <Screen><SafeAreaView style={{ flex: 1 }}><ScrollView contentContainerStyle={{ width: '100%', maxWidth: 760, alignSelf: 'center', padding: 16, paddingBottom: 48, gap: 16 }} keyboardShouldPersistTaps="handled">
-    <Pressable accessibilityRole="button" onPress={() => router.back()}><Text style={{ color: theme.color.text.secondary }}>← {room.name}</Text></Pressable>
+    <Pressable accessibilityRole="button" onPress={() => router.replace(`/rooms/${room.id}`)}><Text style={{ color: theme.color.text.secondary }}>← {room.name}</Text></Pressable>
     <Text accessibilityRole="header" style={{ color: ink, fontSize: 30, fontWeight: '700' }}>Whiteboard</Text>
     <Text style={{ color: theme.color.text.secondary }}>Choose a tool, then draw or tap on the board. Changes save as you go.</Text>
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>{buttons.map((name) =>
@@ -169,13 +170,13 @@ export function WhiteboardScreen() {
       <Button label="Remove" variant="ghost" disabled={busy} onPress={() => void save(board.items.filter((entry) => entry.id !== item.id))} />
     </View>) : <Text style={{ color: theme.color.text.secondary }}>The board is empty.</Text>}
     <Text style={{ color: ink, fontSize: 20, fontWeight: '600' }}>Study this board</Text>
-    <Text style={{ color: theme.color.text.secondary }}>Pair with the local companion to ask about this board. Its default mode is a mock; set its board provider to OpenAI for model answers. Your token stays in memory.</Text>
-    {Platform.OS === 'web' ? <View style={{ gap: 8 }}>
-      <TextInput accessibilityLabel="Companion address" autoCapitalize="none" value={companionUrl} onChangeText={setCompanionUrl} placeholder="http://127.0.0.1:8787" style={{ borderWidth: 1, borderColor: theme.color.border.strong, borderRadius: 8, padding: 12, color: ink }} />
+    <Text style={{ color: theme.color.text.secondary }}>{Platform.OS === 'web' ? 'Pair with the local companion or an HTTPS board service.' : 'Enter your HTTPS board service address and pairing token.'} The token stays in memory.</Text>
+    <View style={{ gap: 8 }}>
+      <TextInput accessibilityLabel="Board service address" autoCapitalize="none" value={companionUrl} onChangeText={setCompanionUrl} placeholder={Platform.OS === 'web' ? 'http://127.0.0.1:8787' : 'https://board.example.com'} style={{ borderWidth: 1, borderColor: theme.color.border.strong, borderRadius: 8, padding: 12, color: ink }} />
       <TextInput accessibilityLabel="Pairing token" autoCapitalize="none" secureTextEntry value={pairingToken} onChangeText={setPairingToken} placeholder="Pairing token" style={{ borderWidth: 1, borderColor: theme.color.border.strong, borderRadius: 8, padding: 12, color: ink }} />
-    </View> : <Text style={{ color: theme.color.text.secondary }}>The local companion is available from the web app on the same computer.</Text>}
+    </View>
     <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>{(['explain', 'check', 'quiz'] as const).map((action) =>
-      <Button key={action} label={action[0].toUpperCase() + action.slice(1)} variant="outline" disabled={Platform.OS !== 'web' || !pairingToken.trim() || asking || busy} onPress={() => void ask(action)} />)}</View>
+      <Button key={action} label={action[0].toUpperCase() + action.slice(1)} variant="outline" disabled={!companionUrl.trim() || !pairingToken.trim() || asking || busy} onPress={() => void ask(action)} />)}</View>
     {asking ? <ActivityIndicator accessibilityLabel="Studying board" /> : null}
     {study ? <View style={{ gap: 8, padding: 14, borderRadius: 8, backgroundColor: theme.color.bg.surface }}>
       <Text style={{ color: ink, fontWeight: '600' }}>{study.provider === 'openai' ? 'AI response' : 'Mock response'}</Text><Text style={{ color: ink }}>{study.reply.message}</Text>
