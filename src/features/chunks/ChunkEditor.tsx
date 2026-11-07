@@ -75,6 +75,10 @@ export function ChunkEditor({
     if (!result.ok) onError(result.message);
   };
 
+  // Multiline fields do not grow by themselves (on web they scroll), so size
+  // the field to its content: a chunk is always shown whole.
+  const [contentHeight, setContentHeight] = useState(0);
+
   const [subjectDraft, setSubjectDraft] = useState('');
   const addSubjects = () => {
     const added = subjectDraft.split(',').map((s) => s.trim()).filter(Boolean);
@@ -112,7 +116,12 @@ export function ChunkEditor({
         value={body}
         onChangeText={(text) => controller.edit(text)}
         onBlur={() => void controller.flush()}
-        style={[theme.text('reading'), { color: theme.color.text.primary, minHeight: theme.layout.control, padding: 0 }]}
+        onContentSizeChange={(event) => setContentHeight(event.nativeEvent.contentSize.height)}
+        scrollEnabled={false}
+        style={[
+          theme.text('reading'),
+          { color: theme.color.text.primary, minHeight: theme.layout.control, height: Math.max(theme.layout.control, contentHeight), padding: 0 },
+        ]}
       />
       )}
 
