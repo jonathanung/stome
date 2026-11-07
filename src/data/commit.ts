@@ -358,12 +358,20 @@ async function apply(db: Db, op: Operation, n: Normalized, deps: CommitDeps): Pr
 }
 
 /**
+ * One queue per database object. Room saves and harness confirms must share
+ * that object — `expoDriver` returns the same wrapper for one SQLite handle —
+ * because `withTransactionAsync` does not isolate two wrappers. Each caller
+ * still uses its own clock and id factory. A failed commit rolls back only
+ * its own transaction; the next queued commit then runs on the committed
+ * database.
+ */
+const commitQueues = new WeakMap<Db, Promise<unknown>>();
+
+/**
  * Creates the app's commit function for one database. Commits are queued so
  * two never share a transaction, even when the UI fires them concurrently.
  */
 export function createCommit(db: Db, deps: CommitDeps): Commit {
-  let queue: Promise<unknown> = Promise.resolve();
-
   async function commitNow(op: Operation): Promise<CommitResult> {
     let normalized: Normalized;
     try {
@@ -399,8 +407,9 @@ export function createCommit(db: Db, deps: CommitDeps): Commit {
   }
 
   return (<K extends OpKind>(op: Operation<K>) => {
-    const next = queue.then(() => commitNow(op as Operation));
-    queue = next.catch(() => undefined);
+    const previous = commitQueues.get(db) ?? Promise.resolve();
+    const next = previous.then(() => commitNow(op as Operation));
+    commitQueues.set(db, next.catch(() => undefined));
     return next as Promise<CommitResult<K>>;
   }) as Commit;
 }

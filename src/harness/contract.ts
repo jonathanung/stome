@@ -382,7 +382,7 @@ export function assessConfirmedAnnotation(input: {
     kind: 'annotation.create',
     source: 'ai',
     confirmed: true,
-    expectedRevision: input.chunk.revision,
+    expectedRevision: proposal.chunkRevision,
     payload: {
       proposalId: proposal.id,
       roomId: proposal.roomId,

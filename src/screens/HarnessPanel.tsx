@@ -18,7 +18,7 @@ import {
   fulfillQuestion,
   type PreparedRun,
 } from '../harness/runTurn';
-import { cancelRun, latestSession, type HarnessSession } from '../harness/store';
+import { cancelRun, ensurePendingOperationId, latestSession, type HarnessSession } from '../harness/store';
 
 type ChunkTarget = {
   id: string;
@@ -84,14 +84,21 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved }: HarnessPanelPro
     }
     let active = true;
     latestSession(harnessExecutor(database))
-      .then((latest) => {
+      .then(async (latest) => {
         if (!active || !latest || latest.roomId !== roomId) {
           return;
         }
-        setSession(latest);
-        setStatus(latest.state);
-        if (latest.state === 'completed' && latest.proposal && !latest.confirmedOperationId) {
-          setProposal(latest.proposal);
+        const ready =
+          latest.state === 'completed' && latest.proposal && !latest.confirmedOperationId && !latest.pendingOperationId
+            ? await ensurePendingOperationId(harnessExecutor(database), latest.id, Date.now())
+            : latest;
+        if (!active) {
+          return;
+        }
+        setSession(ready);
+        setStatus(ready.state);
+        if (ready.state === 'completed' && ready.proposal && !ready.confirmedOperationId) {
+          setProposal(ready.proposal);
         }
         if (latest.errorMessage && (latest.state === 'failed' || latest.state === 'cancelled')) {
           setError(latest.errorMessage);

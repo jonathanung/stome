@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { pairingTtlMs, startCompanion } from '../companion/server.ts';
 import { createCommit } from '../src/data/commit.ts';
 import { getChunk, listAnnotations } from '../src/data/queries.ts';
+import type { Db } from '../src/db/driver.ts';
 import { migrateDb } from '../src/db/migrate.ts';
 import { companionProvider } from '../src/harness/companionClient.ts';
 import { nodeDb } from '../tests/support/node-db.ts';
@@ -35,6 +36,8 @@ import {
   HARNESS_MIGRATION_SQL,
   HARNESS_SCHEMA_VERSION,
   cancelRun,
+  ensurePendingOperationId,
+  repairOperationId,
   commitStubAnnotation,
   completeRun,
   createSession,
@@ -283,6 +286,7 @@ test('cancellation discards a late success and leaves no annotation', async () =
       anchorEnd: 4,
       chunkRevision: 100,
     },
+    operationId: 'late-op',
     messageId: 'late-message',
     now: 80,
   });
@@ -1227,6 +1231,280 @@ test('a confirmed chunk answer is one ai annotation and the same operation id ad
   assert.equal((await listAnnotations(app, savedChunk.id)).length, 2);
   app.close();
   harness.close();
+});
+
+test('confirm keeps the proposal revision and does not adopt a newer chunk revision', async () => {
+  const app = nodeDb();
+  await migrateDb(app);
+  const harness = await harnessDb();
+  const commit = createCommit(app, { now: () => 5_000, newId: () => 'id-1' });
+  const room = await commit({
+    opId: 'room-stale',
+    kind: 'room.create',
+    source: 'human',
+    confirmed: false,
+    payload: { name: 'biology' },
+  });
+  assert.equal(room.ok, true);
+  if (!room.ok) return;
+  const created = await commit({
+    opId: 'chunk-stale',
+    kind: 'chunk.create',
+    source: 'human',
+    confirmed: false,
+    payload: { roomId: room.value.roomId, bodies: ['photosynthesis makes sugar'] },
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+  const savedChunk = await getChunk(app, created.value.chunkIds[0] ?? '');
+  assert.ok(savedChunk);
+  if (!savedChunk) return;
+  const view = chunkViewFromFoundation(savedChunk);
+  const prepared = await beginQuestion(harness, { chunks: [view], prompt: 'Why sugar?' });
+  const outcome = await fulfillQuestion(harness, prepared, {
+    chunks: [view],
+    scenario: 'success',
+    provider: mockProvider,
+    signal: new AbortController().signal,
+  });
+  assert.equal(outcome.proposal?.chunkRevision, savedChunk.revision);
+  const operationId = outcome.session?.pendingOperationId ?? '';
+  const edited = await commit({
+    opId: 'edit-stale',
+    kind: 'chunk.update',
+    source: 'human',
+    confirmed: false,
+    expectedRevision: savedChunk.revision,
+    payload: { chunkId: savedChunk.id, body: 'a later edit' },
+  });
+  assert.equal(edited.ok, true);
+  await assert.rejects(
+    () =>
+      confirmFoundationQuestion(harness, app, {
+        sessionId: prepared.sessionId,
+        operationId,
+        confirmed: true,
+        now: 6_000,
+      }),
+    /changed/,
+  );
+  assert.equal((await listAnnotations(app, savedChunk.id)).length, 0);
+  const applied = await app.get<{ op_id: string }>('SELECT op_id FROM applied_ops WHERE op_id = ?', [operationId]);
+  assert.equal(applied, null);
+  const current = await getChunk(app, savedChunk.id);
+  assert.equal(current?.body, 'a later edit');
+  assert.equal(current?.revision, savedChunk.revision + 1);
+  app.close();
+  harness.close();
+});
+
+test('a committed pin repairs its session after reopen and a later chunk edit or delete', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'stome-pin-repair-'));
+  const appPath = join(dir, 'app.db');
+  const harnessPath = join(dir, 'harness.db');
+  const app = nodeDb(appPath);
+  const harness = openMemory(harnessPath);
+  await migrateDb(app);
+  await migrateHarness(harness);
+  let nextId = 0;
+  const commit = createCommit(app, { now: () => 4_000, newId: () => `setup-${nextId++}` });
+  const room = await commit({
+    opId: 'room-repair',
+    kind: 'room.create',
+    source: 'human',
+    confirmed: false,
+    payload: { name: 'biology' },
+  });
+  assert.equal(room.ok, true);
+  if (!room.ok) return;
+  const created = await commit({
+    opId: 'chunk-repair',
+    kind: 'chunk.create',
+    source: 'human',
+    confirmed: false,
+    payload: { roomId: room.value.roomId, bodies: ['photosynthesis makes sugar', 'a second chunk'] },
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+  const first = await getChunk(app, created.value.chunkIds[0] ?? '');
+  const second = await getChunk(app, created.value.chunkIds[1] ?? '');
+  assert.ok(first && second);
+  if (!first || !second) return;
+
+  function failingSession(inner: SqlExecutor): { db: SqlExecutor; arm(): void } {
+    let failRecord = false;
+    return {
+      arm() {
+        failRecord = true;
+      },
+      db: {
+        exec: (sql) => inner.exec(sql),
+        get: (sql, params) => inner.get(sql, params),
+        all: (sql, params) => inner.all(sql, params),
+        run: (sql, params) => inner.run(sql, params),
+        async transaction(fn) {
+          if (failRecord) {
+            failRecord = false;
+            throw new Error('injected session failure');
+          }
+          return inner.transaction(fn);
+        },
+      },
+    };
+  }
+
+  async function propose(sessionDb: SqlExecutor, appDb: Db, chunkId: string, prompt: string) {
+    const chunk = await getChunk(appDb, chunkId);
+    assert.ok(chunk);
+    if (!chunk) throw new Error('missing chunk');
+    const view = chunkViewFromFoundation(chunk);
+    const prepared = await beginQuestion(sessionDb, { chunks: [view], prompt });
+    const outcome = await fulfillQuestion(sessionDb, prepared, {
+      chunks: [view],
+      scenario: 'success',
+      provider: mockProvider,
+      signal: new AbortController().signal,
+    });
+    assert.equal(outcome.status, 'proposal');
+    return { prepared, operationId: outcome.session?.pendingOperationId ?? '', revision: chunk.revision };
+  }
+
+  const editCase = await propose(harness, app, first.id, 'Why sugar?');
+  const firstFailure = failingSession(harness);
+  firstFailure.arm();
+  await assert.rejects(
+    () =>
+      confirmFoundationQuestion(firstFailure.db, app, {
+        sessionId: editCase.prepared.sessionId,
+        operationId: editCase.operationId,
+        confirmed: true,
+        now: 5_000,
+      }),
+    /injected session failure/,
+  );
+  app.close();
+  harness.close();
+
+  const reopenedApp = nodeDb(appPath);
+  const reopenedHarness = openMemory(harnessPath);
+  const edited = await createCommit(reopenedApp, { now: () => 6_000, newId: () => 'edit-id' })({
+    opId: 'edit-after-pin',
+    kind: 'chunk.update',
+    source: 'human',
+    confirmed: false,
+    expectedRevision: editCase.revision,
+    payload: { chunkId: first.id, body: 'edited after the pin' },
+  });
+  assert.equal(edited.ok, true);
+  const repaired = await confirmFoundationQuestion(reopenedHarness, reopenedApp, {
+    sessionId: editCase.prepared.sessionId,
+    operationId: editCase.operationId,
+    confirmed: true,
+    now: 7_000,
+  });
+  assert.equal(repaired.replayed, true);
+  assert.equal((await listAnnotations(reopenedApp, first.id)).length, 1);
+  const pinRows = await reopenedApp.get<{ n: number }>('SELECT COUNT(*) AS n FROM applied_ops WHERE op_id = ?', [
+    editCase.operationId,
+  ]);
+  assert.equal(pinRows?.n, 1);
+  const session = await getSession(reopenedHarness, editCase.prepared.sessionId);
+  assert.equal(session?.confirmedOperationId, editCase.operationId);
+
+  const deleteCase = await propose(reopenedHarness, reopenedApp, second.id, 'And this?');
+  const secondFailure = failingSession(reopenedHarness);
+  secondFailure.arm();
+  await assert.rejects(
+    () =>
+      confirmFoundationQuestion(secondFailure.db, reopenedApp, {
+        sessionId: deleteCase.prepared.sessionId,
+        operationId: deleteCase.operationId,
+        confirmed: true,
+      }),
+    /injected session failure/,
+  );
+  const removed = await createCommit(reopenedApp, { now: () => 8_000, newId: () => 'delete-id' })({
+    opId: 'delete-after-pin',
+    kind: 'chunk.delete',
+    source: 'human',
+    confirmed: false,
+    expectedRevision: deleteCase.revision,
+    payload: { chunkId: second.id },
+  });
+  assert.equal(removed.ok, true);
+  const afterDelete = await confirmFoundationQuestion(reopenedHarness, reopenedApp, {
+    sessionId: deleteCase.prepared.sessionId,
+    operationId: deleteCase.operationId,
+    confirmed: true,
+    now: 9_000,
+  });
+  assert.equal(afterDelete.replayed, true);
+  assert.equal(await getChunk(reopenedApp, second.id), null);
+  assert.equal((await listAnnotations(reopenedApp, second.id)).length, 0);
+  const deletePin = await reopenedApp.get<{ n: number }>('SELECT COUNT(*) AS n FROM applied_ops WHERE op_id = ?', [
+    deleteCase.operationId,
+  ]);
+  assert.equal(deletePin?.n, 1);
+  reopenedApp.close();
+  reopenedHarness.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('a completed proposal and its operation id reopen together', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'stome-pin-id-'));
+  const app = nodeDb();
+  await migrateDb(app);
+  const path = join(dir, 'harness.db');
+  const harness = openMemory(path);
+  await migrateHarness(harness);
+  const commit = createCommit(app, { now: () => 3_000, newId: () => 'setup' });
+  const room = await commit({
+    opId: 'room-id',
+    kind: 'room.create',
+    source: 'human',
+    confirmed: false,
+    payload: { name: 'biology' },
+  });
+  assert.equal(room.ok, true);
+  if (!room.ok) return;
+  const created = await commit({
+    opId: 'chunk-id',
+    kind: 'chunk.create',
+    source: 'human',
+    confirmed: false,
+    payload: { roomId: room.value.roomId, bodies: ['photosynthesis makes sugar'] },
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+  const savedChunk = await getChunk(app, created.value.chunkIds[0] ?? '');
+  assert.ok(savedChunk);
+  if (!savedChunk) return;
+  const view = chunkViewFromFoundation(savedChunk);
+  const prepared = await beginQuestion(harness, { chunks: [view], prompt: 'Why sugar?' });
+  const outcome = await fulfillQuestion(harness, prepared, {
+    chunks: [view],
+    scenario: 'success',
+    provider: mockProvider,
+    signal: new AbortController().signal,
+  });
+  const operationId = outcome.session?.pendingOperationId ?? '';
+  assert.ok(operationId);
+  assert.equal(outcome.proposal?.chunkRevision, savedChunk.revision);
+  harness.close();
+  const reopened = openMemory(path);
+  const session = await getSession(reopened, prepared.sessionId);
+  assert.equal(session?.pendingOperationId, operationId);
+  assert.equal(session?.proposal?.id, outcome.proposal?.id);
+  await reopened.run('UPDATE harness_sessions SET pending_operation_id = NULL WHERE id = ?', [prepared.sessionId]);
+  const repaired = await ensurePendingOperationId(reopened, prepared.sessionId, 4_000);
+  const stable = repairOperationId(prepared.sessionId, outcome.proposal?.id ?? '');
+  assert.equal(repaired.pendingOperationId, stable);
+  reopened.close();
+  const persisted = await getSession(openMemory(path), prepared.sessionId);
+  assert.equal(persisted?.pendingOperationId, stable);
+  assert.equal(persisted?.proposal?.chunkRevision, savedChunk.revision);
+  app.close();
+  rmSync(dir, { recursive: true, force: true });
 });
 
 function post(
