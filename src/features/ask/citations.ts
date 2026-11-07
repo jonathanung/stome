@@ -37,6 +37,8 @@ export type CitationProblem = {
 export const BAD_ANCHOR_MESSAGE = 'Bad anchor: the cited passage does not sit inside this chunk.';
 export const MISSING_CHUNK_MESSAGE = 'This citation does not match a chunk in this room.';
 export const STALE_REVISION_MESSAGE = 'Stale revision: this chunk changed after the answer. Ask again before pinning.';
+export const STALE_PASSAGE_MESSAGE = 'Stale revision: the saved passage no longer matches this spot in the chunk.';
+export const UNVERIFIED_PASSAGE_MESSAGE = 'This saved answer has no verified passage, so the current text is not shown as the citation.';
 
 export function chunkLabel(body: string): string {
   const line = body.split('\n')[0]?.trim() ?? '';
@@ -73,6 +75,7 @@ export function citationsForProposal(
     if (requireAnchor) {
       if (chunk.revision !== proposal.chunkRevision) {
         problems.push({ chunkId, code: 'stale_revision', message: STALE_REVISION_MESSAGE });
+        return;
       }
       const quote = anchorQuote(chunk.body, proposal.anchorStart, proposal.anchorEnd);
       if (quote === null) {
@@ -104,20 +107,37 @@ export function citationsForProposal(
   return { citations, problems };
 }
 
-export function citationFromAnnotation(
-  body: string,
-  anchor: unknown,
-): { ok: true; start: number; end: number; quote: string } | { ok: false; message: string } {
+export type CitationRead =
+  | { ok: true; start: number; end: number; quote: string }
+  | { ok: false; code: 'bad_anchor' | 'stale_passage' | 'unverified'; message: string; savedQuote: string | null };
+
+function savedQuoteFrom(grounding: unknown): string | null {
+  if (typeof grounding !== 'object' || grounding === null || Array.isArray(grounding)) return null;
+  const quote = (grounding as { quote?: unknown }).quote;
+  return typeof quote === 'string' && quote.length > 0 ? quote : null;
+}
+
+/**
+ * A pin is grounded only by the passage stored when it was confirmed.
+ * Offsets alone never describe the current body. Older pins with no stored
+ * passage stay unverified. A later edit that keeps the range in bounds is
+ * stale when the current slice differs from that passage.
+ */
+export function citationFromAnnotation(body: string, anchor: unknown, grounding?: unknown): CitationRead {
+  const savedQuote = savedQuoteFrom(grounding);
+  if (!savedQuote) return { ok: false, code: 'unverified', message: UNVERIFIED_PASSAGE_MESSAGE, savedQuote: null };
   if (typeof anchor !== 'object' || anchor === null || Array.isArray(anchor)) {
-    return { ok: false, message: BAD_ANCHOR_MESSAGE };
+    return { ok: false, code: 'bad_anchor', message: BAD_ANCHOR_MESSAGE, savedQuote };
   }
   const { start, end } = anchor as { start?: unknown; end?: unknown };
   if (typeof start !== 'number' || typeof end !== 'number') {
-    return { ok: false, message: BAD_ANCHOR_MESSAGE };
+    return { ok: false, code: 'bad_anchor', message: BAD_ANCHOR_MESSAGE, savedQuote };
   }
-  const quote = anchorQuote(body, start, end);
-  if (quote === null) return { ok: false, message: BAD_ANCHOR_MESSAGE };
-  return { ok: true, start, end, quote };
+  const current = anchorQuote(body, start, end);
+  if (current === null || current !== savedQuote) {
+    return { ok: false, code: 'stale_passage', message: STALE_PASSAGE_MESSAGE, savedQuote };
+  }
+  return { ok: true, start, end, quote: savedQuote };
 }
 
 export function visiblePinError(error: unknown): string {

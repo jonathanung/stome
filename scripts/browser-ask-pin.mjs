@@ -146,6 +146,9 @@ try {
   await page.waitForFunction(() => !document.querySelector('[data-testid="proposal-card"]'), { timeout: 10000 });
   if ((await annotationTexts()).length !== beforeDecline) throw new Error('cancel wrote an annotation');
   if ((await annotationTexts()).join('\n').includes('Stop this question')) throw new Error('a late answer was kept');
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  const cancelKept = await page.evaluate(() => document.body.innerText.includes('You cancelled this question. Saved chunks were not changed.'));
+  if (!cancelKept) throw new Error('a late result replaced the cancel message');
   await hideToken();
   await shot('ask-cancelled');
   const failures = logs.filter((line) => line.startsWith('pageerror:'));

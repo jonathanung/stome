@@ -60,7 +60,7 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
   const activityRef = useRef<Activity>('idle');
   const runRef = useRef<PreparedRun | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const dropResultRef = useRef(false);
+  const askGeneration = useRef(0);
 
   function setActivity(next: Activity) {
     activityRef.current = next;
@@ -138,7 +138,7 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
     if (activityRef.current !== 'idle') {
       return;
     }
-    dropResultRef.current = false;
+    const generation = ++askGeneration.current;
     setActivity('asking');
     setError(null);
     setProposal(null);
@@ -161,13 +161,7 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
         provider: companionProvider({ baseUrl: companionUrl.trim(), token: token.trim() }),
         signal: controller.signal,
       });
-      if (dropResultRef.current || controller.signal.aborted) {
-        setProposal(null);
-        setSession(outcome.session);
-        setStatus('cancelled');
-        setError('You cancelled this question. Saved chunks were not changed.');
-        return;
-      }
+      if (generation !== askGeneration.current) return;
       setSession(outcome.session);
       setStatus(outcome.session?.state ?? outcome.status);
       if (outcome.status === 'proposal' && outcome.proposal && outcome.session?.state === 'completed') {
@@ -178,27 +172,32 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
         setError(outcome.errorMessage);
       }
     } catch (caught: unknown) {
+      if (generation !== askGeneration.current) return;
       setStatus('failed');
       setError(caught instanceof Error ? caught.message : 'Could not ask the companion');
     } finally {
-      setActivity('idle');
-      abortRef.current = null;
+      if (generation === askGeneration.current) {
+        setActivity('idle');
+        abortRef.current = null;
+      }
     }
   }
 
   async function onCancel() {
-    dropResultRef.current = true;
+    const generation = ++askGeneration.current;
     const prepared = runRef.current;
     abortRef.current?.abort();
-    if (!database || !prepared) {
-      setStatus('cancelled');
-      return;
-    }
+    setActivity('idle');
+    setProposal(null);
+    setStatus('cancelled');
+    setError('You cancelled this question. Saved chunks were not changed.');
+    if (!database || !prepared) return;
     await cancelRun(harnessExecutor(database), {
       sessionId: prepared.sessionId,
       runToken: prepared.runToken,
       now: Date.now(),
     });
+    if (askGeneration.current !== generation) return;
     setProposal(null);
     setStatus('cancelled');
     setError('You cancelled this question. Saved chunks were not changed.');
@@ -222,6 +221,7 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
       onSaved();
     } catch (caught: unknown) {
       setError(visiblePinError(caught));
+      onSaved();
     } finally {
       setActivity('idle');
     }

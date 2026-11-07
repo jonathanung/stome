@@ -30,6 +30,7 @@ export function PinnedAnswer({
   chunkBody,
   answer,
   anchor,
+  grounding,
   onOpen,
 }: {
   annotationId: string;
@@ -37,10 +38,11 @@ export function PinnedAnswer({
   chunkBody: string;
   answer: string;
   anchor: unknown;
+  grounding?: unknown;
   onOpen: (focus: ChunkFocus) => void;
 }) {
   const theme = useStoneTheme();
-  const parsed = citationFromAnnotation(chunkBody, anchor);
+  const parsed = citationFromAnnotation(chunkBody, anchor, grounding);
   const shown = answer.trim() ? `AI answer: ${answer}` : 'AI answer';
   return (
     <View testID={`annotation-${annotationId}`}>
@@ -58,9 +60,16 @@ export function PinnedAnswer({
           </Text>
         </Pressable>
       ) : (
-        <Text accessibilityRole="alert" style={{ color: theme.color.status.danger.text }} testID={`annotation-${annotationId}-error`}>
-          {parsed.message}
-        </Text>
+        <View>
+          <Text accessibilityRole="alert" style={{ color: theme.color.status.danger.text }} testID={`annotation-${annotationId}-error`}>
+            {parsed.message}
+          </Text>
+          {parsed.savedQuote ? (
+            <Text style={{ color: theme.color.text.secondary }} testID={`annotation-${annotationId}-saved`}>
+              {`Saved passage: ${parsed.savedQuote}`}
+            </Text>
+          ) : null}
+        </View>
       )}
     </View>
   );

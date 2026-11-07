@@ -5,7 +5,9 @@ import { HarnessError } from '../src/harness/contract.ts';
 import {
   BAD_ANCHOR_MESSAGE,
   MISSING_CHUNK_MESSAGE,
+  STALE_PASSAGE_MESSAGE,
   STALE_REVISION_MESSAGE,
+  UNVERIFIED_PASSAGE_MESSAGE,
   anchorQuote,
   citationFromAnnotation,
   citationsForProposal,
@@ -44,7 +46,7 @@ test('a bad anchor and a missing chunk are visible and are not quoted', () => {
   assert.equal(anchorQuote(sugar.body, 0, 99), null);
 });
 
-test('a newer chunk revision is a visible stale error and the passage still cites', () => {
+test('a newer chunk revision is a visible stale error and does not quote the current text', () => {
   const edited = { ...sugar, revision: 2 };
   const { citations, problems } = citationsForProposal(
     [sugar.id],
@@ -53,15 +55,42 @@ test('a newer chunk revision is a visible stale error and the passage still cite
   );
   assert.equal(problems[0]?.code, 'stale_revision');
   assert.equal(problems[0]?.message, STALE_REVISION_MESSAGE);
-  assert.equal(citations[0]?.quote, 'phot');
+  assert.equal(citations.some((citation) => citation.anchored || citation.quote === 'phot'), false);
 });
 
-test('a pinned annotation cites its saved range or shows a bad anchor', () => {
-  const saved = citationFromAnnotation(sugar.body, { start: 15, end: 20 });
+test('a pinned annotation cites its saved passage only when that text is still there', () => {
+  const saved = citationFromAnnotation(sugar.body, { start: 15, end: 20 }, { quote: 'makes', chunkRevision: 1 });
   assert.equal(saved.ok && saved.quote, 'makes');
-  const broken = citationFromAnnotation(sugar.body, { start: 0, end: 400 });
+  const broken = citationFromAnnotation(sugar.body, { start: 0, end: 400 }, { quote: 'makes' });
   assert.equal(broken.ok, false);
-  if (!broken.ok) assert.equal(broken.message, BAD_ANCHOR_MESSAGE);
+  if (!broken.ok) {
+    assert.equal(broken.savedQuote, 'makes');
+    assert.equal(broken.message.includes('photosynthesis'), false);
+  }
+});
+
+test('an in-bounds edit of the same length is not attributed as the saved citation', () => {
+  const original = 'photosynthesis makes sugar';
+  const quote = original.slice(0, 12);
+  const mutated = `${'X'.repeat(12)}${original.slice(12)}`;
+  assert.equal(mutated.length, original.length);
+  assert.notEqual(mutated.slice(0, 12), quote);
+  const read = citationFromAnnotation(mutated, { start: 0, end: 12 }, { quote, chunkRevision: 1 });
+  assert.equal(read.ok, false);
+  if (!read.ok) {
+    assert.equal(read.code, 'stale_passage');
+    assert.equal(read.message, STALE_PASSAGE_MESSAGE);
+    assert.equal(read.savedQuote, quote);
+    assert.equal(read.message.includes(mutated.slice(0, 12)), false);
+  }
+  const oldPin = citationFromAnnotation(mutated, { start: 0, end: 12 }, { answer: 'old pin' });
+  assert.equal(oldPin.ok, false);
+  if (!oldPin.ok) {
+    assert.equal(oldPin.code, 'unverified');
+    assert.equal(oldPin.message, UNVERIFIED_PASSAGE_MESSAGE);
+    assert.equal(oldPin.savedQuote, null);
+    assert.equal(oldPin.message.includes(mutated.slice(0, 12)), false);
+  }
 });
 
 test('pin failures name stale revision and bad anchor', () => {

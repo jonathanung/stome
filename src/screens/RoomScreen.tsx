@@ -8,7 +8,7 @@ import {
   Pressable, Text, TextInput, View,
 } from 'react-native';
 
-import { Button, Screen, useReduceMotion, useStoneTheme } from '../../design-theme/src/primitives';
+import { Button, Screen, useStoneTheme } from '../../design-theme/src/primitives';
 import { createCommit } from '../data/commit';
 import type { Annotation, Chunk, Room } from '../data/models';
 import { getRoom, listChunks, listRoomAnnotations } from '../data/queries';
@@ -18,6 +18,53 @@ import type { ChunkFocus } from '../features/ask/citations';
 import { HarnessPanel } from './HarnessPanel';
 
 type ChunkWithAnnotations = Chunk & { annotations: Annotation[] };
+
+type CitedBox = { top: number; bottom: number; height: number };
+
+type CitedSpan = {
+  scrollIntoView?: (options: { block: 'center'; inline: 'nearest'; behavior: 'auto' | 'smooth' }) => void;
+  getBoundingClientRect?: () => CitedBox;
+  parentElement?: CitedSpan | null;
+  scrollHeight?: number;
+  clientHeight?: number;
+  scrollTop?: number;
+};
+
+function citedSpan(): CitedSpan | null {
+  const doc = (globalThis as { document?: { querySelector: (selector: string) => CitedSpan | null } }).document;
+  return doc?.querySelector('[data-testid="cited-anchor"]') ?? null;
+}
+
+function spanIsVisible(span: CitedSpan): boolean {
+  const rect = span.getBoundingClientRect?.();
+  const height = (globalThis as { innerHeight?: number }).innerHeight ?? 0;
+  if (!rect || rect.height <= 0 || height <= 0) return false;
+  return rect.top >= -1 && rect.bottom <= height + 1;
+}
+
+/** Scrolls the rendered span into the viewport. A card-level jump is not enough for a long chunk. */
+function alignCitedSpan(span: CitedSpan): void {
+  span.scrollIntoView?.({ block: 'center', inline: 'nearest', behavior: 'auto' });
+  if (spanIsVisible(span)) return;
+  const rect = span.getBoundingClientRect?.();
+  const viewHeight = (globalThis as { innerHeight?: number }).innerHeight ?? 0;
+  if (!rect || rect.height <= 0 || viewHeight <= 0) return;
+  let parent = span.parentElement ?? null;
+  while (parent) {
+    const live = span.getBoundingClientRect?.();
+    if (!live || spanIsVisible(span)) return;
+    const scrollHeight = parent.scrollHeight ?? 0;
+    const clientHeight = parent.clientHeight ?? 0;
+    if (scrollHeight > clientHeight + 1 && typeof parent.scrollTop === 'number') {
+      const parentRect = parent.getBoundingClientRect?.();
+      if (parentRect && parentRect.height > 0) {
+        const delta = live.top - parentRect.top - (clientHeight - live.height) / 2;
+        parent.scrollTop += delta;
+      }
+    }
+    parent = parent.parentElement ?? null;
+  }
+}
 
 function annotationLabel(annotation: Annotation): string {
   if (annotation.type === 'stroke') return 'Whiteboard stroke';
@@ -35,8 +82,8 @@ export function RoomScreen() {
   const db = useMemo(() => expoDriver(sqlite), [sqlite]);
   const commit = useMemo(() => createCommit(db, { now: Date.now, newId: randomUUID }), [db]);
   const theme = useStoneTheme();
-  const reduceMotion = useReduceMotion();
   const listRef = useRef<FlatList<ChunkWithAnnotations>>(null);
+  const scrollY = useRef(0);
   const [focus, setFocus] = useState<ChunkFocus | null>(null);
   const [room, setRoom] = useState<Room | null>(null);
   const [chunks, setChunks] = useState<ChunkWithAnnotations[]>([]);
@@ -80,17 +127,34 @@ export function RoomScreen() {
   }, [load]);
   const openCitation = useCallback((next: ChunkFocus) => {
     setFocus(next);
-    const index = chunks.findIndex((chunk) => chunk.id === next.chunkId);
-    if (index < 0) return;
-    const doc = (globalThis as { document?: { querySelector: (selector: string) => { scrollIntoView: (options: { block: 'center'; behavior: 'auto' | 'smooth' }) => void } | null } }).document;
-    if (Platform.OS === 'web' && doc && /^[0-9a-zA-Z-]+$/.test(next.chunkId)) {
-      doc.querySelector(`[data-testid="chunk-${next.chunkId}"]`)?.scrollIntoView({
-        block: 'center',
-        behavior: reduceMotion ? 'auto' : 'smooth',
-      });
-    }
-    listRef.current?.scrollToIndex({ index, animated: !reduceMotion, viewPosition: 0.2 });
-  }, [chunks, reduceMotion]);
+  }, []);
+  useEffect(() => {
+    if (!focus || focus.end <= focus.start) return;
+    const index = chunks.findIndex((chunk) => chunk.id === focus.chunkId);
+    let cancelled = false;
+    let attempt = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const reveal = () => {
+      if (cancelled) return;
+      const span = citedSpan();
+      if (span) {
+        if (spanIsVisible(span)) return;
+        alignCitedSpan(span);
+      } else if (index >= 0) {
+        listRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0 });
+      }
+      if (attempt < 40) {
+        attempt += 1;
+        timer = setTimeout(reveal, 50);
+      }
+    };
+    const frame = requestAnimationFrame(reveal);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+      clearTimeout(timer);
+    };
+  }, [chunks, focus]);
   async function action(run: () => Promise<void>) {
     if (busy) return;
     setBusy(true);
@@ -115,9 +179,15 @@ export function RoomScreen() {
 
   return <Screen><SafeAreaView style={{ flex: 1 }}>
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-      <FlatList ref={listRef} data={chunks} extraData={focus} keyExtractor={(chunk) => chunk.id} keyboardShouldPersistTaps="handled"
-        onScrollToIndexFailed={({ index }) => {
-          listRef.current?.scrollToOffset({ offset: Math.max(0, index) * 180, animated: !reduceMotion });
+      <FlatList ref={listRef} data={chunks} extraData={focus} keyExtractor={(chunk) => chunk.id} keyboardShouldPersistTaps="handled" testID="chunk-list"
+        initialNumToRender={1} maxToRenderPerBatch={1} windowSize={1}
+        onScroll={(event) => { scrollY.current = event.nativeEvent.contentOffset.y; }}
+        scrollEventThrottle={16}
+        onScrollToIndexFailed={({ index, highestMeasuredFrameIndex }) => {
+          const goingDown = highestMeasuredFrameIndex < index;
+          const next = goingDown ? scrollY.current + 800 : Math.max(0, scrollY.current - 800);
+          scrollY.current = next;
+          listRef.current?.scrollToOffset({ offset: next, animated: false });
         }}
         contentContainerStyle={{ width: '100%', maxWidth: 760, alignSelf: 'center', padding: 20, paddingBottom: 48, gap: 12 }}
         ListHeaderComponent={<View style={{ gap: 14, marginBottom: 12 }}>
@@ -160,6 +230,7 @@ export function RoomScreen() {
               answer={typeof annotation.payload.answer === 'string' ? annotation.payload.answer : ''}
               chunkBody={item.body}
               chunkId={item.id}
+              grounding={annotation.payload}
               onOpen={openCitation}
             />
           ) : <Text key={annotation.id} style={{ color: theme.color.text.secondary }} testID={`annotation-${annotation.id}`}>
