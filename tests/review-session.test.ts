@@ -18,22 +18,38 @@ test('the review route is the room id plus an optional chunk', () => {
   assert.equal(reviewHref('room-1', 'chunk 2'), '/rooms/room-1/review?chunk=chunk%202');
 });
 
-test('the same note always gets the same question and an empty note errors', () => {
-  const first = mockReviewQuestion({ id: 'c1', body: '  photosynthesis makes sugar  ' });
-  const again = mockReviewQuestion({ id: 'c1', body: 'photosynthesis makes sugar' });
+test('the same chunk always gets the same mock question and an error continues', () => {
+  const chunk = { id: 'c1', roomId: 'room-1', body: '  photosynthesis makes sugar  ' };
+  const first = mockReviewQuestion(chunk);
+  const again = mockReviewQuestion({ ...chunk, body: 'photosynthesis makes sugar' });
   assert.equal(first.ok, true);
   assert.equal(again.ok, true);
   if (!first.ok || !again.ok) return;
   assert.equal(first.question, again.question);
-  assert.match(first.question, /photosynthesis makes sugar/);
-  const other = mockReviewQuestion({ id: 'c2', body: 'mitochondria' });
+  assert.equal(first.question, 'Mock answer (c1; messages=0): What should you remember from this note?');
+  const other = mockReviewQuestion({ id: 'c2', roomId: 'room-1', body: 'mitochondria' });
   assert.equal(other.ok, true);
   if (!other.ok) return;
   assert.notEqual(other.question, first.question);
-  const empty = mockReviewQuestion({ id: 'c3', body: '   ' });
+  assert.equal(other.question, 'Mock answer (c2; messages=0): What should you remember from this note?');
+
+  const failed = mockReviewQuestion(chunk, 'error');
+  assert.equal(failed.ok, false);
+  if (failed.ok) return;
+  assert.equal(failed.message, 'The mock provider failed before answering');
+  const continued = mockReviewQuestion({ id: 'c2', roomId: 'room-1', body: 'mitochondria' });
+  assert.equal(continued.ok, true);
+  if (!continued.ok) return;
+  assert.equal(continued.question, other.question);
+
+  const empty = mockReviewQuestion({ id: 'c3', roomId: 'room-1', body: '   ' });
   assert.equal(empty.ok, false);
   if (empty.ok) return;
   assert.match(empty.message, /empty note/);
+  const afterEmpty = mockReviewQuestion(chunk);
+  assert.equal(afterEmpty.ok, true);
+  if (!afterEmpty.ok) return;
+  assert.equal(afterEmpty.question, first.question);
 });
 
 test('a session shows unreviewed and due notes in room order', () => {

@@ -12,7 +12,7 @@ import {
   type MockScenario,
   type ProposeInput,
   type ProposeOutput,
-} from './contract';
+} from './contract.ts';
 
 export type ProviderRequest = {
   tool: typeof TOOL_NAME | typeof EDIT_TOOL_NAME;
@@ -63,16 +63,17 @@ export function mockEditOutput(input: ProposeInput): EditProposeOutput {
   };
 }
 
-export async function mockComplete(request: ProviderRequest, signal: AbortSignal): Promise<unknown> {
+/**
+ * One deterministic mock result. `cancel` is a terminal error here.
+ * `mockComplete` waits for the abort signal instead of settling immediately.
+ */
+export function settleMockRequest(request: ProviderRequest): unknown {
   if (request.tool !== TOOL_NAME && request.tool !== EDIT_TOOL_NAME) {
     throw new HarnessError('invalid_shape', 'The mock provider only runs the notes tools');
   }
   const editing = request.tool === EDIT_TOOL_NAME;
   if (!MOCK_SCENARIOS.includes(request.scenario)) {
     throw new HarnessError('invalid_shape', 'The mock scenario is unknown');
-  }
-  if (signal.aborted) {
-    throw abortError(signal);
   }
   const input = parseProposeInput(request.input);
   if (requestCharCount(input) > PROVIDER_LIMITS.maxRequestChars) {
@@ -85,7 +86,7 @@ export async function mockComplete(request: ProviderRequest, signal: AbortSignal
     throw new HarnessError('provider_error', 'The mock provider failed before answering');
   }
   if (request.scenario === 'cancel') {
-    return await waitForCancel(signal);
+    throw new HarnessError('cancelled', 'The provider call was cancelled');
   }
   if (request.scenario === 'oversize') {
     const body = 'x'.repeat(PROVIDER_LIMITS.maxOutputChars + 1);
@@ -107,6 +108,26 @@ export async function mockComplete(request: ProviderRequest, signal: AbortSignal
     };
   }
   return editing ? parseEditOutput(mockEditOutput(input)) : parseProposeOutput(mockSuccessOutput(input));
+}
+
+export async function mockComplete(request: ProviderRequest, signal: AbortSignal): Promise<unknown> {
+  if (request.tool !== TOOL_NAME && request.tool !== EDIT_TOOL_NAME) {
+    throw new HarnessError('invalid_shape', 'The mock provider only runs the notes tools');
+  }
+  if (!MOCK_SCENARIOS.includes(request.scenario)) {
+    throw new HarnessError('invalid_shape', 'The mock scenario is unknown');
+  }
+  if (signal.aborted) {
+    throw abortError(signal);
+  }
+  if (request.scenario === 'cancel') {
+    const input = parseProposeInput(request.input);
+    if (requestCharCount(input) > PROVIDER_LIMITS.maxRequestChars) {
+      throw new HarnessError('request_limit', 'The question and selected notes are over the request limit');
+    }
+    return await waitForCancel(signal);
+  }
+  return settleMockRequest(request);
 }
 
 function combineSignals(signal: AbortSignal, timeoutMs: number): { signal: AbortSignal; stop: () => void } {

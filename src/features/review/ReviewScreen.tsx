@@ -147,7 +147,7 @@ export function ReviewScreen() {
   }
 
   const card = cards[0];
-  const asked = card ? mockReviewQuestion(card) : null;
+  const asked = card && roomId ? mockReviewQuestion({ id: card.id, body: card.body, roomId }) : null;
   const pending = !busy && card ? reviewMarkController.retained(card.id) : null;
   const shownError = error ?? (pending
     ? `The previous ${REVIEW_LABEL[pending.payload.state]} mark did not finish. Retry that choice. It will not be counted twice.`
