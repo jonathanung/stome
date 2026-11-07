@@ -27,9 +27,13 @@ export type TextEditState = {
 
 type DragState = {
   id: string;
-  startBx: number;
-  startBy: number;
+  /** Board position at the moment the pointer went down — never updated. */
+  initialBx: number;
+  initialBy: number;
+  /** Original element position at pointer-down — never updated. */
   origEl: WhiteboardElement;
+  /** True once we've moved past DRAG_THRESHOLD. */
+  isDragging: boolean;
 };
 
 const MIN_SCALE = 0.1;
@@ -93,7 +97,7 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
         const hit = [...refs.elementsRef.current!].reverse().find((el) => hitTest(el, bx, by));
         if (hit) {
           refs.setSelectedIdRef.current!(hit.id);
-          refs.dragRef.current = { id: hit.id, startBx: bx, startBy: by, origEl: hit };
+          refs.dragRef.current = { id: hit.id, initialBx: bx, initialBy: by, origEl: hit, isDragging: false };
         } else {
           refs.setSelectedIdRef.current!(null);
           refs.dragRef.current = null;
@@ -172,16 +176,19 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
       // Drag selected element to move it
       if (refs.toolRef.current === 'select' && refs.dragRef.current) {
         const [bx, by] = screenToBoard(sx, sy, t);
-        const { startBx, startBy, origEl } = refs.dragRef.current;
-        const dx = bx - startBx;
-        const dy = by - startBy;
-        if (Math.abs(dx) > DRAG_THRESHOLD / t.scale || Math.abs(dy) > DRAG_THRESHOLD / t.scale) {
-          const moved = moveElement(origEl, dx, dy);
-          refs.dragRef.current = { ...refs.dragRef.current, origEl: { ...origEl } };
-          refs.setElements((prev) => prev.map((e) => (e.id === moved.id ? moved : e)));
-          // Update dragRef so next move delta is relative to new position
-          refs.dragRef.current = { id: origEl.id, startBx: bx, startBy: by, origEl: moved };
+        const { initialBx, initialBy, origEl, isDragging } = refs.dragRef.current;
+        const totalDx = bx - initialBx;
+        const totalDy = by - initialBy;
+        // Use total displacement from original tap position so threshold
+        // only blocks the very first tiny movement, not every subsequent frame.
+        if (!isDragging && Math.abs(totalDx) < DRAG_THRESHOLD && Math.abs(totalDy) < DRAG_THRESHOLD) {
+          return;
         }
+        refs.dragRef.current = { ...refs.dragRef.current, isDragging: true };
+        const moved = moveElement(origEl, totalDx, totalDy);
+        // Keep elementsRef in sync so release can read the final position.
+        refs.elementsRef.current = refs.elementsRef.current!.map((e) => (e.id === moved.id ? moved : e));
+        refs.setElements((prev) => prev.map((e) => (e.id === moved.id ? moved : e)));
         return;
       }
 
@@ -219,11 +226,14 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
 
       // Commit drag-move to history
       if (refs.toolRef.current === 'select' && refs.dragRef.current) {
-        const finalEl = refs.elementsRef.current!.find((e) => e.id === refs.dragRef.current!.id);
+        const { id, isDragging } = refs.dragRef.current;
         refs.dragRef.current = null;
+        if (!isDragging) return; // was just a tap, no move needed
+        // Read the latest element position from React state via elementsRef
+        const finalEl = refs.elementsRef.current!.find((e) => e.id === id);
         if (finalEl) {
           refs.pushHistoryRef.current!([
-            ...refs.elementsRef.current!.filter((e) => e.id !== finalEl.id),
+            ...refs.elementsRef.current!.filter((e) => e.id !== id),
             finalEl,
           ]);
         }

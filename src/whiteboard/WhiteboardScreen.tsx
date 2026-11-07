@@ -48,9 +48,10 @@ export function WhiteboardScreen() {
   const drawingRef = useRef<WhiteboardElement | null>(null);
   const dragRef = useRef<{
     id: string;
-    startBx: number;
-    startBy: number;
+    initialBx: number;
+    initialBy: number;
     origEl: WhiteboardElement;
+    isDragging: boolean;
   } | null>(null);
   const panStartRef = useRef<{ ox: number; oy: number; tx: number; ty: number } | null>(null);
   const pinchRef = useRef<{ dist: number; scale: number; ox: number; oy: number } | null>(null);
