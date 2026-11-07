@@ -18,7 +18,6 @@ import { destinationForMapping, unsetRoomMapping, type RoomMapping } from '../..
 import { changeSourcePath, changeSubjects, createSubjectReview, type SubjectReview } from '../../import/review-draft';
 import { ImportChooseFiles, ImportSteps } from './import-choose-files';
 import { RoomMappingControl } from './room-mapping';
-import { router } from 'expo-router';
 
 interface Draft extends SubjectReview {
   id: string;
@@ -132,7 +131,6 @@ export default function NoteImportScreen() {
               onChoose={choose}
               onCancel={() => { setDrafts([]); setErrors([]); }}
               onPreview={() => setStage('review')}
-              onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
             />
             {errors.map((error, i) => <Text key={i} accessibilityRole="alert" style={styles.error}>{error}</Text>)}
           </ScrollView>

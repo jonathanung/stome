@@ -41,9 +41,9 @@ function Sources() {
   const cols = width > 980 ? 4 : width > 640 ? 2 : 1;
   const items: { name: string; badge: string; tone: 'ok' | 'warn' | 'muted'; on: boolean; text: string }[] = [
     { name: 'markdown', badge: 'ready', tone: 'ok', on: true, text: 'obsidian notes or any .md file. headings, tags and properties come along.' },
-    { name: 'pdf', badge: 'ready', tone: 'ok', on: true, text: 'goodnotes, onenote or any pdf. selectable text comes in one chunk per page; handwriting is not read.' },
-    { name: 'onenote', badge: 'ready', tone: 'ok', on: true, text: 'html, mhtml or docx exports. notebook and section folders suggest subjects.' },
-    { name: 'freeform', badge: 'ready', tone: 'ok', on: true, text: 'pdf exports bring their text. png or jpeg boards come in as a reference note; shapes are not read.' },
+    { name: 'goodnotes pdf', badge: 'researching', tone: 'warn', on: false, text: 'handwriting needs a flattened export with text recognition. we\'re testing real exports first.' },
+    { name: 'onenote', badge: 'later', tone: 'muted', on: false, text: 'needs a microsoft sign-in. export a pdf for now.' },
+    { name: 'freeform', badge: 'later', tone: 'muted', on: false, text: 'boards don\'t map to linear notes yet. a whiteboard import comes with whiteboards.' },
   ];
   return (
     <View style={styles.section} accessibilityLabel="source">
@@ -71,7 +71,7 @@ function Sources() {
 }
 
 export function ImportChooseFiles({
-  collection, onCollection, rows, onPath, onRemove, onChoose, onCancel, onPreview, busy, onBack,
+  collection, onCollection, rows, onPath, onRemove, onChoose, onCancel, onPreview, busy,
 }: {
   collection: string;
   onCollection(value: string): void;
@@ -82,7 +82,6 @@ export function ImportChooseFiles({
   onCancel(): void;
   onPreview(): void;
   busy: boolean;
-  onBack?: () => void;
 }) {
   const styles = useStyles();
   const theme = useStoneTheme();
@@ -98,7 +97,6 @@ export function ImportChooseFiles({
     <View style={styles.stage}>
       <View style={styles.header}>
         <View style={styles.headerText}>
-          <Pressable accessibilityRole="link" onPress={onBack} hitSlop={8}><Text style={styles.meta}>← rooms</Text></Pressable>
           <Text accessibilityRole="header" style={styles.title}>bring your notes</Text>
           <Text style={styles.sub}>nothing is saved until you pick rooms and confirm. imports don&apos;t award stones.</Text>
         </View>
@@ -123,8 +121,8 @@ export function ImportChooseFiles({
           <View style={styles.dropText}>
             <Icon name="upload" size={24} color={theme.color.text.primary} />
             <View style={{ flexShrink: 1 }}>
-              <Text style={styles.dropTitle}>{Platform.OS === 'web' ? 'drop markdown, onenote, pdf or board image files, or choose them' : 'choose markdown, onenote, pdf or board image files'}</Text>
-              <Text style={styles.meta}>up to 20 at a time · 1 MiB each · {rows.length} chosen</Text>
+              <Text style={styles.dropTitle}>{Platform.OS === 'web' ? 'drop .md files or choose them' : 'choose .md files'}</Text>
+              <Text style={styles.meta}>up to 20 at a time · {rows.length} chosen</Text>
             </View>
           </View>
           <Pressable accessibilityRole="button" accessibilityLabel="choose files" accessibilityState={{ disabled: busy }} disabled={busy} onPress={onChoose} style={[styles.btn, styles.btnSec, busy && styles.disabled]}>
