@@ -13,7 +13,7 @@ import {
   type StoredProposal,
 } from '../harness/contract';
 import { harnessExecutor, openHarnessDatabase } from '../harness/expoDb';
-import { AnswerCitations } from '../features/ask/AnswerCitations';
+import { AskProposalCard } from '../features/ask/AskProposalCard';
 import { visiblePinError, type ChunkFocus } from '../features/ask/citations';
 import {
   beginQuestion,
@@ -391,7 +391,24 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
           <Text style={styles.secondaryText}>Continue</Text>
         </Pressable>
       </View>
-      {proposal ? (
+      {proposal && !isEditProposal(proposal) ? (
+        <AskProposalCard
+          body={proposal.body}
+          busy={busy}
+          chunks={chunks}
+          confirmDisabled={confirmDisabled}
+          onConfirm={() => {
+            void onConfirm();
+          }}
+          onDecline={() => {
+            void onDiscard();
+          }}
+          onOpen={onOpenCitation}
+          proposal={proposal}
+          selectedChunkIds={session?.selectedChunkIds ?? []}
+        />
+      ) : null}
+      {proposal && isEditProposal(proposal) ? (
         <View style={styles.proposal} testID="proposal-card">
           {isEditProposal(proposal) ? (
             <>
@@ -404,15 +421,6 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
             </>
           ) : (
             <>
-              <Text style={styles.proposalTitle}>Proposed AI answer</Text>
-              <Text testID="proposal-body">{proposal.body}</Text>
-              <AnswerCitations
-                chunks={chunks}
-                onOpen={onOpenCitation}
-                proposal={proposal}
-                selectedChunkIds={session?.selectedChunkIds ?? []}
-              />
-              <Text style={styles.help}>Decline writes nothing. Confirm pins this answer on the cited passage.</Text>
             </>
           )}
           <View style={styles.actions}>
