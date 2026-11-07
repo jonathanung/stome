@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { pairingTtlMs, startCompanion } from '../companion/server.ts';
 import { createCommit } from '../src/data/commit.ts';
 import { getChunk, listAnnotations } from '../src/data/queries.ts';
+import { citationFromAnnotation } from '../src/features/ask/citations.ts';
 import type { Db } from '../src/db/driver.ts';
 import { migrateDb } from '../src/db/migrate.ts';
 import { companionProvider } from '../src/harness/companionClient.ts';
@@ -24,7 +25,7 @@ import {
   noteToChunk,
   type ChunkView,
 } from '../src/harness/contract.ts';
-import { createProvider, mockProvider, mockSuccessOutput } from '../src/harness/provider.ts';
+import { createProvider, mockEditOutput, mockProvider, mockSuccessOutput } from '../src/harness/provider.ts';
 import {
   beginQuestion,
   confirmFoundationQuestion,
@@ -1165,6 +1166,8 @@ test('a confirmed chunk answer is one ai annotation and the same operation id ad
   assert.equal(pins[0]?.type, 'ai_answer');
   assert.deepEqual(pins[0]?.anchor, { start: 0, end: 12 });
   assert.equal(pins[0]?.payload.answer, outcome.proposal?.body);
+  assert.equal(pins[0]?.payload.quote, 'photosynthes');
+  assert.equal(pins[0]?.payload.chunkRevision, savedChunk.revision);
   const after = await getChunk(app, savedChunk.id);
   assert.equal(after?.body, 'photosynthesis makes sugar');
   assert.equal(after?.revision, savedChunk.revision);
@@ -1231,6 +1234,102 @@ test('a confirmed chunk answer is one ai annotation and the same operation id ad
   assert.equal((await listAnnotations(app, savedChunk.id)).length, 2);
   app.close();
   harness.close();
+});
+
+test('a same-length edit after pin is not reloaded as the original citation', async () => {
+  const app = nodeDb();
+  await migrateDb(app);
+  const harness = await harnessDb();
+  let groundId = 0;
+  const commit = createCommit(app, { now: () => 5_000, newId: () => `ground-${++groundId}` });
+  const room = await commit({ opId: 'ground-room', kind: 'room.create', source: 'human', confirmed: false, payload: { name: 'biology' } });
+  assert.equal(room.ok, true);
+  if (!room.ok) return;
+  const original = 'photosynthesis makes sugar';
+  const created = await commit({
+    opId: 'ground-chunk',
+    kind: 'chunk.create',
+    source: 'human',
+    confirmed: false,
+    payload: { roomId: room.value.roomId, bodies: [original] },
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+  const savedChunk = await getChunk(app, created.value.chunkIds[0] ?? '');
+  assert.ok(savedChunk);
+  if (!savedChunk) return;
+  const prepared = await beginQuestion(harness, { chunks: [chunkViewFromFoundation(savedChunk)], prompt: 'Why sugar?' });
+  const outcome = await fulfillQuestion(harness, prepared, {
+    chunks: [chunkViewFromFoundation(savedChunk)],
+    scenario: 'success',
+    provider: mockProvider,
+    signal: new AbortController().signal,
+  });
+  assert.equal(outcome.status, 'proposal');
+  await confirmFoundationQuestion(harness, app, {
+    sessionId: prepared.sessionId,
+    operationId: outcome.session?.pendingOperationId ?? '',
+    confirmed: true,
+    now: 6_000,
+  });
+  const pinned = (await listAnnotations(app, savedChunk.id))[0];
+  assert.equal(pinned?.payload.quote, original.slice(0, 12));
+  const mutated = `${'X'.repeat(12)}${original.slice(12)}`;
+  const edited = await commit({
+    opId: 'ground-edit',
+    kind: 'chunk.update',
+    source: 'ai',
+    confirmed: true,
+    expectedRevision: savedChunk.revision,
+    payload: { chunkId: savedChunk.id, body: mutated },
+  });
+  assert.equal(edited.ok, true);
+  const reloadedChunk = await getChunk(app, savedChunk.id);
+  const reloadedPin = (await listAnnotations(app, savedChunk.id))[0];
+  const read = citationFromAnnotation(reloadedChunk?.body ?? '', reloadedPin?.anchor, reloadedPin?.payload);
+  assert.equal(read.ok, false);
+  if (!read.ok) {
+    assert.equal(read.savedQuote, 'photosynthes');
+    assert.equal(read.message.includes(mutated.slice(0, 12)), false);
+  }
+  app.close();
+  harness.close();
+});
+
+test('the mock can cite a deep marker and rewrite a same-length opening', () => {
+  const text = `Note 02 open${'y'.repeat(40)}\nDEEP-ANCHOR.\n`;
+  const chunk = { id: 'chunk-deep', roomId: 'room-1', text };
+  const deep = mockSuccessOutput({
+    roomId: 'room-1',
+    prompt: 'Cite the deep passage.',
+    chunks: [chunk],
+    priorMessages: [],
+  });
+  assert.equal(text.slice(deep.anchorStart, deep.anchorEnd), 'DEEP-ANCHOR.');
+  assert.ok(deep.anchorStart > 12);
+  const ordinary = mockSuccessOutput({
+    roomId: 'room-1',
+    prompt: 'Why sugar?',
+    chunks: [chunk],
+    priorMessages: [],
+  });
+  assert.equal(ordinary.anchorStart, 0);
+  assert.equal(ordinary.anchorEnd, 12);
+  const rewritten = mockEditOutput({
+    roomId: 'room-1',
+    prompt: 'Replace the first 12 characters with XXXXXXXXXXXX.',
+    chunks: [chunk],
+    priorMessages: [],
+  });
+  assert.equal(rewritten.body.slice(0, 12), 'XXXXXXXXXXXX');
+  assert.equal(rewritten.body.slice(12), text.slice(12));
+  const appended = mockEditOutput({
+    roomId: 'room-1',
+    prompt: 'Make it clearer',
+    chunks: [chunk],
+    priorMessages: [],
+  });
+  assert.equal(appended.body.startsWith(text), true);
 });
 
 test('confirm keeps the proposal revision and does not adopt a newer chunk revision', async () => {
