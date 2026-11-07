@@ -28,7 +28,7 @@ const MIN_SCALE = 0.1;
 const MAX_SCALE = 20;
 const HISTORY_LIMIT = 50;
 
-export function WhiteboardScreen() {
+export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
   const [elements, setElements] = useState<WhiteboardElement[]>([]);
   const [history, setHistory] = useState<WhiteboardElement[][]>([[]]);
   const [historyIndex, setHistoryIndex] = useState(0);
@@ -291,7 +291,7 @@ export function WhiteboardScreen() {
 
       {/* Style panel */}
       {showStylePanel ? (
-        <View style={styles.stylePanelWrapper} pointerEvents="box-none">
+        <View style={onBack ? styles.stylePanelWrapperWithBack : styles.stylePanelWrapper} pointerEvents="box-none">
           <StylePanel
             style={currentStyle}
             onChange={(patch) => setCurrentStyle((prev) => ({ ...prev, ...patch }))}
@@ -299,9 +299,20 @@ export function WhiteboardScreen() {
         </View>
       ) : null}
 
+      {/* Back button — shown when navigated to from another screen */}
+      {onBack ? (
+        <Pressable
+          style={styles.backButton}
+          onPress={onBack}
+          accessibilityLabel="Back"
+        >
+          <Text style={styles.backIcon}>←</Text>
+        </Pressable>
+      ) : null}
+
       {/* Properties toggle */}
       <Pressable
-        style={styles.propertiesButton}
+        style={[styles.propertiesButton, onBack && styles.propertiesButtonWithBack]}
         onPress={() => setShowStylePanel((v) => !v)}
         accessibilityLabel="Toggle style panel"
       >
@@ -340,6 +351,24 @@ const styles = StyleSheet.create({
     right: 0,
   },
   stylePanelWrapper: { left: 16, position: 'absolute', top: 70 },
+  stylePanelWrapperWithBack: { left: 16, position: 'absolute', top: 120 },
+  backButton: {
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    borderRadius: 10,
+    elevation: 4,
+    height: 40,
+    justifyContent: 'center',
+    left: 16,
+    position: 'absolute',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    top: 20,
+    width: 40,
+  },
+  backIcon: { color: '#495057', fontSize: 20 },
   propertiesButton: {
     alignItems: 'center',
     backgroundColor: '#ffffff',
@@ -356,6 +385,7 @@ const styles = StyleSheet.create({
     top: 20,
     width: 40,
   },
+  propertiesButtonWithBack: { top: 70 },
   propertiesIcon: { fontSize: 20 },
   deleteButton: {
     alignItems: 'center',
