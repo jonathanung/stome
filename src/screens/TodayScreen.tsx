@@ -1,7 +1,7 @@
 import { Link, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Screen, useStoneTheme } from '../../design-theme/src/primitives';
@@ -53,6 +53,7 @@ export function TodayScreen() {
   return (
     <Screen>
       <SafeAreaView style={{ flex: 1 }}>
+        <ScrollView contentContainerStyle={{ flexGrow: 1, paddingBottom: 32 }}>
         <View style={{ width: '100%', maxWidth: 760, alignSelf: 'center', padding: 20, gap: 16 }} testID="today-screen">
           <Text accessibilityRole="header" style={{ color: theme.color.text.primary, fontSize: 32, fontWeight: '700' }}>Today</Text>
           <Text style={{ color: theme.color.text.secondary }}>Due notes from this device. The list is built when you open it.</Text>
@@ -92,6 +93,7 @@ export function TodayScreen() {
             );
           })}
         </View>
+        </ScrollView>
       </SafeAreaView>
     </Screen>
   );
