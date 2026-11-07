@@ -1,4 +1,4 @@
-import { useSQLiteContext } from 'expo-sqlite';
+import { useSQLiteContext, type SQLiteDatabase } from 'expo-sqlite';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -15,6 +15,9 @@ import {
 } from 'react-native';
 
 import { createNote, listNotes, type Note } from '../db/notes';
+import { harnessExecutor, openHarnessDatabase } from '../harness/expoDb';
+import { listStubAnnotations, type StubAnnotation } from '../harness/store';
+import { HarnessPanel } from './HarnessPanel';
 
 type NoteFormProps = {
   title: string;
@@ -84,12 +87,39 @@ function NoteForm({
   );
 }
 
-function NoteCard({ note }: { note: Note }) {
+function NoteCard({
+  note,
+  selected,
+  annotations,
+  onToggle,
+}: {
+  note: Note;
+  selected: boolean;
+  annotations: readonly StubAnnotation[];
+  onToggle: (id: number) => void;
+}) {
+  const answers = annotations.filter((annotation) => annotation.noteId === note.id);
   return (
     <View style={styles.note} testID={`note-${note.id}`}>
+      <Pressable
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: selected }}
+        accessibilityLabel={`Include ${note.title} in the question`}
+        onPress={() => onToggle(note.id)}
+        style={styles.include}
+        testID={`select-note-${note.id}`}
+      >
+        <Text style={styles.includeText}>{selected ? 'Included' : 'Include'}</Text>
+      </Pressable>
       <Text style={styles.noteTitle}>{note.title}</Text>
       {note.body.length > 0 ? <Text style={styles.noteBody}>{note.body}</Text> : null}
       <Text style={styles.noteMeta}>{new Date(note.createdAt).toLocaleString()}</Text>
+      {answers.map((annotation) => (
+        <View key={annotation.id} style={styles.answer} testID={`annotation-${annotation.id}`}>
+          <Text style={styles.answerLabel}>AI answer</Text>
+          <Text>{annotation.body}</Text>
+        </View>
+      ))}
     </View>
   );
 }
@@ -106,11 +136,43 @@ export function NotesScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [harnessDb, setHarnessDb] = useState<SQLiteDatabase | null>(null);
+  const [harnessError, setHarnessError] = useState<string | null>(null);
+  const [annotations, setAnnotations] = useState<StubAnnotation[]>([]);
 
   const refresh = useCallback(async () => {
     const rows = await listNotes(db);
     setNotes(rows);
   }, [db]);
+
+  const reloadAnnotations = useCallback(async () => {
+    if (!harnessDb) {
+      return;
+    }
+    setAnnotations(await listStubAnnotations(harnessExecutor(harnessDb)));
+  }, [harnessDb]);
+
+  useEffect(() => {
+    let active = true;
+    openHarnessDatabase()
+      .then(async (opened) => {
+        if (!active) {
+          return;
+        }
+        setHarnessDb(opened);
+        setAnnotations(await listStubAnnotations(harnessExecutor(opened)));
+      })
+      .catch((caught: unknown) => {
+        if (!active) {
+          return;
+        }
+        setHarnessError(caught instanceof Error ? caught.message : 'Could not open the harness database');
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -164,26 +226,49 @@ export function NotesScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.screen}
       >
-        <View style={styles.form}>
-          <NoteForm
-            body={body}
-            error={error}
-            onChangeBody={setBody}
-            onChangeTitle={setTitle}
-            onSubmit={() => {
-              void onSubmit();
-            }}
-            saving={saving}
-            title={title}
-          />
-        </View>
         <FlatList
           contentContainerStyle={styles.list}
           data={notes}
           keyboardShouldPersistTaps="handled"
           keyExtractor={(note) => String(note.id)}
           ListEmptyComponent={EmptyNotes}
-          renderItem={({ item }) => <NoteCard note={item} />}
+          ListHeaderComponent={
+            <View style={styles.form}>
+              <NoteForm
+                body={body}
+                error={error}
+                onChangeBody={setBody}
+                onChangeTitle={setTitle}
+                onSubmit={() => {
+                  void onSubmit();
+                }}
+                saving={saving}
+                title={title}
+              />
+              <HarnessPanel
+                database={harnessDb}
+                databaseError={harnessError}
+                notes={notes}
+                notesDb={db}
+                onSaved={() => {
+                  void refresh().then(() => reloadAnnotations());
+                }}
+                selectedIds={selectedIds}
+              />
+            </View>
+          }
+          renderItem={({ item }) => (
+            <NoteCard
+              annotations={annotations}
+              note={item}
+              onToggle={(id) => {
+                setSelectedIds((current) =>
+                  current.includes(id) ? current.filter((itemId) => itemId !== id) : [...current, id],
+                );
+              }}
+              selected={selectedIds.includes(item.id)}
+            />
+          )}
           style={styles.listView}
           testID="notes-list"
         />
@@ -295,5 +380,28 @@ const styles = StyleSheet.create({
     color: '#777777',
     fontSize: 12,
     marginTop: 6,
+  },
+  include: {
+    alignSelf: 'flex-start',
+    marginBottom: 8,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  includeText: {
+    color: '#111111',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  answer: {
+    borderTopColor: '#e2e2e2',
+    borderTopWidth: 1,
+    marginTop: 8,
+    paddingTop: 8,
+  },
+  answerLabel: {
+    color: '#333333',
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 4,
   },
 });
