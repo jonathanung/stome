@@ -31,7 +31,8 @@ STOME_APP_ORIGIN=http://localhost:8081 STOME_COMPANION_PORT=8787 npm run compani
 | --- | --- | --- |
 | Saved chunks | `stome.db` rooms and chunks | Written by the room screen and import, through `createCommit` |
 | Sessions, messages, operation ids | separate Expo SQLite file `stome-harness.db` | Harness-owned. The operation id is stored on the session before `createCommit` |
-| Confirmed AI answer | `annotations` in `stome.db` | `source: 'ai'`, `confirmed: true`, `expectedRevision` is the chunk revision just read. Replay of that operation id does not insert again |
+| Confirmed AI answer | `annotations` in `stome.db` | `source: 'ai'`, `confirmed: true`. `expectedRevision` is the revision stored on the proposal when it was created. A newer chunk revision rejects the confirm. Replay of that operation id does not insert again |
+| Confirmed AI note edit | `chunks.content` in `stome.db` | `chunk.update`, `source: 'ai'`, `confirmed: true`. The proposal stores the body it read and that revision. Confirm sends that revision, not a newer read. Cancel, discard, refusal, and a stale revision leave the saved text unchanged. Replay does not write again |
 | Older demo pins | `harness_stub_annotations` | Left in place. A `note:*` selection fails confirm and is not copied |
 | Model calls | deterministic mock in the companion | No live provider |
 
@@ -43,7 +44,7 @@ A companion payload is not a write permission. Confirmation re-reads the chunk, 
   kind: 'annotation.create',
   source: 'ai',
   confirmed: true,
-  expectedRevision: number, // chunks.revision just read
+  expectedRevision: number, // proposal.chunkRevision, not a newer read
   payload: {
     chunkId,
     type: 'ai_answer',
@@ -53,7 +54,7 @@ A companion payload is not a write permission. Confirmation re-reads the chunk, 
 }
 ```
 
-`createCommit` writes the annotation, checks the revision, and records `applied_ops` in one transaction. The session flag is a second write in `stome-harness.db`. If that flag is missed, confirming the same operation id again sees `duplicate: true` and sets the flag. It does not add a row. `commitStubAnnotation` is not used for this save.
+`createCommit` writes the annotation, checks the revision, and records `applied_ops` in one transaction. Room saves and a confirm share one queue for that database, so a human note or highlight waits until the pin transaction finishes. A failed pin rolls back only its own transaction. The session flag is a separate write in `stome-harness.db`. A retry reads `applied_ops` before it checks the chunk again. If that operation id already committed an annotation, the session flag is repaired and nothing is inserted, even when the chunk was edited or deleted afterward. A new operation id still rejects a stale or missing chunk and writes nothing. The proposal and its operation id are stored in the same session update. A completed proposal that has no operation id gets one stable id on the next open. `commitStubAnnotation` is not used for this save.
 
 ## Session states
 
@@ -63,7 +64,7 @@ A companion payload is not a write permission. Confirmation re-reads the chunk, 
 
 ## Tool and provider
 
-The registry contains only `notes.proposeAnnotation`. There is no plugin loader, shell tool, or filesystem tool.
+The registry contains only `notes.proposeAnnotation` and `notes.proposeChunkEdit`. There is no plugin loader, shell tool, or filesystem tool. `notes.proposeChunkEdit` proposes a whole-body replacement for one selected chunk. The mock keeps the original text and appends `Mock edit (<chunk id>; messages=<prior count>): <prompt>`. The proposal stores that previous body and the chunk revision it read. Confirm writes `chunk.update` with `source: 'ai'` and `expectedRevision` set to the stored revision. A newer read is not substituted. Cancel, discard, a refused confirm, and a stale or missing chunk leave the saved text unchanged and add no AI row. Replaying the operation id does not write again. If the commit landed and the session record failed, the next confirm reads `applied_ops` before it checks the chunk, then repairs the session even if the chunk was edited or deleted afterward.
 
 Mock scenarios, all deterministic:
 

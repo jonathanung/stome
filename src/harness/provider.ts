@@ -1,18 +1,21 @@
 import {
+  EDIT_TOOL_NAME,
   MOCK_SCENARIOS,
   PROVIDER_LIMITS,
   TOOL_NAME,
   HarnessError,
+  parseEditOutput,
   parseProposeInput,
   parseProposeOutput,
   requestCharCount,
+  type EditProposeOutput,
   type MockScenario,
   type ProposeInput,
   type ProposeOutput,
 } from './contract';
 
 export type ProviderRequest = {
-  tool: typeof TOOL_NAME;
+  tool: typeof TOOL_NAME | typeof EDIT_TOOL_NAME;
   input: unknown;
   scenario: MockScenario;
 };
@@ -41,10 +44,25 @@ export function mockSuccessOutput(input: ProposeInput): ProposeOutput {
   };
 }
 
-export async function mockComplete(request: ProviderRequest, signal: AbortSignal): Promise<unknown> {
-  if (request.tool !== TOOL_NAME) {
-    throw new HarnessError('invalid_shape', 'The mock provider only runs notes.proposeAnnotation');
+export function mockEditOutput(input: ProposeInput): EditProposeOutput {
+  const chunk = input.chunks[0];
+  if (!chunk || input.chunks.length !== 1) {
+    throw new HarnessError('invalid_output', 'A note edit needs exactly one chunk');
   }
+  const suffix = `\n\nMock edit (${chunk.id}; messages=${input.priorMessages.length}): ${input.prompt.trim()}`;
+  return {
+    roomId: chunk.roomId,
+    chunkId: chunk.id,
+    type: 'chunk_edit',
+    body: `${chunk.text}${suffix}`,
+  };
+}
+
+export async function mockComplete(request: ProviderRequest, signal: AbortSignal): Promise<unknown> {
+  if (request.tool !== TOOL_NAME && request.tool !== EDIT_TOOL_NAME) {
+    throw new HarnessError('invalid_shape', 'The mock provider only runs the notes tools');
+  }
+  const editing = request.tool === EDIT_TOOL_NAME;
   if (!MOCK_SCENARIOS.includes(request.scenario)) {
     throw new HarnessError('invalid_shape', 'The mock scenario is unknown');
   }
@@ -65,17 +83,25 @@ export async function mockComplete(request: ProviderRequest, signal: AbortSignal
     return await waitForCancel(signal);
   }
   if (request.scenario === 'oversize') {
+    const body = 'x'.repeat(PROVIDER_LIMITS.maxOutputChars + 1);
+    if (editing) {
+      return {
+        roomId: input.roomId,
+        chunkId: input.chunks[0]?.id ?? '',
+        type: 'chunk_edit',
+        body,
+      };
+    }
     return {
       roomId: input.roomId,
       chunkId: input.chunks[0]?.id ?? '',
       type: 'ai_answer',
-      body: 'x'.repeat(PROVIDER_LIMITS.maxOutputChars + 1),
+      body,
       anchorStart: 0,
       anchorEnd: 1,
     };
   }
-  const output = mockSuccessOutput(input);
-  return parseProposeOutput(output);
+  return editing ? parseEditOutput(mockEditOutput(input)) : parseProposeOutput(mockSuccessOutput(input));
 }
 
 function combineSignals(signal: AbortSignal, timeoutMs: number): { signal: AbortSignal; stop: () => void } {
@@ -156,7 +182,7 @@ export async function completeWithLimits(
   request: ProviderRequest,
   signal: AbortSignal,
   timeoutMs: number = PROVIDER_LIMITS.timeoutMs,
-): Promise<ProposeOutput> {
+): Promise<ProposeOutput | EditProposeOutput> {
   const timed = combineSignals(signal, timeoutMs);
   let raw: unknown;
   try {
@@ -183,5 +209,5 @@ export async function completeWithLimits(
   if (signal.aborted || timed.signal.aborted) {
     throw abortError(signal.aborted ? signal : timed.signal);
   }
-  return parseProposeOutput(raw);
+  return request.tool === EDIT_TOOL_NAME ? parseEditOutput(raw) : parseProposeOutput(raw);
 }
