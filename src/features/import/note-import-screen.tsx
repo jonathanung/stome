@@ -9,6 +9,7 @@ import { createCommit } from '../../data/commit';
 import type { Room } from '../../data/models';
 import { listChunks, listRooms } from '../../data/queries';
 import { expoDriver } from '../../db/expo-driver';
+import { freeformPathSubjects, freeformSourceIdentity } from '../../import/freeform/parse';
 import { sourceIdentity } from '../../import/markdown';
 import { onenotePathSubjects, onenoteSourceIdentity } from '../../import/onenote/parse';
 import { pdfPathSubjects, pdfSourceIdentity } from '../../import/pdf/parse';
@@ -29,7 +30,7 @@ interface Draft extends SubjectReview {
 
 function applyOnenoteFolders<T extends SubjectReview>(note: PickedNote, draft: T): T {
   if (!note.exportFormat || note.exportFormat === 'markdown' || draft.subjectsEdited) return draft;
-  const folders = note.exportFormat === 'pdf' ? pdfPathSubjects : onenotePathSubjects;
+  const folders = note.exportFormat === 'pdf' ? pdfPathSubjects : note.exportFormat === 'freeform-image' ? freeformPathSubjects : onenotePathSubjects;
   return { ...draft, ...folders(draft.fileSubjects, draft.path) };
 }
 
@@ -97,6 +98,7 @@ export default function NoteImportScreen() {
       const format = draft.note.exportFormat;
       const sourceId = format === 'pdf'
         ? pdfSourceIdentity(collection, draft.path)
+        : format === 'freeform-image' ? freeformSourceIdentity(collection, draft.path)
         : format && format !== 'markdown' ? onenoteSourceIdentity(collection, draft.path) : sourceIdentity(collection, draft.path);
       const result = await commit({
         opId: randomUUID(), kind: 'import.note', source: 'import', confirmed: true,
@@ -148,7 +150,7 @@ export default function NoteImportScreen() {
             <ImportSteps current={2} />
             <Action label="Back to files" onPress={() => setStage('choose')} />
             <Text style={styles.title}>Review and pick rooms</Text>
-            <Text style={styles.text}>Import Markdown, an HTML, MHTML, or DOCX file exported from OneNote, or a PDF (for example a GoodNotes, OneNote or Freeform export). Choose up to 20 files: 1 MiB each, or 8 MiB for a PDF. From a PDF only selectable text is imported, one chunk per page; handwriting and images are not recognized. Native .one files and ink are not imported.</Text>
+            <Text style={styles.text}>Import Markdown, an HTML, MHTML, or DOCX file exported from OneNote, a PDF (for example a GoodNotes, OneNote or Freeform export), or a PNG or JPEG Freeform board image. Choose up to 20 files: 1 MiB each, or 8 MiB for a PDF or image. Board images are kept as a reference note only; the picture is not stored or read. From a PDF only selectable text is imported, one chunk per page; handwriting and images are not recognized. Native .one files and ink are not imported.</Text>
             <Field label="Source collection" value={collection} onChangeText={setCollection} disabled={busy} />
             <Text style={styles.hint}>Use the same collection and source paths when re-importing. Review each note before confirming.</Text>
             <Action label={drafts.length ? 'Choose another batch' : 'Choose Markdown, OneNote or PDF files'} onPress={choose} disabled={busy} />

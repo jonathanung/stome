@@ -43,7 +43,7 @@ function Sources() {
     { name: 'markdown', badge: 'ready', tone: 'ok', on: true, text: 'obsidian notes or any .md file. headings, tags and properties come along.' },
     { name: 'pdf', badge: 'ready', tone: 'ok', on: true, text: 'goodnotes, onenote or any pdf. selectable text comes in one chunk per page; handwriting is not read.' },
     { name: 'onenote', badge: 'ready', tone: 'ok', on: true, text: 'html, mhtml or docx exports. notebook and section folders suggest subjects.' },
-    { name: 'freeform', badge: 'later', tone: 'muted', on: false, text: "boards don't map to linear notes yet. a whiteboard import comes with whiteboards." },
+    { name: 'freeform', badge: 'ready', tone: 'ok', on: true, text: 'pdf exports bring their text. png or jpeg boards come in as a reference note; shapes are not read.' },
   ];
   return (
     <View style={styles.section} accessibilityLabel="source">
@@ -123,7 +123,7 @@ export function ImportChooseFiles({
           <View style={styles.dropText}>
             <Icon name="upload" size={24} color={theme.color.text.primary} />
             <View style={{ flexShrink: 1 }}>
-              <Text style={styles.dropTitle}>{Platform.OS === 'web' ? 'drop markdown, onenote or pdf files, or choose them' : 'choose markdown, onenote or pdf files'}</Text>
+              <Text style={styles.dropTitle}>{Platform.OS === 'web' ? 'drop markdown, onenote, pdf or board image files, or choose them' : 'choose markdown, onenote, pdf or board image files'}</Text>
               <Text style={styles.meta}>up to 20 at a time · 1 MiB each · {rows.length} chosen</Text>
             </View>
           </View>
