@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
 import {
   ActivityIndicator, FlatList, KeyboardAvoidingView, Platform,
-  Text, TextInput, View,
+  Text, TextInput, View, useWindowDimensions,
 } from 'react-native';
 
 import { Button, Screen, useStoneTheme } from '../../design-theme/src/primitives';
@@ -18,6 +18,8 @@ import { AnchoredChunkText, PinnedAnswer } from '../features/ask/AnchoredChunkTe
 import type { ChunkFocus } from '../features/ask/citations';
 import { ChunkEditor, type EditResult } from '../features/chunks/ChunkEditor';
 import { pastedParagraphs } from '../features/chunks/paste';
+import { PencilToolbar } from '../features/ask/PencilToolbar';
+import { RoomAskPanel, type AskMessage } from '../features/ask/RoomAskPanel';
 import { Icon } from '../ui/Icon';
 import { EmptyState, Field, Notice, SectionTitle, useColumn } from '../ui/kit';
 import { HarnessPanel } from './HarnessPanel';
@@ -110,6 +112,10 @@ export function RoomScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pasteNotice, setPasteNotice] = useState<string | null>(null);
+  const { width } = useWindowDimensions();
+  const splitView = width >= 900 && width < 1300;
+  const [askOpen, setAskOpen] = useState(true);
+  const [askMessages, setAskMessages] = useState<AskMessage[]>([]);
 
   const load = useCallback(async () => {
     if (!id) return { room: null, chunks: [] as ChunkWithAnnotations[] };
@@ -214,7 +220,7 @@ export function RoomScreen() {
     </EmptyState>
   </View></SafeAreaView></Screen>;
 
-  return <Screen><SafeAreaView style={{ flex: 1 }}>
+  const roomList = <Screen><SafeAreaView style={{ flex: 1 }}>
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
       <FlatList ref={listRef} data={chunks} extraData={focus} keyExtractor={(chunk) => chunk.id} keyboardShouldPersistTaps="handled" testID="chunk-list"
         initialNumToRender={1} maxToRenderPerBatch={1} windowSize={1}
@@ -308,4 +314,20 @@ export function RoomScreen() {
       />
     </KeyboardAvoidingView>
   </SafeAreaView></Screen>;
+
+  // iPad: the room beside an ask column, with a floating pencil tool bar.
+  // The ask backend is not wired to this panel yet; questions stay local.
+  if (!splitView) return roomList;
+  return <View style={{ flex: 1, flexDirection: 'row' }} testID="room-split-view">
+    <View style={{ flex: 1, minWidth: 0 }}>
+      {roomList}
+      <PencilToolbar />
+    </View>
+    {askOpen ? <RoomAskPanel
+      subtitle={`your ink + ${chunks.length} ${chunks.length === 1 ? 'chunk' : 'chunks'}`}
+      messages={askMessages} proposal={null}
+      onSend={(text) => setAskMessages((prev) => [...prev, { id: randomUUID(), text }])}
+      onPin={() => undefined} onDecline={() => undefined}
+      onClose={() => setAskOpen(false)} /> : null}
+  </View>;
 }
