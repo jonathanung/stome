@@ -23,12 +23,31 @@ type MarkRequest = {
 /**
  * One frozen review.mark for a chunk. The same op id, time zone, revision,
  * and choice are reused when a commit succeeded but the response did not
- * come back. A later, deliberate choice is a new operation.
+ * come back, even if the note on screen has a newer revision. A different
+ * choice waits. After that attempt is acknowledged or rejected, a later
+ * mark is a new operation. The attempt lives in this JavaScript session;
+ * a full reload drops it.
  */
 export function createMarkController() {
   const retained = new Map<string, MarkAttempt>();
   const flights = new Map<string, Promise<MarkOutcome>>();
+  const listeners = new Set<() => void>();
   let generation = 0;
+
+  function notify(): void {
+    for (const listener of [...listeners]) {
+      try {
+        listener();
+      } catch {
+        // A refresh failure must not drop the write that just finished.
+      }
+    }
+  }
+
+  function invalidate(): number {
+    generation += 1;
+    return generation;
+  }
 
   function submit(input: {
     newId: () => string;
@@ -43,9 +62,7 @@ export function createMarkController() {
     const held = retained.get(request.chunkId) ?? null;
     if (
       held &&
-      (held.payload.state !== request.state ||
-        held.payload.chunkId !== request.chunkId ||
-        held.expectedRevision !== request.expectedRevision)
+      (held.payload.state !== request.state || held.payload.chunkId !== request.chunkId)
     ) {
       return Promise.resolve({ status: 'blocked', attempt: held });
     }
@@ -91,6 +108,7 @@ export function createMarkController() {
         settle({ status: 'ambiguous', error });
       } finally {
         flights.delete(request.chunkId);
+        notify();
       }
     })();
 
@@ -98,13 +116,20 @@ export function createMarkController() {
   }
 
   function requestLeave(navigate: () => void | Promise<void>): Promise<void> {
-    generation += 1;
+    invalidate();
     return Promise.all([...flights.values()]).then(() => navigate());
+  }
+
+  function subscribe(listener: () => void): () => void {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
   }
 
   return {
     submit,
     requestLeave,
+    invalidate,
+    subscribe,
     generation: () => generation,
     retained: (chunkId: string) => retained.get(chunkId) ?? null,
   };

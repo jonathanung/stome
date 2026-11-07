@@ -223,14 +223,38 @@ try {
   await page.waitForFunction(() => document.body.innerText.includes('alpha missed note') && document.body.innerText.includes('Revision'), { timeout: 15000 });
   await assertNoPairingToken('review-screen');
   await shotScreen('today-opened-review', 'review-screen');
+  await page.evaluate(() => {
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    globalThis.__stomeDeferReviewMark = gate;
+    globalThis.__releaseReviewMark = release;
+    globalThis.__stomeDeferReviewMarkEntered = false;
+    globalThis.__spa = 1;
+  });
   await clickButton('Got it');
-  await page.waitForFunction(() => document.body.innerText.includes('Saved Got it.'), { timeout: 15000 });
-  await page.click('[data-testid="review-back"]');
-  await page.waitForFunction(() => location.pathname.endsWith('/today') || document.body.innerText.includes('Nothing due today'), { timeout: 15000 });
+  await page.waitForFunction(() => globalThis.__stomeDeferReviewMarkEntered === true, { timeout: 15000 });
+  const savedEarly = await page.$eval('[data-testid="review-saved"]', (element) => element.textContent).catch(() => '');
+  if (savedEarly.includes('Saved')) throw new Error('the paused mark painted before browser back');
+  await page.evaluate(() => { history.back(); });
+  await page.waitForFunction(() => {
+    const text = document.body.innerText;
+    return globalThis.__spa === 1
+      && location.pathname.endsWith('/today')
+      && text.includes('alpha missed note')
+      && !text.includes('Saved Got it.');
+  }, { timeout: 15000 });
   if (!page.url().includes('/today') && beforeTap) {
-    throw new Error(`back did not return to Today: ${page.url()}`);
+    throw new Error(`browser back did not return to Today: ${page.url()}`);
   }
-  await page.waitForFunction(() => document.body.innerText.includes('Nothing due today'), { timeout: 15000 });
+  await assertNoPairingToken('today-screen');
+  await shotScreen('today-pending', 'today-screen');
+  await page.evaluate(() => { globalThis.__releaseReviewMark(); });
+  await page.waitForFunction(() => {
+    const text = document.body.innerText;
+    return text.includes('Nothing due today') && !text.includes('alpha missed note');
+  }, { timeout: 15000 });
+  const painted = await page.evaluate(() => document.querySelector('[data-testid="review-saved"]')?.textContent ?? '');
+  if (painted.includes('Saved')) throw new Error(`late report painted after browser back: ${painted}`);
   const todayAfter = await bodyText();
   if (todayAfter.includes('alpha missed note')) throw new Error('the reviewed note is still due');
   await assertNoPairingToken('today-screen');
@@ -251,6 +275,7 @@ try {
       'review-question-error.png',
       'today-due.png',
       'today-opened-review.png',
+      'today-pending.png',
       'today-refreshed.png',
       'room-stage.png',
     ],

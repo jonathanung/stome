@@ -33,6 +33,18 @@ function one(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
+/** The browser harness sets this gate to pause a mark before it is written. */
+function deferredReviewMark(): Promise<void> | undefined {
+  const host = globalThis as typeof globalThis & {
+    __stomeDeferReviewMark?: Promise<void>;
+    __stomeDeferReviewMarkEntered?: boolean;
+  };
+  const gate = host.__stomeDeferReviewMark;
+  if (!gate) return undefined;
+  host.__stomeDeferReviewMarkEntered = true;
+  return gate;
+}
+
 function toCard(chunk: ReviewQueueChunk): ReviewQueueChunk {
   return {
     id: chunk.id,
@@ -113,6 +125,7 @@ export function ReviewScreen() {
       });
     return () => {
       active = false;
+      reviewMarkController.invalidate();
     };
   }, [load]));
 
@@ -127,6 +140,10 @@ export function ReviewScreen() {
 
   const card = cards[0];
   const asked = card ? mockReviewQuestion(card) : null;
+  const pending = !busy && card ? reviewMarkController.retained(card.id) : null;
+  const shownError = error ?? (pending
+    ? `The previous ${REVIEW_LABEL[pending.payload.state]} mark did not finish. Retry that choice. It will not be counted twice.`
+    : null);
 
   async function mark(state: ReviewState) {
     if (!card || !roomId || marking.current) return;
@@ -139,7 +156,11 @@ export function ReviewScreen() {
       const outcome = await reviewMarkController.submit({
         newId: randomUUID,
         timeZone: deviceTimeZone,
-        commit: (attempt) => commit(attempt),
+        commit: async (attempt) => {
+          const gate = deferredReviewMark();
+          if (gate) await gate;
+          return commit(attempt);
+        },
         request: { chunkId: seen.id, state, expectedRevision: seen.revision },
         report: (result) => {
           const was = stageRef.current;
@@ -222,7 +243,7 @@ export function ReviewScreen() {
             </Pressable>
             <Text accessibilityRole="header" style={{ color: inputColor, fontSize: 32, fontWeight: '700' }}>Review</Text>
             {loading ? <ActivityIndicator /> : null}
-            {error ? <Text accessibilityRole="alert" testID="review-error" style={{ color: theme.color.status.danger.text }}>{error}</Text> : null}
+            {shownError ? <Text accessibilityRole="alert" testID="review-error" style={{ color: theme.color.status.danger.text }}>{shownError}</Text> : null}
             {!loading && missing ? (
               <View style={{ gap: 12 }}>
                 <Text accessibilityRole="alert" style={{ color: inputColor }}>This room was not found.</Text>

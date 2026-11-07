@@ -9,6 +9,7 @@ import type { DueChunk } from '../data/models';
 import { listDueChunks } from '../data/queries';
 import { planToday } from '../data/today';
 import { expoDriver } from '../db/expo-driver';
+import { reviewMarkController } from '../features/review/mark-attempt';
 import { reviewHref } from '../features/review/session';
 
 const STATE_LABEL = {
@@ -33,21 +34,28 @@ export function TodayScreen() {
 
   useFocusEffect(useCallback(() => {
     let active = true;
-    listDueChunks(db, Date.now())
-      .then((due) => {
-        if (active) {
+    let ticket = 0;
+    const load = () => {
+      const mine = ++ticket;
+      return listDueChunks(db, Date.now())
+        .then((due) => {
+          if (!active || mine !== ticket) return;
           setItems(planToday(due));
           setLoading(false);
-        }
-      })
-      .catch((reason: unknown) => {
-        if (active) {
+        })
+        .catch((reason: unknown) => {
+          if (!active || mine !== ticket) return;
           setError(reason instanceof Error ? reason.message : 'Could not read today’s list');
           setLoading(false);
-        }
-      });
+        });
+    };
+    void load();
+    const unsubscribe = reviewMarkController.subscribe(() => {
+      void load();
+    });
     return () => {
       active = false;
+      unsubscribe();
     };
   }, [db]));
 
