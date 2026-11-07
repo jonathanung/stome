@@ -24,9 +24,9 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "check:schema": "node --experimental-sqlite --experimental-strip-types scripts/check-schema.ts",
     "lint": "expo lint",
-    "check": "npm run typecheck && npm run lint && npm run check:schema"
+    "check": "npm run typecheck && npm run lint && npm test",
+    "test": "node --experimental-sqlite --experimental-strip-types --disable-warning=ExperimentalWarning --test \"tests/**/*.test.ts\""
   },
   "engines": {
     "node": "22.23.4"

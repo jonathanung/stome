@@ -3,9 +3,9 @@ import { StatusBar } from 'expo-status-bar';
 import { Component, Suspense, type ReactNode } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
+import { expoDriver } from './src/db/expo-driver';
 import { migrateDb } from './src/db/migrate';
 import { DATABASE_NAME } from './src/db/schema';
-import { NotesScreen } from './src/screens/NotesScreen';
 
 type BoundaryState = {
   error: Error | null;
@@ -46,8 +46,10 @@ export default function App() {
       <StatusBar style="auto" />
       <DatabaseBoundary>
         <Suspense fallback={<Opening />}>
-          <SQLiteProvider databaseName={DATABASE_NAME} onInit={migrateDb} useSuspense>
-            <NotesScreen />
+          <SQLiteProvider databaseName={DATABASE_NAME} onInit={(db) => migrateDb(expoDriver(db))} useSuspense>
+            <View style={styles.centered}>
+              <Text>Rooms and chunks are coming in FND.3.</Text>
+            </View>
           </SQLiteProvider>
         </Suspense>
       </DatabaseBoundary>
