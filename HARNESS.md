@@ -15,7 +15,7 @@ The companion prints a pairing token and listens on `http://127.0.0.1:8787`. Lea
 npm run web:sqlite
 ```
 
-Open the app at `http://localhost:8081` (the companion's default allowed origin). That command proxies Expo, which listens on port 8082, and adds the document headers below. Paste the token into **Pairing token**. Save a note that has body text, tick **Include**, leave the scenario on `success`, choose **Ask**, then **Confirm and save**. Reload the page. The AI answer is still under the note. The note title and body are unchanged.
+Open the app at `http://localhost:8081` (the companion's default allowed origin). That command proxies Expo, which listens on port 8082, and adds the document headers below. Create a room, add a note chunk, tick **Include** on that chunk, paste the token into **Pairing token**, leave the scenario on `success`, choose **Ask**, then **Confirm and save**. Reload the page. The AI answer is on the chunk. The chunk text and revision are unchanged.
 
 `cancel` waits until you press Cancel. `timeout`, `error`, and `oversize` fail the question and do not change the note. **Continue** asks again with the saved messages after a confirmed answer, a failure, a cancellation, or a discarded proposal. Each new proposal is confirmed on its own. An old operation id still returns the original save.
 
@@ -29,20 +29,13 @@ STOME_APP_ORIGIN=http://localhost:8081 STOME_COMPANION_PORT=8787 npm run compani
 
 | Piece | Where it lives | Status |
 | --- | --- | --- |
-| Saved notes | `stome.db` via Expo SQLite, scaffold table `notes` | Existing write path. FND.1 (#55) added `rooms`, `chunks`, and `annotations` at schema version 2. This harness does not write those tables. |
-| Sessions, messages, operation ids | separate Expo SQLite file `stome-harness.db` | Harness-owned |
-| Confirmed AI answer | `harness_stub_annotations` in `stome-harness.db` | Stub until #36 |
-| Room / chunk / annotation tables | not created | Owned by #35 |
+| Saved chunks | `stome.db` rooms and chunks | Written by the room screen and import, through `createCommit` |
+| Sessions, messages, operation ids | separate Expo SQLite file `stome-harness.db` | Harness-owned. The operation id is stored on the session before `createCommit` |
+| Confirmed AI answer | `annotations` in `stome.db` | `source: 'ai'`, `confirmed: true`, `expectedRevision` is the chunk revision just read. Replay of that operation id does not insert again |
+| Older demo pins | `harness_stub_annotations` | Left in place. A `note:*` selection fails confirm and is not copied |
 | Model calls | deterministic mock in the companion | No live provider |
 
-Until #35 exists, a chunk is a scaffold note:
-
-- room id: `scaffold-notes` (the only room this screen can select)
-- chunk id: `note:<notes.id>`
-- anchor text: the note body
-- expected revision: the note's `updated_at`
-
-A companion payload is not a write permission. Confirmation reads the scaffold note from `stome.db` immediately before it builds this request, and the stub stores it in `stome-harness.db`:
+A companion payload is not a write permission. Confirmation re-reads the chunk, then calls `createCommit`:
 
 ```ts
 {
@@ -50,23 +43,23 @@ A companion payload is not a write permission. Confirmation reads the scaffold n
   kind: 'annotation.create',
   source: 'ai',
   confirmed: true,
-  expectedRevision: number,
+  expectedRevision: number, // chunks.revision just read
   payload: {
-    proposalId, roomId, chunkId, noteId,
-    type: 'ai_answer', body, anchorStart, anchorEnd
-  }
+    chunkId,
+    type: 'ai_answer',
+    anchor: { start, end },
+    payload: { answer, proposalId },
+  },
 }
 ```
 
-`src/harness/store.ts` `commitStubAnnotation` is the temporary writer. Replace it with the #36 function. The replacement is tracked in #53. Do not treat `harness_stub_annotations` as the shared annotation schema.
-
-That note read is not atomic with the stub write. The two databases are separate files, so a note edit can still commit after the read and before the stub insert. The revision check uses the `updated_at` from that read. It is not the Foundation confirmation gate, and this harness does not claim that gate exists. Schema version 2 from #55 creates the Foundation tables and leaves them unused here. #53 is where that cross-database limit has to be closed, by writing through the real commit in one database.
+`createCommit` writes the annotation, checks the revision, and records `applied_ops` in one transaction. The session flag is a second write in `stome-harness.db`. If that flag is missed, confirming the same operation id again sees `duplicate: true` and sets the flag. It does not add a row. `commitStubAnnotation` is not used for this save.
 
 ## Session states
 
 `idle → running → completed | failed | cancelled`
 
-`completed`, `failed`, and `cancelled` can return to `running` only through **Continue**. A completed session with an unconfirmed proposal must be confirmed or discarded first. Confirming one proposal does not consume the next one: the confirmation flag applies to the current proposal, and the next turn clears it. The previous proposal stays saved because its proposal id already has a stub row, and its operation id still replays from `harness_operations`. A session still `running` when the harness database opens is marked `failed` with `interrupted`. A result that arrives after cancel, or after that restart, is discarded. If a saved note is missing when a run tries to finish, the run is marked `failed` instead of staying `running`.
+`completed`, `failed`, and `cancelled` can return to `running` only through **Continue**. A completed session with an unconfirmed proposal must be confirmed or discarded first. Confirming one proposal does not consume the next one: the confirmation flag applies to the current proposal, and the next turn clears it. The previous operation id still replays from `applied_ops` and `harness_operations`. A session still `running` when the harness database opens is marked `failed` with `interrupted`. A result that arrives after cancel, or after that restart, is discarded. If a saved chunk is missing when a run tries to finish, the run is marked `failed` instead of staying `running`.
 
 ## Tool and provider
 

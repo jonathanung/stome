@@ -21,7 +21,7 @@ export type SqlExecutor = {
   transaction<T>(fn: (tx: SqlExecutor) => Promise<T>): Promise<T>;
 };
 
-export const HARNESS_SCHEMA_VERSION = 1;
+export const HARNESS_SCHEMA_VERSION = 2;
 
 // Isolated from stome.db. These names are harness-owned and are not the
 // Foundation Room / chunk / annotation tables.
@@ -36,6 +36,7 @@ CREATE TABLE harness_sessions (
   error_message TEXT,
   proposal_json TEXT,
   confirmed_operation_id TEXT,
+  pending_operation_id TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -83,6 +84,7 @@ type SessionRow = {
   error_message: string | null;
   proposal_json: string | null;
   confirmed_operation_id: string | null;
+  pending_operation_id: string | null;
   created_at: number;
   updated_at: number;
 };
@@ -97,6 +99,7 @@ export type HarnessSession = {
   errorMessage: string | null;
   proposal: StoredProposal | null;
   confirmedOperationId: string | null;
+  pendingOperationId: string | null;
   createdAt: number;
   updatedAt: number;
 };
@@ -156,6 +159,7 @@ function mapSession(row: SessionRow): HarnessSession {
     errorMessage: row.error_message,
     proposal: row.proposal_json ? (JSON.parse(row.proposal_json) as StoredProposal) : null,
     confirmedOperationId: row.confirmed_operation_id,
+    pendingOperationId: row.pending_operation_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -195,10 +199,19 @@ export async function migrateHarness(db: SqlExecutor): Promise<void> {
   if (version === HARNESS_SCHEMA_VERSION) {
     return;
   }
-  await db.transaction(async (tx) => {
-    await tx.exec(HARNESS_MIGRATION_SQL);
-    await tx.exec(`PRAGMA user_version = ${HARNESS_SCHEMA_VERSION}`);
-  });
+  if (version === 0) {
+    await db.transaction(async (tx) => {
+      await tx.exec(HARNESS_MIGRATION_SQL);
+      await tx.exec(`PRAGMA user_version = ${HARNESS_SCHEMA_VERSION}`);
+    });
+    return;
+  }
+  if (version === 1) {
+    await db.transaction(async (tx) => {
+      await tx.exec('ALTER TABLE harness_sessions ADD COLUMN pending_operation_id TEXT');
+      await tx.exec(`PRAGMA user_version = ${HARNESS_SCHEMA_VERSION}`);
+    });
+  }
 }
 
 export async function createSession(
@@ -264,7 +277,7 @@ export async function startRun(
     await tx.run(
       `UPDATE harness_sessions
        SET state = 'running', run_token = ?, error_code = NULL, error_message = NULL,
-           confirmed_operation_id = NULL, updated_at = ?
+           confirmed_operation_id = NULL, pending_operation_id = NULL, updated_at = ?
        WHERE id = ?`,
       [input.runToken, input.now, input.sessionId],
     );
@@ -349,7 +362,7 @@ export async function cancelRun(
 export async function discardProposal(db: SqlExecutor, sessionId: string, now: number): Promise<void> {
   await db.run(
     `UPDATE harness_sessions
-     SET proposal_json = NULL, updated_at = ?
+     SET proposal_json = NULL, pending_operation_id = NULL, updated_at = ?
      WHERE id = ? AND state = 'completed' AND confirmed_operation_id IS NULL`,
     [now, sessionId],
   );
@@ -387,6 +400,58 @@ function resultFromOperation(row: OperationRow): StubCommitResult {
 export async function readStubResult(db: SqlExecutor, operationId: string): Promise<StubCommitResult | null> {
   const existing = await db.get<OperationRow>('SELECT result_json FROM harness_operations WHERE id = ?', [operationId]);
   return existing ? resultFromOperation(existing) : null;
+}
+
+/** Remember the operation id for this proposal before the Foundation commit runs. */
+export async function holdOperationId(
+  db: SqlExecutor,
+  input: { sessionId: string; operationId: string; now: number },
+): Promise<void> {
+  const operationId = input.operationId.trim();
+  if (operationId.length === 0 || operationId.length > 64) {
+    throw new HarnessError('invalid_shape', 'The operation id is missing');
+  }
+  await db.run(
+    `UPDATE harness_sessions
+     SET pending_operation_id = ?, updated_at = ?
+     WHERE id = ? AND state = 'completed' AND confirmed_operation_id IS NULL
+       AND (pending_operation_id IS NULL OR pending_operation_id = ?)`,
+    [operationId, input.now, input.sessionId, operationId],
+  );
+  const session = await requireSession(db, input.sessionId);
+  if (session.pendingOperationId !== operationId) {
+    throw new HarnessError('invalid_shape', 'This proposal already has a different operation id');
+  }
+}
+
+/** Session bookkeeping after createCommit accepts the pin. Does not write annotations. */
+export async function recordFoundationPin(
+  db: SqlExecutor,
+  input: { sessionId: string; operationId: string; annotationId: string; now: number },
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    const existing = await tx.get<OperationRow>('SELECT result_json FROM harness_operations WHERE id = ?', [
+      input.operationId,
+    ]);
+    if (!existing) {
+      const result: StubCommitResult = {
+        replayed: false,
+        annotationId: input.annotationId,
+        operationId: input.operationId,
+      };
+      await tx.run('INSERT INTO harness_operations (id, result_json, created_at) VALUES (?, ?, ?)', [
+        input.operationId,
+        JSON.stringify(result),
+        input.now,
+      ]);
+    }
+    await tx.run(
+      `UPDATE harness_sessions
+       SET confirmed_operation_id = ?, pending_operation_id = NULL, updated_at = ?
+       WHERE id = ?`,
+      [input.operationId, input.now, input.sessionId],
+    );
+  });
 }
 
 /**

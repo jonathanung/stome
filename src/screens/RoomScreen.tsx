@@ -13,6 +13,7 @@ import { createCommit } from '../data/commit';
 import type { Annotation, Chunk, Room } from '../data/models';
 import { getRoom, listChunks, listRoomAnnotations } from '../data/queries';
 import { expoDriver } from '../db/expo-driver';
+import { HarnessPanel } from './HarnessPanel';
 
 type ChunkWithAnnotations = Chunk & { annotations: Annotation[] };
 
@@ -120,6 +121,7 @@ export function RoomScreen() {
           {error ? <Text accessibilityRole="alert" style={{ color: theme.color.status.danger.text }}>{error}</Text> : null}
         </View>}
         ListEmptyComponent={<Text style={{ color: theme.color.text.secondary }}>No notes in this room yet.</Text>}
+        ListFooterComponent={<HarnessPanel roomId={room.id} chunks={chunks} appDb={sqlite} onSaved={() => { void refresh(); }} />}
         renderItem={({ item, index }) => <View style={{ backgroundColor: theme.color.bg.surface, borderColor: theme.color.border.hairline, borderWidth: 1, borderRadius: theme.radius.card, padding: 16, gap: 10 }}>
           <Text style={{ color: theme.color.text.tertiary }}>Chunk {index + 1} · {new Date(item.createdAt).toLocaleString()}</Text>
           <Text style={{ color: theme.color.text.primary, fontSize: 16, lineHeight: 24 }}>{item.body}</Text>
