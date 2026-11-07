@@ -1,8 +1,9 @@
 # Pull requests and pushes to main.
-# TypeScript, Expo lint, and the Node sqlite schema script.
-# The build job exports the Expo web target with Metro. That is a browser
-# bundle, not an iOS or Android native compile.
-# No simulator, signing, deploy, secrets, or provider calls.
+# check: TypeScript, Expo lint, and the Node sqlite schema script.
+# build: Metro web export. That is a browser bundle, not a native compile.
+# render-web: Chrome opens that export and fails on render or runtime errors.
+# render-android: Android emulator runs the debug app. iOS is not run.
+# No signing, deploy, secrets, or paid device lab.
 
 name: checks
 
@@ -79,3 +80,114 @@ jobs:
           path: dist
           retention-days: 7
           if-no-files-found: error
+
+  # Chrome against the production web export. Not a native runtime.
+  render-web:
+    name: Web render
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      EXPO_NO_TELEMETRY: "1"
+      STOME_RENDER_OUT: render-smoke-web
+      STOME_PUPPETEER_ROOT: /tmp/stome-browser/package.json
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Download web export
+        uses: actions/download-artifact@v7
+        with:
+          name: web-export
+          path: dist
+
+      - name: Ensure Chrome
+        run: |
+          if ! command -v google-chrome >/dev/null 2>&1; then
+            wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+            sudo apt-get install -y /tmp/chrome.deb
+          fi
+          google-chrome --version
+
+      - name: Install puppeteer-core
+        run: npm install --prefix /tmp/stome-browser puppeteer-core@24
+
+      - name: Render web screens
+        run: node scripts/render-smoke-web.mjs
+
+      - name: Upload web render evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: render-web
+          path: render-smoke-web
+          retention-days: 7
+          if-no-files-found: warn
+
+  # Android emulator debug app. Not a browser viewport or a Metro export.
+  # iOS Simulator cannot run on ubuntu-latest, and this workflow has no iOS job.
+  render-android:
+    name: Android emulator render
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      EXPO_NO_TELEMETRY: "1"
+      REACT_NATIVE_PACKAGER_HOSTNAME: localhost
+      STOME_RENDER_OUT: render-smoke-android
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      - name: Setup Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install
+        run: npm ci
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+
+      - name: Require Android SDK
+        run: |
+          sdk="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          test -n "$sdk"
+          test -d "$sdk"
+          echo "Android SDK $sdk"
+
+      - name: Boot emulator and render
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          ram-size: 2048M
+          disk-size: 6144M
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -no-metrics
+          script: node scripts/render-smoke-android.mjs
+
+      - name: Upload Android render evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: render-android
+          path: render-smoke-android
+          retention-days: 7
+          if-no-files-found: warn
