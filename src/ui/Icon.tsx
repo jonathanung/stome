@@ -27,7 +27,8 @@ export type IconName =
   | 'sticky'
   | 'undo'
   | 'redo'
-  | 'chat';
+  | 'chat'
+  | 'arrowUp';
 
 /** 24px stroke glyphs, drawn the way the Stone boards draw them (1.75 stroke, round caps). */
 function Glyph({ name }: { name: IconName }) {
@@ -80,6 +81,8 @@ function Glyph({ name }: { name: IconName }) {
       return <><Path d="m15 14 5-5-5-5" /><Path d="M20 9H9a5 5 0 0 0 0 10h3" /></>;
     case 'chat':
       return <Path d="M4 5h16v11H9l-5 4z" />;
+    case 'arrowUp':
+      return <><Path d="M12 19V5" /><Path d="m5 12 7-7 7 7" /></>;
     case 'spark':
       return <><Path d="M12 3v3" /><Path d="M12 18v3" /><Path d="M3 12h3" /><Path d="M18 12h3" /><Path d="m6 6 2 2" /><Path d="m16 16 2 2" /><Path d="m6 18 2-2" /><Path d="m16 8 2-2" /></>;
   }
