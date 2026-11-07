@@ -1,6 +1,6 @@
 export const DATABASE_NAME = 'stome.db';
 
-export const SUPPORTED_VERSION = 4;
+export const SUPPORTED_VERSION = 5;
 
 export { ROOM_STAGES, ANNOTATION_TYPES, type RoomStage, type AnnotationType } from './models.ts';
 
@@ -129,6 +129,18 @@ export const MIGRATIONS: readonly Migration[] = [
         imported_at INTEGER NOT NULL
       );
       CREATE INDEX import_sources_room ON import_sources (room_id);
+    `,
+  },
+  {
+    version: 5,
+    name: 'room whiteboards',
+    sql: `
+      CREATE TABLE whiteboards (
+        room_id TEXT PRIMARY KEY NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+        revision INTEGER NOT NULL DEFAULT 1,
+        items TEXT NOT NULL CHECK (json_valid(items)),
+        updated_at INTEGER NOT NULL
+      );
     `,
   },
 ];

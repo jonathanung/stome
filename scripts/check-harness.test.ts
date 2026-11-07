@@ -10,6 +10,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { pairingTtlMs, startCompanion } from '../companion/server.ts';
+import { parseBoardReply, parseBoardRequest } from '../src/whiteboard/assistant.ts';
 import { companionProvider } from '../src/harness/companionClient.ts';
 import { serializedExecutor, type RawSql } from '../src/harness/serialized.ts';
 import {
@@ -1158,3 +1159,18 @@ function rawPost(
     req.end(input.body);
   });
 }
+
+test('board companion endpoint requires pairing and returns a validated reply', async (t) => {
+  const server = await startCompanion({ origin: 'http://localhost:8081', token: 'test-token', expiresAt: Date.now() + 60_000, provider: mockProvider });
+  t.after(() => server.close());
+  const request = parseBoardRequest({ roomId: 'room-1', revision: 0, action: 'check', items: [] });
+  const postBoard = (token: string) => fetch(`${server.url}/v1/board`, { method: 'POST',
+    headers: { origin: 'http://localhost:8081', 'content-type': 'application/json', 'x-stome-token': token },
+    body: JSON.stringify(request) });
+  assert.equal((await postBoard('wrong')).status, 401);
+  const response = await postBoard('test-token');
+  assert.equal(response.status, 200);
+  const body = await response.json() as { ok: boolean; provider: string; output: unknown };
+  assert.equal(body.provider, 'mock');
+  assert.match(parseBoardReply(body.output, request).message, /Mock check/);
+});
