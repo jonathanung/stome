@@ -1,39 +1,43 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
-import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, ScrollView, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Screen, useStoneTheme } from '../../design-theme/src/primitives';
 import type { RecentChunk } from '../data/models';
 import { listRecentChunks } from '../data/queries';
+import { searchNotes, type SearchHit, type SearchKind } from '../data/search';
 import { expoDriver } from '../db/expo-driver';
-import { BackButton, EmptyState, Notice, ScreenHeader, useColumn } from '../ui/kit';
+import { Icon } from '../ui/Icon';
+import { BackButton, EmptyState, Field, Notice, ScreenHeader, useColumn } from '../ui/kit';
+import { Eyebrow, FilterChip, RecentRow, SearchResult, groupByRecency } from './RecentSearchParts';
 
 const RECENT_LIMIT = 30;
+const WIDE = 1000;
+const KINDS: { label: string; kinds: SearchKind[] }[] = [
+  { label: 'Everything', kinds: [] },
+  { label: 'Chunks', kinds: ['chunk'] },
+  { label: 'Highlights', kinds: ['highlight'] },
+  { label: 'AI answers', kinds: ['ai_answer'] },
+];
 
-/** "2h ago" style label; falls back to the date after a week. */
-function ago(timestamp: number, now = Date.now()): string {
-  const minutes = Math.round((now - timestamp) / 60_000);
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  if (days === 1) return 'yesterday';
-  if (days < 7) return `${days} days ago`;
-  return new Date(timestamp).toLocaleDateString();
-}
-
-/** The most recently edited chunks across every room, newest first (#39). */
+/** Search across rooms plus the most recently edited chunks, newest first (#39, #10). */
 export function RecentScreen() {
   const sqlite = useSQLiteContext();
   const db = useMemo(() => expoDriver(sqlite), [sqlite]);
   const theme = useStoneTheme();
   const column = useColumn();
+  const { width } = useWindowDimensions();
+  const wide = width >= WIDE;
   const [chunks, setChunks] = useState<RecentChunk[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [kindIndex, setKindIndex] = useState(0);
+  const [roomId, setRoomId] = useState<string | null>(null);
+  const [hits, setHits] = useState<SearchHit[]>([]);
+  const [searching, setSearching] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -57,66 +61,119 @@ export function RecentScreen() {
     }, [db]),
   );
 
-  const last = chunks.length - 1;
+  const trimmed = query.trim();
+  const shownHits = trimmed ? hits : [];
+  useEffect(() => {
+    if (!trimmed) return;
+    let active = true;
+    const timer = setTimeout(() => {
+      setSearching(true);
+      searchNotes(db, trimmed, { kinds: KINDS[kindIndex].kinds, roomId })
+        .then((rows) => active && setHits(rows))
+        .catch((reason: unknown) => active && setError(reason instanceof Error ? reason.message : 'Search failed'))
+        .finally(() => active && setSearching(false));
+    }, 200);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [db, trimmed, kindIndex, roomId]);
+
+  const rooms = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const chunk of chunks) seen.set(chunk.roomId, chunk.roomName);
+    return [...seen];
+  }, [chunks]);
+  const roomName = rooms.find(([id]) => id === roomId)?.[1];
+  const cycleRoom = () => {
+    const at = rooms.findIndex(([id]) => id === roomId);
+    setRoomId(at + 1 < rooms.length ? rooms[at + 1][0] : null);
+  };
+
+  const groups = useMemo(() => {
+    const order: string[] = [];
+    const byRoom = new Map<string, SearchHit[]>();
+    for (const hit of shownHits) {
+      if (!byRoom.has(hit.roomName)) order.push(hit.roomName);
+      byRoom.set(hit.roomName, [...(byRoom.get(hit.roomName) ?? []), hit]);
+    }
+    return order.map((name) => ({ name, items: byRoom.get(name) ?? [] }));
+  }, [shownHits]);
+
+  const open = (id: string) => router.push(`/rooms/${id}`);
+  const recent = (
+    <View style={{ gap: theme.space.xs, padding: theme.space.card, borderRadius: theme.radius.card, borderWidth: 1, borderColor: theme.color.border.hairline, backgroundColor: theme.color.bg.surface }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <Text style={[theme.text('title'), { color: theme.color.text.primary }]}>Recent notes</Text>
+        <Text style={[theme.text('label'), { color: theme.color.text.tertiary }]}>This device</Text>
+      </View>
+      {loading ? <ActivityIndicator color={theme.color.accent.bg} /> : null}
+      {!loading && !chunks.length ? <EmptyState title="Nothing edited yet" body="Notes you write show up here, newest first." /> : null}
+      {groupByRecency(chunks).map((group) => (
+        <View key={group.label}>
+          <Eyebrow top={theme.space.xxl}>{group.label}</Eyebrow>
+          {group.items.map((chunk, i) => (
+            <RecentRow key={chunk.id} chunk={chunk} last={i === group.items.length - 1} onPress={() => open(chunk.roomId)} />
+          ))}
+        </View>
+      ))}
+    </View>
+  );
+
+  const results = trimmed ? (
+    <View style={{ gap: theme.space.xl }}>
+      {searching && !shownHits.length ? <ActivityIndicator color={theme.color.accent.bg} /> : null}
+      {!searching && !shownHits.length ? <EmptyState title="No matches" body="Try a different word, or widen the filters." /> : null}
+      {groups.map((group, i) => (
+        <View key={group.name} style={{ gap: theme.space.xl }}>
+          <Eyebrow top={i ? theme.space.md : 0}>{`${group.name} · ${group.items.length}`}</Eyebrow>
+          {group.items.map((hit) => (
+            <SearchResult key={hit.key} hit={hit} query={trimmed} onPress={() => open(hit.roomId)} />
+          ))}
+        </View>
+      ))}
+    </View>
+  ) : null;
+
   return (
     <Screen>
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'left', 'right']}>
-        <FlatList
-          data={chunks}
-          keyExtractor={(chunk) => chunk.id}
-          contentContainerStyle={[column, { paddingBottom: 120 }]}
-          ListHeaderComponent={
-            <View style={{ gap: theme.space.base, marginBottom: theme.space.section }}>
-              <ScreenHeader back={<BackButton label="Rooms" accessibilityLabel="All rooms" onPress={() => router.replace('/')} />} title="Recent notes">
-                <Text style={[theme.text('bodySmall'), { color: theme.color.text.secondary }]}>
-                  The chunks you edited most recently, across all rooms.
-                </Text>
-              </ScreenHeader>
-              {loading ? <ActivityIndicator color={theme.color.accent.bg} /> : null}
-              {error ? <Notice tone="danger">{error}</Notice> : null}
+        <ScrollView contentContainerStyle={[column, { paddingBottom: 120, gap: theme.space.card }, wide ? { maxWidth: 1180 } : null]} keyboardShouldPersistTaps="handled">
+          <ScreenHeader back={<BackButton label="Rooms" accessibilityLabel="All rooms" onPress={() => router.replace('/')} />} title="Find a note" />
+          <View
+            accessibilityRole="search"
+            style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.xl, paddingLeft: 18, paddingRight: theme.space.md, minHeight: 56, borderRadius: 18, borderWidth: 1.5, borderColor: theme.color.text.primary, backgroundColor: theme.color.bg.surface }}>
+            <Icon name="search" size={20} color={theme.color.text.secondary} />
+            <Field
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search notes, highlights and answers"
+              accessibilityLabel="Search notes, highlights and answers"
+              returnKeyType="search"
+              autoCorrect={false}
+              style={{ flex: 1, backgroundColor: 'transparent', borderColor: 'transparent' }}
+            />
+            {trimmed && !searching ? <Text style={[theme.text('label'), { color: theme.color.text.tertiary, paddingRight: theme.space.md }]}>{shownHits.length === 1 ? '1 result' : `${shownHits.length} results`}</Text> : null}
+          </View>
+          <View accessibilityRole="toolbar" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.space.md }}>
+            {KINDS.map((kind, i) => (
+              <FilterChip key={kind.label} label={kind.label} on={i === kindIndex} onPress={() => setKindIndex(i)} />
+            ))}
+            <FilterChip label={roomName ? `${roomName} ▾` : 'All rooms ▾'} on={!!roomId} onPress={cycleRoom} />
+          </View>
+          {error ? <Notice tone="danger">{error}</Notice> : null}
+          {wide && results ? (
+            <View style={{ flexDirection: 'row', gap: theme.space.section, alignItems: 'flex-start' }}>
+              <View style={{ flex: 1.5 }}>{results}</View>
+              <View style={{ flex: 1 }}>{recent}</View>
             </View>
-          }
-          ListEmptyComponent={loading ? undefined : <EmptyState title="Nothing edited yet" body="Notes you write show up here, newest first." />}
-          renderItem={({ item, index }) => (
-            <Pressable
-              accessibilityRole="link"
-              accessibilityLabel={`Open ${item.roomName}: ${item.body.slice(0, 60)}`}
-              onPress={() => router.push(`/rooms/${item.roomId}`)}
-              style={({ pressed }) => ({
-                backgroundColor: pressed ? theme.color.bg.alt : theme.color.bg.surface,
-                borderColor: theme.color.border.hairline,
-                borderLeftWidth: 1,
-                borderRightWidth: 1,
-                borderTopWidth: 1,
-                borderBottomWidth: index === last ? 1 : 0,
-                borderTopLeftRadius: index === 0 ? theme.radius.float : 0,
-                borderTopRightRadius: index === 0 ? theme.radius.float : 0,
-                borderBottomLeftRadius: index === last ? theme.radius.float : 0,
-                borderBottomRightRadius: index === last ? theme.radius.float : 0,
-                paddingHorizontal: theme.space.base,
-                paddingVertical: theme.space.xxl,
-                gap: theme.space.sm,
-                minHeight: theme.layout.control,
-              })}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: theme.space.xl }}>
-                <Text numberOfLines={1} style={[theme.text('label'), { flex: 1, color: theme.color.text.secondary }]}>{item.roomName}</Text>
-                <Text style={[theme.text('label'), { color: theme.color.text.tertiary }]}>{ago(item.updatedAt)}</Text>
-              </View>
-              <Text numberOfLines={3} style={[theme.text('bodySmall'), { color: theme.color.text.primary }]}>
-                {item.body.trim() ? item.body.slice(0, 280) : 'Empty chunk'}
-              </Text>
-              {item.subjects.length ? (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.space.sm }}>
-                  {item.subjects.map((subject) => (
-                    <Text key={subject} style={[theme.text('label'), { color: theme.color.text.secondary, backgroundColor: theme.color.bg.inset, borderRadius: theme.radius.pill, paddingHorizontal: theme.space.lg, paddingVertical: 2, overflow: 'hidden' }]}>
-                      {subject}
-                    </Text>
-                  ))}
-                </View>
-              ) : null}
-            </Pressable>
+          ) : (
+            <>
+              {results}
+              {recent}
+            </>
           )}
-        />
+        </ScrollView>
       </SafeAreaView>
     </Screen>
   );

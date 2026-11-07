@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Pressable, Text, TextInput, View } from 'react-native';
+import { Pressable, Text, TextInput, View, useWindowDimensions } from 'react-native';
 
-import { Button, StoneText, useStoneTheme } from '../../../design-theme/src/primitives';
+import { StoneText, useStoneTheme } from '../../../design-theme/src/primitives';
 import type { Chunk } from '../../data/models';
+import Svg, { Path } from 'react-native-svg';
+
+import { Icon } from '../../ui/Icon';
 import { deleteAfterFlush, type AutosaveController, type AutosaveState } from './autosave';
 import { DraftRevision, saveBodyWithBase } from './draft-revision';
 import { readDraft, syncChunkDraft } from './draft-store';
@@ -45,6 +48,8 @@ export function ChunkEditor({
 }: ChunkEditorProps) {
   const theme = useStoneTheme();
   const n = index + 1;
+  const phone = useWindowDimensions().width < 640;
+  const [editing, setEditing] = useState(false);
 
   // Draft base is frozen on the first keystroke. Render reads `view`, which
   // is state copied from that record after each edit or save.
@@ -130,12 +135,31 @@ export function ChunkEditor({
       nativeID={nativeID}
       style={{
         backgroundColor: theme.color.bg.surface,
-        borderColor: highlighted ? theme.color.status.warning.fill : theme.color.border.hairline,
+        borderColor: state.status === 'error' ? theme.color.status.danger.fill
+          : highlighted ? theme.color.status.warning.fill : theme.color.border.hairline,
         borderWidth: highlighted ? 2 : 1,
-        borderRadius: theme.radius.card,
-        padding: theme.space.base,
-        gap: theme.space.md,
+        borderRadius: theme.radius.float,
+        paddingTop: theme.space.xxl + 4,
+        paddingBottom: theme.space.base,
+        paddingRight: theme.space.card,
+        paddingLeft: phone ? theme.space.card : 52,
+        gap: theme.space.xl,
+        ...theme.shadow.card,
+        ...(editing ? { outlineWidth: 2, outlineStyle: 'solid', outlineColor: theme.color.text.primary, outlineOffset: 2 } : null),
       }}>
+      {phone ? null : (
+        <View style={{ position: 'absolute', left: 10, top: 14, gap: 2 }}>
+          <HandleButton direction="up" label={`Move chunk ${n} up`} disabled={index === 0}
+            onPress={() => void run((rev) => onMove(index - 1, rev))} />
+          <HandleButton direction="down" label={`Move chunk ${n} down`} disabled={index === count - 1}
+            onPress={() => void run((rev) => onMove(index + 1, rev))} />
+        </View>
+      )}
+      {editing ? (
+        <Text style={[theme.text('eyebrow'), { color: theme.color.text.tertiary }]}>
+          {`editing · ${state.status === 'saving' ? 'saving…' : state.status === 'unsaved' ? 'unsaved' : 'saved'}`}
+        </Text>
+      ) : null}
       {readView ? (
         <View style={{ gap: theme.space.sm }}>
           {readView}
@@ -158,7 +182,8 @@ export function ChunkEditor({
           setView({ written: revisions.written, frozen: revisions.frozen });
           controller.edit(text);
         }}
-        onBlur={() => void controller.flush()}
+        onFocus={() => setEditing(true)}
+        onBlur={() => { setEditing(false); void controller.flush(); }}
         onContentSizeChange={(event) => setContentHeight(event.nativeEvent.contentSize.height)}
         scrollEnabled={false}
         style={[
@@ -181,13 +206,16 @@ export function ChunkEditor({
               gap: theme.space.xs,
               minHeight: theme.layout.habit,
               alignItems: 'center',
-              paddingHorizontal: theme.space.lg,
+              paddingLeft: theme.space.lg,
+              paddingRight: theme.space.xs,
               borderRadius: theme.radius.pill,
               backgroundColor: theme.color.bg.inset,
               opacity: pressed ? 0.6 : 1,
             })}>
             <Text style={[theme.text('label'), { color: theme.color.text.secondary }]}>{subject}</Text>
-            <Text style={[theme.text('label'), { color: theme.color.text.tertiary }]}>×</Text>
+            <View style={{ width: 20, height: 20, alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="cross" size={12} color={theme.color.text.tertiary} strokeWidth={2.5} />
+            </View>
           </Pressable>
         ))}
         <TextInput
@@ -200,11 +228,14 @@ export function ChunkEditor({
           onChangeText={setSubjectDraft}
           onSubmitEditing={addSubjects}
           onBlur={addSubjects}
-          style={[theme.text('search'), { color: theme.color.text.primary, minHeight: theme.layout.chip, minWidth: 120, padding: 0 }]}
+          style={[theme.text('label'), {
+            color: theme.color.text.primary, minHeight: theme.layout.habit, minWidth: 96, paddingHorizontal: theme.space.lg,
+            borderRadius: theme.radius.pill, borderWidth: 1, borderStyle: 'dashed', borderColor: theme.color.border.strong,
+          }]}
         />
       </View>
 
-      <SaveStatus state={state} onRetry={() => void controller.retry()} />
+      <SaveStatus state={state} editing={editing} onRetry={() => void controller.retry()} />
       {state.status === 'error' && view.frozen !== null && chunk.revision !== view.frozen ? (
         <Text style={[theme.text('bodySmall'), { color: theme.color.text.secondary }]}>
           {`Latest saved note: ${chunk.body}`}
@@ -217,8 +248,10 @@ export function ChunkEditor({
           {`Chunk ${n} · edited ${new Date(chunk.updatedAt).toLocaleString()}`}
         </StoneText>
         <View style={{ flexDirection: 'row', gap: theme.space.base }}>
-          <TextAction label="Up" accessibilityLabel={`Move chunk ${n} up`} disabled={index === 0} onPress={() => void run((rev) => onMove(index - 1, rev))} />
-          <TextAction label="Down" accessibilityLabel={`Move chunk ${n} down`} disabled={index === count - 1} onPress={() => void run((rev) => onMove(index + 1, rev))} />
+          {phone ? <>
+            <TextAction label="Up" accessibilityLabel={`Move chunk ${n} up`} disabled={index === 0} onPress={() => void run((rev) => onMove(index - 1, rev))} />
+            <TextAction label="Down" accessibilityLabel={`Move chunk ${n} down`} disabled={index === count - 1} onPress={() => void run((rev) => onMove(index + 1, rev))} />
+          </> : null}
           <TextAction
             label="Delete"
             accessibilityLabel={`Delete chunk ${n}`}
@@ -242,28 +275,38 @@ export function ChunkEditor({
 const STATUS_LABEL = { saved: 'Saved', unsaved: 'Unsaved changes', saving: 'Saving…' } as const;
 
 /** Visible saved / unsaved / error state. A failed save keeps the text and offers retry. */
-function SaveStatus({ state, onRetry }: { state: AutosaveState; onRetry: () => void }) {
+function SaveStatus({ state, onRetry, editing }: { state: AutosaveState; onRetry: () => void; editing: boolean }) {
   const theme = useStoneTheme();
   if (state.status === 'error') {
     return (
       <View
         accessibilityRole="alert"
         style={{
-          gap: theme.space.md,
-          padding: theme.space.lg,
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: theme.space.lg,
+          paddingVertical: theme.space.md,
+          paddingLeft: theme.space.xl,
+          paddingRight: theme.space.md,
           borderRadius: theme.radius.control,
           backgroundColor: theme.color.status.danger.wash,
         }}>
-        <Text style={[theme.text('bodySmall'), { color: theme.color.status.danger.text }]}>
-          {`Couldn't save: ${state.error}. Your text is still here.`}
+        <Icon name="cross" size={16} color={theme.color.status.danger.text} strokeWidth={2.5} />
+        <Text style={[theme.text('meta'), { flex: 1, minWidth: 160, color: theme.color.status.danger.text }]}>
+          {`couldn't save${state.error ? ` (${state.error})` : ''}. this text is kept here until it does.`}
         </Text>
-        <View style={{ alignSelf: 'flex-start' }}>
-          <Button label="Retry save" variant="outline" size="compact" onPress={onRetry} />
-        </View>
+        <Pressable accessibilityRole="button" accessibilityLabel="Retry save" onPress={onRetry}
+          style={({ pressed }) => ({
+            minHeight: 36, paddingHorizontal: theme.space.xl, borderRadius: theme.radius.lg, justifyContent: 'center',
+            backgroundColor: theme.color.status.danger.fill, opacity: pressed ? 0.7 : 1,
+          })}>
+          <Text style={[theme.text('meta'), { color: theme.color.text.onFill }]}>retry save</Text>
+        </Pressable>
       </View>
     );
   }
-  if (state.text === null) return null; // nothing typed yet
+  if (state.text === null || editing) return null; // nothing typed yet, or the eyebrow already says
   return (
     <View accessibilityLiveRegion="polite">
       <StoneText role="fine" tone={state.status === 'saved' ? 'tertiary' : 'secondary'}>
@@ -299,6 +342,27 @@ function TextAction({
       hitSlop={{ top: 12, bottom: 12, left: 10, right: 10 }}
       style={({ pressed }) => ({ minHeight: 20, minWidth: 20, alignItems: 'center', opacity: pressed ? 0.6 : 1 })}>
       <Text style={[theme.text('meta'), { color }]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+/** Up/down reorder handle shown in the card's left gutter on wide screens. */
+function HandleButton({ direction, label, disabled, onPress }: {
+  direction: 'up' | 'down'; label: string; disabled: boolean; onPress: () => void;
+}) {
+  const theme = useStoneTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => ({ width: 36, height: 36, borderRadius: theme.radius.md, alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.6 : 1 })}>
+      <Svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke={disabled ? theme.color.text.disabled : theme.color.text.tertiary}
+        strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+        <Path d={direction === 'up' ? 'm6 15 6-6 6 6' : 'm6 9 6 6 6-6'} />
+      </Svg>
     </Pressable>
   );
 }
