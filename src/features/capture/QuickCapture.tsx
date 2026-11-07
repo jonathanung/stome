@@ -24,8 +24,9 @@ import {
 } from './session';
 import { chooseCaptureRoom, roomIdFromPath } from './target';
 
+// React Native defines `window` as the global object without DOM APIs, so gate on web, not on `window`.
 function browserStorage(kind: 'local' | 'session'): CaptureStorage | null {
-  if (typeof window === 'undefined') return null;
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return null;
   try {
     return kind === 'local' ? window.localStorage : window.sessionStorage;
   } catch {
@@ -85,7 +86,7 @@ export function QuickCapture() {
   }, [controller, pathRoom]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
     const onKey = (event: KeyboardEvent) => {
       const match = isCaptureShortcut(
         {

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { createStyles } from '../../../design-theme/src/primitives';
 import { createCommit } from '../../data/commit';
 import type { Room } from '../../data/models';
 import { listChunks, listRooms } from '../../data/queries';
@@ -23,14 +24,17 @@ interface Draft extends SubjectReview {
 }
 
 function Action({ label, onPress, disabled = false }: { label: string; onPress(): void; disabled?: boolean }) {
+  const styles = useStyles();
   return <Pressable accessibilityRole="button" accessibilityState={{ disabled }} disabled={disabled} onPress={onPress} style={[styles.button, disabled && styles.disabled]}><Text style={styles.buttonText}>{label}</Text></Pressable>;
 }
 
 function Field({ label, value, onChangeText, disabled = false }: { label: string; value: string; onChangeText(value: string): void; disabled?: boolean }) {
+  const styles = useStyles();
   return <View style={styles.field}><Text style={styles.label}>{label}</Text><TextInput accessibilityLabel={label} value={value} onChangeText={onChangeText} editable={!disabled} autoCapitalize="none" autoCorrect={false} style={styles.input} /></View>;
 }
 
 export default function NoteImportScreen() {
+  const styles = useStyles();
   const sqlite = useSQLiteContext();
   const db = useMemo(() => expoDriver(sqlite), [sqlite]);
   const commit = useMemo(() => createCommit(db, { now: Date.now, newId: randomUUID }), [db]);
@@ -131,20 +135,20 @@ export default function NoteImportScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#f6f4ee' },
+const useStyles = createStyles((theme) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: theme.color.bg.canvas },
   page: { padding: 20, gap: 20, width: '100%', maxWidth: 720, alignSelf: 'center', paddingBottom: 48 },
   section: { gap: 12 },
-  card: { backgroundColor: '#fffdf8', padding: 20, gap: 12, borderRadius: 18, borderWidth: 1, borderColor: '#d8d3c8' },
-  title: { fontSize: 30, fontWeight: '700', color: '#292820' },
-  heading: { fontSize: 22, fontWeight: '600', color: '#292820' },
-  text: { fontSize: 17, lineHeight: 25, color: '#3f4036' },
-  hint: { fontSize: 14, lineHeight: 21, color: '#626453' },
-  label: { fontSize: 15, color: '#3f4036', fontWeight: '600' },
+  card: { backgroundColor: theme.color.bg.surface, padding: 20, gap: 12, borderRadius: 18, borderWidth: 1, borderColor: theme.color.border.hairline },
+  title: { fontSize: 30, fontWeight: '700', color: theme.color.text.primary },
+  heading: { fontSize: 22, fontWeight: '600', color: theme.color.text.primary },
+  text: { fontSize: 17, lineHeight: 25, color: theme.color.text.secondary },
+  hint: { fontSize: 14, lineHeight: 21, color: theme.color.text.tertiary },
+  label: { fontSize: 15, color: theme.color.text.secondary, fontWeight: '600' },
   field: { gap: 6 },
-  input: { minHeight: 48, borderWidth: 1, borderColor: '#777b67', borderRadius: 10, padding: 12, fontSize: 17, color: '#292820', backgroundColor: '#fffdf8' },
-  button: { minHeight: 48, borderRadius: 12, padding: 12, backgroundColor: '#424e35', justifyContent: 'center', alignItems: 'center' },
-  buttonText: { fontSize: 16, fontWeight: '600', color: '#ffffff' },
+  input: { minHeight: 48, borderWidth: 1, borderColor: theme.color.border.strong, borderRadius: 10, padding: 12, fontSize: 17, color: theme.color.text.primary, backgroundColor: theme.color.bg.surface },
+  button: { minHeight: 48, borderRadius: 12, padding: 12, backgroundColor: theme.color.accent.bg, justifyContent: 'center', alignItems: 'center' },
+  buttonText: { fontSize: 16, fontWeight: '600', color: theme.color.accent.fg },
   disabled: { opacity: 0.5 },
-  error: { fontSize: 15, lineHeight: 22, color: '#9b2929' },
-});
+  error: { fontSize: 15, lineHeight: 22, color: theme.color.status.danger.text },
+}));

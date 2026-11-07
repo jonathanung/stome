@@ -6,96 +6,89 @@ import {
   useFonts,
 } from '@expo-google-fonts/inter';
 import { Outfit_700Bold, Outfit_800ExtraBold, Outfit_900Black } from '@expo-google-fonts/outfit';
-import { SQLiteProvider } from 'expo-sqlite';
+import { SQLiteProvider, type SQLiteDatabase } from 'expo-sqlite';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Component, Suspense, type ReactNode } from 'react';
-import { ActivityIndicator, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
 
 import { ThemeProvider, useStoneTheme } from '../../design-theme/src/primitives';
-import { QuickCapture } from '../features/capture/QuickCapture';
 import { expoDriver } from '../db/expo-driver';
 import { migrateDb } from '../db/migrate';
 import { DATABASE_NAME } from '../db/schema';
+import { classifyStorageFailure, createStorageRetryGate, finishStartup } from '../db/storage-startup';
+import { QuickCapture } from '../features/capture/QuickCapture';
+import { StorageOpening, StorageStartupScreen } from '../screens/StorageStartup';
+import { stackHeaderOptions } from '../theme/stack-header';
+
+function prepareDatabase(db: SQLiteDatabase): Promise<void> {
+  return finishStartup(
+    db,
+    (database) => migrateDb(expoDriver(database)),
+    (database) => database.closeAsync(),
+  );
+}
 
 type BoundaryState = {
   error: Error | null;
+  retrying: boolean;
 };
 
-function Centered({ children }: { children: ReactNode }) {
-  const theme = useStoneTheme();
-  return (
-    <View style={{ alignItems: 'center', flex: 1, gap: theme.space.md, justifyContent: 'center', padding: theme.space.section, backgroundColor: theme.color.bg.canvas }}>
-      {children}
-    </View>
-  );
-}
-
-function DatabaseError({ error }: { error: Error }) {
-  const theme = useStoneTheme();
-  return (
-    <Centered>
-      <Text accessibilityRole="alert" style={[theme.text('title'), { color: theme.color.text.primary, textAlign: 'center' }]}>
-        Could not open the local database.
-      </Text>
-      <Text style={[theme.text('bodySmall'), { color: theme.color.text.secondary, textAlign: 'center' }]}>{error.message}</Text>
-    </Centered>
-  );
-}
-
 class DatabaseBoundary extends Component<{ children: ReactNode }, BoundaryState> {
-  state: BoundaryState = { error: null };
+  state: BoundaryState = { error: null, retrying: false };
+
+  private readonly retryGate = createStorageRetryGate();
 
   static getDerivedStateFromError(error: Error): BoundaryState {
-    return { error };
+    return { error, retrying: false };
   }
+
+  componentDidCatch(error: Error, info: { componentStack?: string | null }) {
+    console.error('DatabaseBoundary caught', error, info.componentStack);
+  }
+
+  retry = () => {
+    const error = this.state.error;
+    if (!error || this.state.retrying || Platform.OS !== 'web') return;
+    const failure = classifyStorageFailure(error);
+    if (!failure.canRetry) return;
+    const started = this.retryGate.request(() => {
+      window.location.reload();
+    });
+    if (started) this.setState({ retrying: true });
+  };
 
   render() {
-    if (this.state.error) return <DatabaseError error={this.state.error} />;
+    if (this.state.error) {
+      const failure = classifyStorageFailure(this.state.error);
+      const onRetry = failure.canRetry && Platform.OS === 'web' ? this.retry : undefined;
+      return <StorageStartupScreen failure={failure} retrying={this.state.retrying} onRetry={onRetry} />;
+    }
     return this.props.children;
   }
-}
-
-function Opening() {
-  const theme = useStoneTheme();
-  return (
-    <Centered>
-      <ActivityIndicator color={theme.color.accent.bg} />
-      <Text style={[theme.text('bodySmall'), { color: theme.color.text.secondary }]}>Opening local notes…</Text>
-    </Centered>
-  );
 }
 
 function AppStack() {
   const theme = useStoneTheme();
   return (
-    <View style={{ flex: 1, backgroundColor: theme.color.bg.canvas }}>
-      <StatusBar style={theme.scheme === 'dark' ? 'light' : 'dark'} />
-      <DatabaseBoundary>
-        <Suspense fallback={<Opening />}>
-          <SQLiteProvider databaseName={DATABASE_NAME} onInit={(db) => migrateDb(expoDriver(db))} useSuspense>
-            <Stack
-              screenOptions={{
-                headerTitle: 'stome',
-                headerShadowVisible: false,
-                headerStyle: { backgroundColor: theme.color.bg.canvas },
-                headerTintColor: theme.color.text.primary,
-                headerTitleStyle: { fontFamily: theme.text('actionTitle').fontFamily, fontSize: 17 },
-                contentStyle: { backgroundColor: theme.color.bg.canvas },
-              }}
-            >
-              <Stack.Screen name="index" options={{ headerShown: false }} />
-              <Stack.Screen name="today" options={{ headerShown: false }} />
-              <Stack.Screen name="rooms/[id]" options={{ headerShown: false }} />
-              <Stack.Screen name="recent" options={{ headerShown: false }} />
-              <Stack.Screen name="rooms/[id]/review" options={{ headerShown: false }} />
-            </Stack>
-            <QuickCapture />
-          </SQLiteProvider>
-        </Suspense>
-      </DatabaseBoundary>
-    </View>
+    <Stack screenOptions={stackHeaderOptions(theme)}>
+      <Stack.Screen name="index" options={{ headerShown: false }} />
+      <Stack.Screen name="today" options={{ headerShown: false }} />
+      <Stack.Screen name="rooms/[id]" options={{ headerShown: false }} />
+      <Stack.Screen name="recent" options={{ headerShown: false }} />
+      <Stack.Screen name="rooms/[id]/review" options={{ headerShown: false }} />
+    </Stack>
   );
+}
+
+function ThemedRoot({ children }: { children: ReactNode }) {
+  const theme = useStoneTheme();
+  return <View style={[styles.root, { backgroundColor: theme.color.bg.canvas }]}>{children}</View>;
+}
+
+function ThemedStatusBar() {
+  const theme = useStoneTheme();
+  return <StatusBar style={theme.scheme === 'dark' ? 'light' : 'dark'} />;
 }
 
 export default function RootLayout() {
@@ -110,9 +103,32 @@ export default function RootLayout() {
   });
   // A font that fails to load falls back to the system face rather than blocking the app.
   const ready = loaded || Boolean(error);
+  if (!ready) {
+    return (
+      <ThemeProvider>
+        <ThemedRoot><ActivityIndicator style={{ flex: 1 }} /></ThemedRoot>
+      </ThemeProvider>
+    );
+  }
   return (
-    <ThemeProvider fontMode={ready && !error ? 'expo' : 'css'}>
-      {ready ? <AppStack /> : <Centered><ActivityIndicator /></Centered>}
+    <ThemeProvider fontMode={error ? 'css' : 'expo'}>
+      <ThemedRoot>
+        <ThemedStatusBar />
+        <DatabaseBoundary>
+          <Suspense fallback={<StorageOpening />}>
+            <SQLiteProvider databaseName={DATABASE_NAME} onInit={prepareDatabase} useSuspense>
+              <AppStack />
+              <QuickCapture />
+            </SQLiteProvider>
+          </Suspense>
+        </DatabaseBoundary>
+      </ThemedRoot>
     </ThemeProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
+});
