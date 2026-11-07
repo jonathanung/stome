@@ -55,6 +55,7 @@ export default function RootLayout() {
               <Stack.Screen name="index" options={{ headerShown: false }} />
               <Stack.Screen name="rooms/[id]" options={{ headerShown: false }} />
               <Stack.Screen name="recent" options={{ headerShown: false }} />
+              <Stack.Screen name="rooms/[id]/review" options={{ headerShown: false }} />
             </Stack>
             <QuickCapture />
           </SQLiteProvider>
