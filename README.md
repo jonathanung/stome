@@ -32,6 +32,6 @@ npm run check
 - `npm run check:schema` — note schema and migrations through Node's built-in `node:sqlite`
 - `npm run check:harness` — harness sessions, mock provider, confirmation, and companion origin/token checks, also through `node:sqlite`
 
-GitHub Actions runs `npm run check` on pull requests and on pushes to `main`. The harness checks were added to that existing script, not as a second workflow. The schema and harness scripts can print Node's experimental SQLite warning; a command passes when its assertions pass.
+GitHub Actions runs `npm run check` on pull requests and on pushes to `main`. The harness checks were added to that existing script, not as a second workflow. A following `build` job runs `npx expo export --platform web` and uploads `dist` for 7 days. That export is Metro's production bundle for the laptop browser, including the SQLite WebAssembly asset. It is not an iOS or Android native compile, and the job does not sign, deploy, or call EAS. The schema and harness scripts can print Node's experimental SQLite warning; a command passes when its assertions pass.
 
 `npm run check:schema` and `npm run check:harness` use Node's built-in SQLite. They are not the Expo SQLite driver on iOS, Android, or web. `check:harness` does not replace opening the Expo web app. This workflow does not boot a simulator, sign a build, or call a live model API. Design-theme tests stay out of this check until that package is in the tree with its own lockfile-backed command.

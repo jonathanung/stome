@@ -1,5 +1,7 @@
 # Pull requests and pushes to main.
 # TypeScript, Expo lint, and the Node sqlite schema script.
+# The build job exports the Expo web target with Metro. That is a browser
+# bundle, not an iOS or Android native compile.
 # No simulator, signing, deploy, secrets, or provider calls.
 
 name: checks
@@ -40,3 +42,40 @@ jobs:
 
       - name: Check
         run: npm run check
+
+  # Metro production export of the laptop web target. Not a native compile,
+  # EAS build, or deploy.
+  build:
+    name: Web production export
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      EXPO_NO_TELEMETRY: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install
+        run: npm ci
+
+      - name: Export web bundle
+        run: npx expo export --platform web --output-dir dist
+
+      - name: Verify web bundle and SQLite wasm
+        run: node scripts/verify-web-export.mjs dist
+
+      - name: Upload web export
+        uses: actions/upload-artifact@v7
+        with:
+          name: web-export
+          path: dist
+          retention-days: 7
+          if-no-files-found: error

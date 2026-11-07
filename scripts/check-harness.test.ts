@@ -29,7 +29,6 @@ import { createProvider, mockEditOutput, mockProvider, mockSuccessOutput } from 
 import {
   beginQuestion,
   confirmFoundationQuestion,
-  confirmQuestion,
   discardQuestion,
   fulfillQuestion,
 } from '../src/harness/runTurn.ts';
@@ -39,12 +38,10 @@ import {
   cancelRun,
   ensurePendingOperationId,
   repairOperationId,
-  commitStubAnnotation,
   completeRun,
   createSession,
   failInterruptedSessions,
   getSession,
-  listStubAnnotations,
   migrateHarness,
   type SqlExecutor,
   type SqlParams,
@@ -114,15 +111,6 @@ function chunk(id: number, text = 'photosynthesis makes sugar', revision = 100, 
   };
 }
 
-function noteFor(view: ChunkView) {
-  return {
-    id: view.noteId,
-    title: view.label,
-    body: view.text,
-    updatedAt: view.revision,
-  };
-}
-
 test('registry is only the notes tools and rejects a foreign room', async () => {
   assert.deepEqual(Object.keys(TOOL_REGISTRY).sort(), ['notes.proposeAnnotation', 'notes.proposeChunkEdit'].sort());
   const harness = readFileSync(new URL('../src/harness/contract.ts', import.meta.url), 'utf8');
@@ -138,7 +126,7 @@ test('registry is only the notes tools and rejects a foreign room', async () => 
   db.close();
 });
 
-test('migration preserves an existing scaffold note and does not create foundation tables', async () => {
+test('migration keeps the scaffold database untouched and creates no foundation tables', async () => {
   assert.ok(SUPPORTED_VERSION >= 2);
   assert.equal(migrationsFor(SUPPORTED_VERSION).length, 0);
   assert.equal(migrationsFor(1).length, MIGRATIONS.length - 1);
@@ -146,7 +134,7 @@ test('migration preserves an existing scaffold note and does not create foundati
   assert.equal(HARNESS_MIGRATION_SQL.includes('CREATE TABLE chunks'), false);
   assert.equal(HARNESS_MIGRATION_SQL.includes('CREATE TABLE annotations'), false);
   assert.equal(HARNESS_MIGRATION_SQL.includes('CREATE TABLE notes'), false);
-  assert.equal(HARNESS_MIGRATION_SQL.includes('harness_stub_annotations'), true);
+  assert.equal(HARNESS_MIGRATION_SQL.includes('harness_stub_annotations'), false);
 
   const notes = openMemory();
   await notes.exec(MIGRATIONS[0]?.sql ?? '');
@@ -168,12 +156,7 @@ test('migration preserves an existing scaffold note and does not create foundati
     signal: new AbortController().signal,
   });
   assert.equal(outcome.status, 'proposal');
-  await confirmQuestion(harness, {
-    sessionId: prepared.sessionId,
-    note: { id: 1, title, body: 'quotes "stay"', updatedAt: 10 },
-    operationId: 'op-keep-note',
-    confirmed: true,
-  });
+  await discardQuestion(harness, prepared.sessionId);
 
   const rows = (await notes.all<{ title: string; body: string; updated_at: number }>(LIST_NOTES_SQL)) ?? [];
   assert.equal(rows.length, 1);
@@ -184,6 +167,47 @@ test('migration preserves an existing scaffold note and does not create foundati
   assert.equal(notesVersion?.user_version, 1);
   notes.close();
   harness.close();
+});
+
+test('the v3 harness migration drops legacy stub annotations and their cached operations', async () => {
+  const db = openMemory();
+  await db.exec(HARNESS_MIGRATION_SQL);
+  await db.exec(`
+    CREATE TABLE harness_stub_annotations (
+      id TEXT PRIMARY KEY NOT NULL,
+      proposal_id TEXT NOT NULL UNIQUE,
+      operation_id TEXT NOT NULL UNIQUE,
+      room_id TEXT NOT NULL,
+      chunk_id TEXT NOT NULL,
+      note_id INTEGER NOT NULL,
+      type TEXT NOT NULL CHECK (type = 'ai_answer'),
+      body TEXT NOT NULL,
+      anchor_start INTEGER NOT NULL,
+      anchor_end INTEGER NOT NULL,
+      chunk_revision INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    INSERT INTO harness_stub_annotations VALUES
+      ('stub-legacy', 'proposal-legacy', 'legacy-op', 'room', 'note:1', 1, 'ai_answer', 'old mock', 0, 3, 1, 1);
+    INSERT INTO harness_operations VALUES
+      ('legacy-op', '{"replayed":false,"annotationId":"stub-legacy","operationId":"legacy-op"}', 1);
+    INSERT INTO harness_operations VALUES
+      ('real-op', '{"replayed":false,"annotationId":"ann-real","operationId":"real-op"}', 2);
+    PRAGMA user_version = 2;
+  `);
+
+  await migrateHarness(db);
+  const version = await db.get<{ user_version: number }>('PRAGMA user_version');
+  assert.equal(version?.user_version, 3);
+  const legacy = await db.get<{ name: string }>(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'harness_stub_annotations'",
+  );
+  assert.equal(legacy, null);
+  const stale = await db.get<{ id: string }>('SELECT id FROM harness_operations WHERE id = ?', ['legacy-op']);
+  assert.equal(stale, null);
+  const kept = await db.get<{ id: string }>('SELECT id FROM harness_operations WHERE id = ?', ['real-op']);
+  assert.equal(kept?.id, 'real-op');
+  db.close();
 });
 
 test('restart fails a running session, continuation uses saved context, and late results are discarded', async () => {
@@ -292,13 +316,40 @@ test('cancellation discards a late success and leaves no annotation', async () =
     now: 80,
   });
   assert.equal(stored, 'discarded');
-  assert.equal((await listStubAnnotations(db)).length, 0);
+  assert.equal((await getSession(db, prepared.sessionId))?.confirmedOperationId, null);
   db.close();
 });
 
 test('rejects unselected chunks, bad anchors, missing confirmation, and a stale revision', async () => {
+  const app = nodeDb();
+  await migrateDb(app);
   const db = await harnessDb();
-  const selected = chunk(1);
+  let seed = 0;
+  const commit = createCommit(app, { now: () => 100, newId: () => `id-${++seed}` });
+  const room = await commit({
+    opId: 'gate-room',
+    kind: 'room.create',
+    source: 'human',
+    confirmed: false,
+    payload: { name: 'biology' },
+  });
+  assert.equal(room.ok, true);
+  if (!room.ok) return;
+  const created = await commit({
+    opId: 'gate-chunks',
+    kind: 'chunk.create',
+    source: 'human',
+    confirmed: false,
+    payload: { roomId: room.value.roomId, bodies: ['photosynthesis makes sugar', 'a second chunk'] },
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+  const first = await getChunk(app, created.value.chunkIds[0] ?? '');
+  const second = await getChunk(app, created.value.chunkIds[1] ?? '');
+  assert.ok(first && second);
+  if (!first || !second) return;
+  const selected = chunkViewFromFoundation(first);
+
   const prepared = await beginQuestion(db, { chunks: [selected], prompt: 'Explain' });
   const outsider = await fulfillQuestion(db, prepared, {
     chunks: [selected],
@@ -306,10 +357,10 @@ test('rejects unselected chunks, bad anchors, missing confirmation, and a stale 
     provider: {
       async complete() {
         return {
-          roomId: SCAFFOLD_ROOM_ID,
-          chunkId: 'note:2',
+          roomId: second.roomId,
+          chunkId: second.id,
           type: 'ai_answer',
-          body: 'wrong note',
+          body: 'wrong chunk',
           anchorStart: 0,
           anchorEnd: 4,
         };
@@ -319,17 +370,16 @@ test('rejects unselected chunks, bad anchors, missing confirmation, and a stale 
   });
   assert.equal(outsider.status, 'failed');
   assert.equal(outsider.errorCode, 'scope_rejected');
-  assert.equal((await listStubAnnotations(db)).length, 0);
 
-  const second = await beginQuestion(db, { chunks: [selected], prompt: 'Again' });
-  const malformed = await fulfillQuestion(db, second, {
+  const next = await beginQuestion(db, { chunks: [selected], prompt: 'Again' });
+  const malformed = await fulfillQuestion(db, next, {
     chunks: [selected],
     scenario: 'success',
     provider: {
       async complete() {
         return {
-          roomId: SCAFFOLD_ROOM_ID,
-          chunkId: 'note:1',
+          roomId: first.roomId,
+          chunkId: first.id,
           type: 'ai_answer',
           body: 'bad anchor',
           anchorStart: 0,
@@ -350,34 +400,68 @@ test('rejects unselected chunks, bad anchors, missing confirmation, and a stale 
     signal: new AbortController().signal,
   });
   assert.equal(proposed.status, 'proposal');
+  const operationId = proposed.session?.pendingOperationId ?? '';
   await assert.rejects(
     () =>
-      confirmQuestion(db, {
+      confirmFoundationQuestion(db, app, {
         sessionId: third.sessionId,
-        note: noteFor(selected),
-        operationId: 'op-no',
+        operationId,
         confirmed: false,
       }),
     /confirm/,
   );
+  const edited = await commit({
+    opId: 'gate-edit',
+    kind: 'chunk.update',
+    source: 'human',
+    confirmed: false,
+    expectedRevision: first.revision,
+    payload: { chunkId: first.id, body: 'a newer version of the chunk' },
+  });
+  assert.equal(edited.ok, true);
   await assert.rejects(
     () =>
-      confirmQuestion(db, {
+      confirmFoundationQuestion(db, app, {
         sessionId: third.sessionId,
-        note: noteFor({ ...selected, revision: selected.revision + 1 }),
-        operationId: 'op-stale',
+        operationId,
         confirmed: true,
       }),
     /changed/,
   );
-  assert.equal((await listStubAnnotations(db)).length, 0);
+  assert.equal((await listAnnotations(app, first.id)).length, 0);
   assert.equal((await getSession(db, third.sessionId))?.confirmedOperationId, null);
   db.close();
+  app.close();
 });
 
-test('operation id dedupe returns the first write and a partial failure rolls back', async () => {
+test('operation id dedupe returns the first annotation and a failed commit rolls back', async () => {
+  const app = nodeDb();
+  await migrateDb(app);
   const db = await harnessDb();
-  const selected = chunk(1);
+  let seed = 0;
+  const commit = createCommit(app, { now: () => 100, newId: () => `dedupe-${++seed}` });
+  const room = await commit({
+    opId: 'dedupe-room',
+    kind: 'room.create',
+    source: 'human',
+    confirmed: false,
+    payload: { name: 'biology' },
+  });
+  assert.equal(room.ok, true);
+  if (!room.ok) return;
+  const created = await commit({
+    opId: 'dedupe-chunk',
+    kind: 'chunk.create',
+    source: 'human',
+    confirmed: false,
+    payload: { roomId: room.value.roomId, bodies: ['photosynthesis makes sugar'] },
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+  const savedChunk = await getChunk(app, created.value.chunkIds[0] ?? '');
+  assert.ok(savedChunk);
+  if (!savedChunk) return;
+  const selected = chunkViewFromFoundation(savedChunk);
   const prepared = await beginQuestion(db, { chunks: [selected], prompt: 'Save this' });
   const proposed = await fulfillQuestion(db, prepared, {
     chunks: [selected],
@@ -386,88 +470,98 @@ test('operation id dedupe returns the first write and a partial failure rolls ba
     signal: new AbortController().signal,
   });
   assert.ok(proposed.proposal);
-  const first = await confirmQuestion(db, {
+  const operationId = proposed.session?.pendingOperationId ?? '';
+  const first = await confirmFoundationQuestion(db, app, {
     sessionId: prepared.sessionId,
-    note: noteFor(selected),
-    operationId: 'op-1',
+    operationId,
     confirmed: true,
   });
   assert.equal(first.replayed, false);
-  const replay = await confirmQuestion(db, {
+  const replay = await confirmFoundationQuestion(db, app, {
     sessionId: prepared.sessionId,
-    note: noteFor(selected),
-    operationId: 'op-1',
+    operationId,
     confirmed: true,
   });
   assert.equal(replay.replayed, true);
   assert.equal(replay.annotationId, first.annotationId);
-  const rows = await listStubAnnotations(db);
+  const rows = await listAnnotations(app, savedChunk.id);
   assert.equal(rows.length, 1);
-  assert.equal(rows[0]?.body, proposed.proposal?.body);
+  assert.equal(rows[0]?.payload.answer, proposed.proposal?.body);
+  assert.equal((await getSession(db, prepared.sessionId))?.confirmedOperationId, operationId);
 
-  const session = await getSession(db, prepared.sessionId);
-  assert.ok(session?.proposal);
   await assert.rejects(
     () =>
-      commitStubAnnotation(
-        db,
-        {
-          opId: 'op-2',
-          kind: 'annotation.create',
-          source: 'ai',
-          confirmed: true,
-          expectedRevision: selected.revision,
-          payload: {
-            proposalId: session.proposal?.id ?? '',
-            roomId: session.roomId,
-            chunkId: 'note:1',
-            noteId: 1,
-            type: 'ai_answer',
-            body: 'a different body that must not land',
-            anchorStart: 0,
-            anchorEnd: 4,
-          },
-        },
-        prepared.sessionId,
-        90,
-      ),
-    /already saved/,
+      confirmFoundationQuestion(db, app, {
+        sessionId: prepared.sessionId,
+        operationId: 'op-other',
+        confirmed: true,
+      }),
+    /matches|saved/,
   );
-  assert.equal((await listStubAnnotations(db)).length, 1);
-  assert.equal((await listStubAnnotations(db))[0]?.body, proposed.proposal?.body);
+  assert.equal((await listAnnotations(app, savedChunk.id)).length, 1);
 
-  const rollback = await harnessDb();
-  const other = chunk(4, 'rollback text');
-  const started = await beginQuestion(rollback, { chunks: [other], prompt: 'Roll back' });
-  const ready = await fulfillQuestion(rollback, started, {
+  const rollbackApp = nodeDb();
+  await migrateDb(rollbackApp);
+  const rollbackHarness = await harnessDb();
+  const rollbackSetup = createCommit(rollbackApp, { now: () => 100, newId: () => `rollback-${++seed}` });
+  const rollbackRoom = await rollbackSetup({
+    opId: 'rollback-room',
+    kind: 'room.create',
+    source: 'human',
+    confirmed: false,
+    payload: { name: 'biology' },
+  });
+  assert.equal(rollbackRoom.ok, true);
+  if (!rollbackRoom.ok) return;
+  const rollbackCreated = await rollbackSetup({
+    opId: 'rollback-chunk',
+    kind: 'chunk.create',
+    source: 'human',
+    confirmed: false,
+    payload: { roomId: rollbackRoom.value.roomId, bodies: ['rollback text'] },
+  });
+  assert.equal(rollbackCreated.ok, true);
+  if (!rollbackCreated.ok) return;
+  const rollbackChunk = await getChunk(rollbackApp, rollbackCreated.value.chunkIds[0] ?? '');
+  assert.ok(rollbackChunk);
+  if (!rollbackChunk) return;
+  const other = chunkViewFromFoundation(rollbackChunk);
+  const started = await beginQuestion(rollbackHarness, { chunks: [other], prompt: 'Roll back' });
+  const ready = await fulfillQuestion(rollbackHarness, started, {
     chunks: [other],
     scenario: 'success',
     provider: mockProvider,
     signal: new AbortController().signal,
   });
   assert.equal(ready.status, 'proposal');
-  await rollback.exec(`
-    CREATE TRIGGER abort_operation BEFORE INSERT ON harness_operations
+  const rollbackId = ready.session?.pendingOperationId ?? '';
+  await rollbackApp.exec(`
+    CREATE TRIGGER abort_operation BEFORE INSERT ON applied_ops
     BEGIN
       SELECT RAISE(ABORT, 'injected failure');
     END;
   `);
   await assert.rejects(
     () =>
-      confirmQuestion(rollback, {
+      confirmFoundationQuestion(rollbackHarness, rollbackApp, {
         sessionId: started.sessionId,
-        note: noteFor(other),
-        operationId: 'op-rollback',
+        operationId: rollbackId,
         confirmed: true,
       }),
     /injected failure/,
   );
-  assert.equal((await listStubAnnotations(rollback)).length, 0);
-  const operations = await rollback.get<{ count: number }>('SELECT COUNT(*) AS count FROM harness_operations');
+  assert.equal((await listAnnotations(rollbackApp, rollbackChunk.id)).length, 0);
+  const applied = await rollbackApp.get<{ count: number }>('SELECT COUNT(*) AS count FROM applied_ops WHERE op_id = ?', [
+    rollbackId,
+  ]);
+  assert.equal(applied?.count, 0);
+  const operations = await rollbackHarness.get<{ count: number }>('SELECT COUNT(*) AS count FROM harness_operations');
   assert.equal(operations?.count, 0);
-  assert.equal((await getSession(rollback, started.sessionId))?.confirmedOperationId, null);
+  assert.equal((await getSession(rollbackHarness, started.sessionId))?.confirmedOperationId, null);
   db.close();
-  rollback.close();
+  app.close();
+  rollbackHarness.close();
+  rollbackApp.close();
 });
 
 test('mock scenarios, timeout, output limit, and the disabled api-key provider', async () => {
@@ -491,7 +585,7 @@ test('mock scenarios, timeout, output limit, and the disabled api-key provider',
       signal: new AbortController().signal,
     });
     assert.equal(outcome.status, 'failed', scenario);
-    assert.equal((await listStubAnnotations(db)).length, 0);
+    assert.equal((await getSession(db, prepared.sessionId))?.confirmedOperationId, null);
   }
 
   const hung = await beginQuestion(db, { chunks: [chunk(1)], prompt: 'Hang' });
@@ -543,10 +637,36 @@ test('mock scenarios, timeout, output limit, and the disabled api-key provider',
 
 test('a second confirmed turn survives reopen and the first operation id still replays', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'stome-harness-'));
+  const appPath = join(dir, 'app.db');
   const path = join(dir, 'harness.db');
+  const app = nodeDb(appPath);
+  await migrateDb(app);
   const firstDb = openMemory(path);
   await migrateHarness(firstDb);
-  const selected = chunk(1);
+  let seed = 0;
+  const commit = createCommit(app, { now: () => 1_000, newId: () => `reopen-${++seed}` });
+  const room = await commit({
+    opId: 'reopen-room',
+    kind: 'room.create',
+    source: 'human',
+    confirmed: false,
+    payload: { name: 'biology' },
+  });
+  assert.equal(room.ok, true);
+  if (!room.ok) return;
+  const created = await commit({
+    opId: 'reopen-chunk',
+    kind: 'chunk.create',
+    source: 'human',
+    confirmed: false,
+    payload: { roomId: room.value.roomId, bodies: ['photosynthesis makes sugar'] },
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+  const savedChunk = await getChunk(app, created.value.chunkIds[0] ?? '');
+  assert.ok(savedChunk);
+  if (!savedChunk) return;
+  const selected = chunkViewFromFoundation(savedChunk);
   const prepared = await beginQuestion(firstDb, { chunks: [selected], prompt: 'First question' });
   const proposed = await fulfillQuestion(firstDb, prepared, {
     chunks: [selected],
@@ -555,22 +675,25 @@ test('a second confirmed turn survives reopen and the first operation id still r
     signal: new AbortController().signal,
   });
   assert.equal(proposed.status, 'proposal');
-  const saved = await confirmQuestion(firstDb, {
+  const firstId = proposed.session?.pendingOperationId ?? '';
+  const saved = await confirmFoundationQuestion(firstDb, app, {
     sessionId: prepared.sessionId,
-    note: noteFor(selected),
-    operationId: 'op-first',
+    operationId: firstId,
     confirmed: true,
+    now: 2_000,
   });
   assert.equal(saved.replayed, false);
   firstDb.close();
+  app.close();
 
+  const reopenedApp = nodeDb(appPath);
   const reopened = openMemory(path);
   await migrateHarness(reopened);
   const interrupted = await failInterruptedSessions(reopened, 50);
   assert.equal(interrupted, 0);
   const session = await getSession(reopened, prepared.sessionId);
   assert.equal(session?.state, 'completed');
-  assert.equal(session?.confirmedOperationId, 'op-first');
+  assert.equal(session?.confirmedOperationId, firstId);
   const continued = await beginQuestion(reopened, {
     chunks: [selected],
     prompt: 'Second question',
@@ -585,39 +708,39 @@ test('a second confirmed turn survives reopen and the first operation id still r
   assert.equal(second.status, 'proposal');
   assert.notEqual(second.proposal?.id, proposed.proposal?.id);
   assert.match(second.proposal?.body ?? '', /Second question/);
-  const savedAgain = await confirmQuestion(reopened, {
+  const secondId = second.session?.pendingOperationId ?? '';
+  const savedAgain = await confirmFoundationQuestion(reopened, reopenedApp, {
     sessionId: continued.sessionId,
-    note: noteFor(selected),
-    operationId: 'op-second',
+    operationId: secondId,
     confirmed: true,
+    now: 3_000,
   });
   assert.equal(savedAgain.replayed, false);
-  const rows = await listStubAnnotations(reopened);
+  const rows = await listAnnotations(reopenedApp, savedChunk.id);
   assert.equal(rows.length, 2);
   assert.deepEqual(
-    rows.map((row) => row.operationId),
-    ['op-first', 'op-second'],
+    rows.map((row) => row.payload.answer),
+    [proposed.proposal?.body, second.proposal?.body],
   );
-  const replay = await confirmQuestion(reopened, {
+  const replay = await confirmFoundationQuestion(reopened, reopenedApp, {
     sessionId: continued.sessionId,
-    note: noteFor(selected),
-    operationId: 'op-first',
+    operationId: firstId,
     confirmed: true,
   });
   assert.equal(replay.replayed, true);
   assert.equal(replay.annotationId, saved.annotationId);
   await assert.rejects(
     () =>
-      confirmQuestion(reopened, {
+      confirmFoundationQuestion(reopened, reopenedApp, {
         sessionId: continued.sessionId,
-        note: noteFor(selected),
         operationId: 'op-third',
         confirmed: true,
       }),
-    /already saved/,
+    /operation id|saved/,
   );
-  assert.equal((await listStubAnnotations(reopened)).length, 2);
+  assert.equal((await listAnnotations(reopenedApp, savedChunk.id)).length, 2);
   reopened.close();
+  reopenedApp.close();
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -727,7 +850,34 @@ test('confirm, discard, and a duplicate operation stay atomic on the shared queu
     },
   });
   await migrateHarness(db);
-  const selected = chunk(1);
+  const app = nodeDb();
+  await migrateDb(app);
+  let seed = 0;
+  const setup = createCommit(app, { now: () => 100, newId: () => `race-${++seed}` });
+  const room = await setup({
+    opId: 'race-room',
+    kind: 'room.create',
+    source: 'human',
+    confirmed: false,
+    payload: { name: 'biology' },
+  });
+  assert.equal(room.ok, true);
+  if (!room.ok) return;
+  const created = await setup({
+    opId: 'race-chunk',
+    kind: 'chunk.create',
+    source: 'human',
+    confirmed: false,
+    payload: { roomId: room.value.roomId, bodies: ['photosynthesis makes sugar', 'other note text'] },
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+  const raceChunk = await getChunk(app, created.value.chunkIds[0] ?? '');
+  const secondChunk = await getChunk(app, created.value.chunkIds[1] ?? '');
+  assert.ok(raceChunk && secondChunk);
+  if (!raceChunk || !secondChunk) return;
+
+  const selected = chunkViewFromFoundation(raceChunk);
   const prepared = await beginQuestion(db, { chunks: [selected], prompt: 'Race' });
   const proposed = await fulfillQuestion(db, prepared, {
     chunks: [selected],
@@ -736,43 +886,65 @@ test('confirm, discard, and a duplicate operation stay atomic on the shared queu
     signal: new AbortController().signal,
   });
   assert.equal(proposed.status, 'proposal');
-  const confirmation = confirmQuestion(db, {
+  const operationId = proposed.session?.pendingOperationId ?? '';
+  const confirmation = confirmFoundationQuestion(db, app, {
     sessionId: prepared.sessionId,
-    note: noteFor(selected),
-    operationId: 'op-race',
+    operationId,
     confirmed: true,
   });
-  const duplicate = confirmQuestion(db, {
+  const duplicate = confirmFoundationQuestion(db, app, {
     sessionId: prepared.sessionId,
-    note: noteFor(selected),
-    operationId: 'op-race',
+    operationId,
     confirmed: true,
   });
   const discard = discardQuestion(db, prepared.sessionId, 80);
   const settled = await Promise.allSettled([confirmation, duplicate, discard]);
-  const rows = await listStubAnnotations(db);
+  const rows = await listAnnotations(app, raceChunk.id);
   const session = await getSession(db, prepared.sessionId);
   const operations = await db.get<{ count: number }>('SELECT COUNT(*) AS count FROM harness_operations');
   assert.ok(rows.length <= 1);
   assert.equal(operations?.count, rows.length);
   if (rows.length === 1) {
-    assert.equal(rows[0]?.operationId, 'op-race');
-    assert.equal(session?.confirmedOperationId, 'op-race');
-    assert.equal(session?.proposal?.id, proposed.proposal?.id);
-    const writes = settled.filter((item) => item.status === 'fulfilled' && item.value && typeof item.value === 'object' && 'annotationId' in item.value);
+    assert.equal(session?.confirmedOperationId, operationId);
+    const writes = settled.filter(
+      (item) => item.status === 'fulfilled' && item.value && typeof item.value === 'object' && 'annotationId' in item.value,
+    );
     assert.equal(writes.length, 2);
   } else {
-    assert.equal(session?.proposal, null);
     assert.equal(session?.confirmedOperationId, null);
   }
   for (const item of settled) {
     if (item.status === 'rejected') {
-      assert.match(String(item.reason), /proposal|already saved/);
+      assert.match(String(item.reason), /proposal|operation id|already saved/);
     }
   }
 
   const other = await harnessDb();
-  const again = chunk(2, 'other note text');
+  const otherApp = nodeDb();
+  await migrateDb(otherApp);
+  const otherSetup = createCommit(otherApp, { now: () => 100, newId: () => `other-${++seed}` });
+  const otherRoom = await otherSetup({
+    opId: 'other-room',
+    kind: 'room.create',
+    source: 'human',
+    confirmed: false,
+    payload: { name: 'biology' },
+  });
+  assert.equal(otherRoom.ok, true);
+  if (!otherRoom.ok) return;
+  const otherCreated = await otherSetup({
+    opId: 'other-chunk',
+    kind: 'chunk.create',
+    source: 'human',
+    confirmed: false,
+    payload: { roomId: otherRoom.value.roomId, bodies: ['other note text'] },
+  });
+  assert.equal(otherCreated.ok, true);
+  if (!otherCreated.ok) return;
+  const otherChunk = await getChunk(otherApp, otherCreated.value.chunkIds[0] ?? '');
+  assert.ok(otherChunk);
+  if (!otherChunk) return;
+  const again = chunkViewFromFoundation(otherChunk);
   const started = await beginQuestion(other, { chunks: [again], prompt: 'Discard wins' });
   const ready = await fulfillQuestion(other, started, {
     chunks: [again],
@@ -781,19 +953,21 @@ test('confirm, discard, and a duplicate operation stay atomic on the shared queu
     signal: new AbortController().signal,
   });
   assert.equal(ready.status, 'proposal');
+  const discardId = ready.session?.pendingOperationId ?? '';
   await discardQuestion(other, started.sessionId, 90);
   await assert.rejects(
     () =>
-      confirmQuestion(other, {
+      confirmFoundationQuestion(other, otherApp, {
         sessionId: started.sessionId,
-        note: noteFor(again),
-        operationId: 'op-after-discard',
+        operationId: discardId,
         confirmed: true,
       }),
-    /proposal/,
+    /proposal|operation id/,
   );
-  assert.equal((await listStubAnnotations(other)).length, 0);
+  assert.equal((await listAnnotations(otherApp, otherChunk.id)).length, 0);
   other.close();
+  otherApp.close();
+  app.close();
   rawDb.close();
 });
 
@@ -843,7 +1017,7 @@ test('completion and cancel on the shared queue leave no annotation', async () =
   assert.notEqual(outcome.status, 'proposal');
   assert.equal((await getSession(db, prepared.sessionId))?.state, 'cancelled');
   assert.equal((await getSession(db, prepared.sessionId))?.proposal, null);
-  assert.equal((await listStubAnnotations(db)).length, 0);
+  assert.equal((await getSession(db, prepared.sessionId))?.confirmedOperationId, null);
   rawDb.close();
 });
 
@@ -1171,7 +1345,7 @@ test('a confirmed chunk answer is one ai annotation and the same operation id ad
   const after = await getChunk(app, savedChunk.id);
   assert.equal(after?.body, 'photosynthesis makes sugar');
   assert.equal(after?.revision, savedChunk.revision);
-  assert.equal((await listStubAnnotations(harness)).length, 0);
+  assert.equal(await harness.get("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'harness_stub_annotations'"), null);
   const applied = await app.get<{ source: string }>('SELECT source FROM applied_ops WHERE op_id = ?', [operationId]);
   assert.equal(applied?.source, 'ai');
 

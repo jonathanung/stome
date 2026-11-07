@@ -33,7 +33,7 @@ STOME_APP_ORIGIN=http://localhost:8081 STOME_COMPANION_PORT=8787 npm run compani
 | Sessions, messages, operation ids | separate Expo SQLite file `stome-harness.db` | Harness-owned. The operation id is stored on the session before `createCommit` |
 | Confirmed AI answer | `annotations` in `stome.db` | `source: 'ai'`, `confirmed: true`. `expectedRevision` is the revision stored on the proposal when it was created. A newer chunk revision rejects the confirm. Replay of that operation id does not insert again |
 | Confirmed AI note edit | `chunks.content` in `stome.db` | `chunk.update`, `source: 'ai'`, `confirmed: true`. The proposal stores the body it read and that revision. Confirm sends that revision, not a newer read. Cancel, discard, refusal, and a stale revision leave the saved text unchanged. Replay does not write again |
-| Older demo pins | `harness_stub_annotations` | Left in place. A `note:*` selection fails confirm and is not copied |
+| Legacy demo rows | `stome-harness.db` | Removed by the v3 harness migration. A `note:*` selection still fails confirm and is never copied into `annotations` |
 | Model calls | deterministic mock in the companion | No live provider |
 
 A companion payload is not a write permission. Confirmation re-reads the chunk, then calls `createCommit`:
@@ -54,7 +54,7 @@ A companion payload is not a write permission. Confirmation re-reads the chunk, 
 }
 ```
 
-`createCommit` writes the annotation, checks the revision, and records `applied_ops` in one transaction. Room saves and a confirm share one queue for that database, so a human note or highlight waits until the pin transaction finishes. A failed pin rolls back only its own transaction. The session flag is a separate write in `stome-harness.db`. A retry reads `applied_ops` before it checks the chunk again. If that operation id already committed an annotation, the session flag is repaired and nothing is inserted, even when the chunk was edited or deleted afterward. A new operation id still rejects a stale or missing chunk and writes nothing. The proposal and its operation id are stored in the same session update. A completed proposal that has no operation id gets one stable id on the next open. `commitStubAnnotation` is not used for this save.
+`createCommit` writes the annotation, checks the revision, and records `applied_ops` in one transaction. Room saves and a confirm share one queue for that database, so a human note or highlight waits until the pin transaction finishes. A failed pin rolls back only its own transaction. The session flag is a separate write in `stome-harness.db`. A retry reads `applied_ops` before it checks the chunk again. If that operation id already committed an annotation, the session flag is repaired and nothing is inserted, even when the chunk was edited or deleted afterward. A new operation id still rejects a stale or missing chunk and writes nothing. The proposal and its operation id are stored in the same session update. A completed proposal that has no operation id gets one stable id on the next open. There is exactly one commit path: `confirmFoundationQuestion` calls `createCommit` (FND.2), and the harness stores only sessions, messages, and operation ids.
 
 ## Session states
 
@@ -94,7 +94,7 @@ Browser requests need the page origin to match. Expo web SQLite needs these head
 
 `metro.config.js` sets them on Metro responses. `npm run web:sqlite` also sets them on the document. A Chrome run at `http://localhost:8081` reported `crossOriginIsolated === true`. The document response carried `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: credentialless`. The pairing token was not in `localStorage` or `sessionStorage`, and the token field was empty after reload.
 
-On that origin, Expo SQLite stored both databases in the origin private file system directory `expo-sqlite`. The file headers identified `/stome.db` (scaffold notes) and `/stome-harness.db` (sessions, messages, operation ids, and stub annotations). The app path uses this real `expo-sqlite` web driver. `npm run check:harness` uses Node's `node:sqlite` for the session rules. The production queue itself is covered there by the same serializer the Expo adapter uses, one owner per connection, with the transaction callback on a direct executor. That Node run is still not a substitute for the browser `expo-sqlite` driver. iOS and Android were not run.
+On that origin, Expo SQLite stored both databases in the origin private file system directory `expo-sqlite`. The file headers identified `/stome.db` (rooms, chunks, and foundation annotations) and `/stome-harness.db` (sessions, messages, and operation ids). The app path uses this real `expo-sqlite` web driver. `npm run check:harness` uses Node's `node:sqlite` for the session rules. The production queue itself is covered there by the same serializer the Expo adapter uses, one owner per connection, with the transaction callback on a direct executor. That Node run is still not a substitute for the browser `expo-sqlite` driver. iOS and Android were not run.
 
 ## Checks
 
