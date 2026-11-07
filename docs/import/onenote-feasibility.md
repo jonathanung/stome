@@ -3,7 +3,20 @@
 Researched 2026-11-07. Research only; no OneNote importer, OAuth app or native
 format parser was implemented or exercised.
 
-## Recommendation for IMPORT.11 (#28)
+## Expanded-scope decision (2026-11-07)
+
+The user now selects offline DOCX, MHT/MHTML and HTML/HTM import for #25, with
+OneNote PDF exports using the shared generic PDF engine. This supersedes the
+original v1 deferral and future Graph-first preference below. See the
+[expanded plan](../note-import.md#expanded-implementation-scope-2026-11-07).
+These are local export adapters, not a claim that every OneNote client offers
+every export format. Preserve available typed structure and embedded resources;
+warn about missing notebook hierarchy, layout, ink and unsupported attachments.
+Graph OAuth and native `.one` parsing are not selected. No account credentials
+or OCR service are needed for this planned route. Actual notebook-export testing
+remains part of #25's acceptance and is not supplied by this documentation.
+
+## Original recommendation for IMPORT.11 (#28, superseded scope)
 
 Defer the OneNote parser (#25) from v1. It is feasible in principle, but neither
 authenticated access nor export fidelity has been tested on a sample notebook.
@@ -73,9 +86,13 @@ download a notebook, convert a `.one` file, or inspect a real Word/MHT/PDF expor
 #20's research criteria can be satisfied by this route/fidelity/risk analysis;
 #25's parser criteria require sample notebooks and are not satisfied.
 
-Before choosing OneNote in a future scope decision, obtain a permitted notebook
+The original recommendation required a permitted notebook before selection;
+the expanded user request now selects bounded offline adapters for engineering.
+Before declaring their source fidelity complete, obtain a permitted notebook
 with sections, subpages, typed headings, tables, an image, an attachment and ink.
 Measure hierarchy, order, text and resource preservation for the chosen route;
 test token expiry/denied access and partial fetches. Include an offline-only
-notebook in the availability check. Keep #25 deferred until that evidence and
-the shared pipeline contract support the selected route.
+notebook in the availability check. Retain this evidence requirement while the
+newly selected adapters and shared artifact contract are implemented. Synthetic
+DOCX/HTML/MIME fixtures establish parser behavior, not authentic OneNote export
+fidelity. The account/expiry checks apply only if Graph is separately selected.

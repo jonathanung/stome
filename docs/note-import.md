@@ -1,6 +1,71 @@
 # Note import v1 — issue #17
 
-## Scope decision (2026-11-07)
+## Expanded implementation scope (2026-11-07)
+
+The user has now requested PDF and the other source exports in addition to
+Markdown, and explicitly excluded handwriting recognition for now. This supersedes the earlier one-or-two-format, Markdown-first
+recommendation below. It selects bounded **export routes** for implementation;
+it does not claim that their parsers, assets or device paths have shipped.
+The revised decision for #28 is recorded on parent #17 before #28 closes.
+
+| Source | Selected route and reason | Fidelity and remaining validation |
+| --- | --- | --- |
+| Obsidian / Markdown | Keep individual UTF-8 `.md` imports and reconcile #23 against the existing parser/tests. This remains the lowest-effort text route. | Existing literal-markup behavior and vault/plugin limitations remain. Full vault/ZIP traversal is outside this expansion. |
+| Generic PDF, including GoodNotes PDF exports (#24) | Extract selectable text per page and retain the original as a visual reference. One shared PDF engine avoids separate source-specific PDF implementations. | Positioned text can have incorrect reading order or omit ink. Files without usable text need a clear message or an explicit reference-only route, not fabricated extracted notes. Handwriting/OCR and GoodNotes-export fidelity are not established by this decision. |
+| OneNote offline exports (#25) | Add DOCX, MHT/MHTML and HTML/HTM adapters; route PDF exports through the shared PDF engine. Offline files can be reviewed without registering an OAuth app or connecting a Microsoft account. | Preserve available typed structure and embedded resources, and warn about missing hierarchy, layout, ink or attachments. Export menus vary by client; this is not a promise that each client offers every format. Authentic notebook exports remain acceptance evidence for #25. |
+| Freeform exports (#26) | Route whole-board/scene PDFs and user-provided PNG/JPEG artifacts into visual reference/background imports. | Preserve board/page/scene identity when supplied; exported pixels are not reconstructed editable shapes, connectors or strokes. Authentic board exports and crop/order checks remain acceptance evidence for #26. |
+
+These choices follow the documented format routes in the source reports and
+the new user direction. They accept visual references as a useful outcome when
+faithful text or spatial reconstruction is unavailable. The earlier effort/risk
+ratings remain relevant: Markdown is low effort/risk; PDF/visual attachments and
+offline document packages need medium-to-high implementation and fidelity work.
+Choosing them now does not retroactively turn that work or its sample tests into
+completed evidence.
+
+### Stages and completion gates
+
+1. **Scope (#28):** record the selected routes, comparison and limitations here
+   and on #17. Closed research #18/#20/#21 supplies the documented route analysis.
+   #19 remains open for authentic typed/handwritten GoodNotes sample validation;
+   its missing samples do not block engineering the explicitly requested generic
+   PDF route. This is a revised scope/dependency decision, not a waiver of #19's
+   acceptance criteria.
+2. **Parser engines (#24/#25):** establish bounded binary/document inputs and a
+   shared typed document result: `format`, `path`, `title`, `subjects`, ordered
+   `chunks` with `body` and optional `page`/`section`, plus `warnings`. Original
+   asset retention belongs to the picker/storage integration, not pure parsers.
+   Test generic fixtures for parser behavior
+   and distinguish them from actual GoodNotes/OneNote exports. Preserve useful
+   original visuals; do not treat empty extracted text as success.
+3. **Shared integration (#24/#26):** extend picking, review, durable local asset
+   storage and the validate-and-commit boundary together. PDF pages and images
+   must remain readable after restart; a cache URI alone is insufficient.
+   Asset-only items need clear source/page labels, not fabricated recognized
+   text. Bound asset sizes/counts and archive expansion, and define rollback and
+   orphan cleanup when a reviewed import fails or is deleted.
+4. **Review and verification:** show text beside its retained page/background,
+   expose missing-content and reading-order warnings, and preserve subject/room
+   overrides. Keep atomic per-source saves, source identity, repeat-import
+   deduplication and conflict protection. Test the actual adapter, asset and
+   persistence paths on supported platforms before advertising support there.
+   A generic fixture or a successful bundle alone cannot validate an app's
+   particular export settings or handwriting fidelity.
+
+The user has explicitly deferred handwriting recognition: **no OCR is included**.
+Do not claim recognition of handwritten or scanned words merely because an image
+or an existing PDF text layer was preserved. No OCR/AI service is selected, no AI subscription or
+credentials are needed for the selected local export routes, and no document is
+uploaded as part of this scope decision. HTML/MHTML import is data conversion:
+do not execute scripts or fetch remote resources implicitly.
+
+Native `.one`, `.goodnotes` and Freeform board reconstruction are not selected.
+The public `.one` specifications documented in the OneNote report do not amount
+to an implemented parser. Graph OAuth/account access is also deferred until a
+separate authenticated integration is explicitly built and verified. This
+export-based plan makes no native-format or complete-notebook migration promise.
+
+## Original Markdown-first decision (2026-11-07, superseded scope)
 
 Ship individual UTF-8 Markdown files, including notes from Obsidian, first.
 Select several `.md` files, preview their chunks and inferred subjects, then
@@ -16,13 +81,14 @@ form the stable source identity; cache URIs are never identities.
 | OneNote (#20) | Microsoft Graph exposes notebooks/sections/pages, needs delegated authentication (app-only auth retired). Desktop PDF export and web page-to-PDF routes exist; PDFs lose notebook hierarchy. No native `.one` parser selected. | High / medium-high for OAuth, HTML, images and ink. | Defer #25. |
 | Freeform (#21) | Apple documents sending a board copy and exporting PDF. Board positions and connectors do not map cleanly to linear notes. Whiteboard mapping needs its own model. | High / high for PDF extraction or spatial preservation. | Defer #26. |
 
-Markdown is implemented; its selection here remains the conservative
-recommendation for #28, not completion of that issue's research gates. The
+At the time of the original decision, Markdown was implemented and the
+selection below was the conservative recommendation for #28. The
 source-specific reports below supersede the original preliminary research
 summary. OneNote and Freeform are research-only assessments of documented
 routes, not claims of working importers. GoodNotes #19 still requires authentic
-typed and handwritten export samples; neither #19 nor #28 can close on the
-current evidence. No device sample tests are claimed. The Markdown tests use
+typed and handwritten export samples. The old #28 gate is superseded by the
+expanded user-authorized plan above; #19's missing sample acceptance remains
+unchanged. No device sample tests are claimed. The Markdown tests use
 the explicitly synthetic `tests/fixtures/import-vault/` sample vault; they do
 not establish compatibility with every Obsidian plugin.
 
@@ -45,13 +111,14 @@ Primary references (consulted 2026-11-07):
 - [Expo SDK 58 DocumentPicker](https://docs.expo.dev/versions/v58.0.0/sdk/document-picker/)
 - [Expo SDK 58 FileSystem](https://docs.expo.dev/versions/v58.0.0/sdk/filesystem/)
 
-## Pipeline and contract (#22, #23, #27)
+## Implemented Markdown pipeline and contract (#22, #23, #27)
 
 Picker → bounded UTF-8 read → pure Markdown parser → review → `import.note`
 operation → existing validate-and-commit boundary → SQLite. The parser takes
 `{path, text}` and returns ordered `bodies`, inferred `subjects`, and warnings.
 Other parsers can implement this same interface later; binary formats are
-rejected by extension instead of guessed. No imported text is executed or
+currently rejected by extension instead of guessed. The expanded binary/asset
+contract above is planned, not present in this Markdown interface. No imported text is executed or
 sent to an AI provider. #31 remains a separate, unimplemented prototype.
 
 ATX headings outside fenced code start chunks. Long sections split at the

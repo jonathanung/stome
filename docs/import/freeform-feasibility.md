@@ -3,7 +3,20 @@
 Researched 2026-11-07. Research only. No Apple Account was accessed and no board
 was exported or parsed on a device.
 
-## Recommendation for IMPORT.11 (#28)
+## Expanded-scope decision (2026-11-07)
+
+The user now selects the lower-fidelity-risk route described by this research:
+whole-board/scene PDFs and user-provided PNG/JPEG artifacts as retained visual
+references/backgrounds for #26. See the
+[expanded plan](../note-import.md#expanded-implementation-scope-2026-11-07).
+This supersedes the original deferral below; it does not establish an editable
+Freeform board importer or a new Apple native-format contract. Generic PDF/image
+engineering may proceed while actual board samples, scene order, crop bounds
+and preserved image quality remain explicit #26 acceptance work. Handwriting
+recognition/OCR is excluded for now; visible handwriting is not recognized text. Apple Account access and
+temporary board-copy links are not required for the selected local artifacts.
+
+## Original recommendation for IMPORT.11 (#28, superseded scope)
 
 Defer the Freeform parser (#26) from v1. **Visual reference import is feasible;
 faithful structured-note or editable-whiteboard import is not established.**
@@ -68,10 +81,11 @@ Ratings are engineering estimates. #21 requests format/fidelity/mapping research
 it does not require building a parser. #26 additionally requires tested sample
 boards and is not satisfied by this document.
 
-Before reopening that parser lane, export a permitted board containing typed
+Before declaring the expanded visual-reference lane complete, export a permitted board containing typed
 text, handwriting, shapes, connectors, an image and a file attachment as a
 whole-board PDF, scene PDF and PNG. Record iPadOS/Freeform versions and framing
 options; inspect text layers, image quality, page sizes, clipping and attachment
-behavior. Test both a text-heavy board and a spatial diagram. Decide whether
-lossy notes are acceptable or whether a background-only whiteboard better
-matches the intended study behavior, then update #28 before implementing #26.
+behavior. Test both a text-heavy board and a spatial diagram. The new scope has
+chosen visual-reference/background preservation; do not infer authoritative
+linear notes or editable board objects from that choice. Existing research is
+evidence for the route, not proof that those acceptance tests have passed.
