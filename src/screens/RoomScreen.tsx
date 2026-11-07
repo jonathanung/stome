@@ -2,10 +2,10 @@ import { randomUUID } from 'expo-crypto';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
 import {
   ActivityIndicator, FlatList, KeyboardAvoidingView, Platform,
-  Pressable, Text, TextInput, View,
+  Text, TextInput, View,
 } from 'react-native';
 
 import { Button, Screen, useStoneTheme } from '../../design-theme/src/primitives';
@@ -13,6 +13,8 @@ import { createCommit } from '../data/commit';
 import type { Annotation, Chunk, Room } from '../data/models';
 import { getRoom, listChunks, listRoomAnnotations } from '../data/queries';
 import { expoDriver } from '../db/expo-driver';
+import { followRoomBack, roomBackStep } from '../navigation/room-back';
+import { RoomHeader } from './RoomHeader';
 
 type ChunkWithAnnotations = Chunk & { annotations: Annotation[] };
 
@@ -42,6 +44,9 @@ export function RoomScreen() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const listRef = useRef<FlatList<ChunkWithAnnotations>>(null);
+  const composerRef = useRef<ComponentRef<typeof TextInput>>(null);
+  const leaveRoom = () => followRoomBack(roomBackStep(router.canGoBack()), router);
 
   const load = useCallback(async () => {
     if (!id) return { room: null, chunks: [] as ChunkWithAnnotations[] };
@@ -91,22 +96,20 @@ export function RoomScreen() {
   if (loading) return <Screen><SafeAreaView style={{ flex: 1 }}><ActivityIndicator style={{ marginTop: 40 }} /></SafeAreaView></Screen>;
   if (!room) return <Screen><SafeAreaView style={{ flex: 1 }}><View style={{ padding: 24, gap: 16 }}>
     <Text accessibilityRole="alert" style={{ color: theme.color.text.primary }}>This room was not found.</Text>
-    <Button label="Back to rooms" onPress={() => router.replace('/')} />
+    <Button label="Back to rooms" onPress={leaveRoom} />
   </View></SafeAreaView></Screen>;
 
   return <Screen><SafeAreaView style={{ flex: 1 }}>
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-      <FlatList data={chunks} keyExtractor={(chunk) => chunk.id} keyboardShouldPersistTaps="handled"
+      <FlatList ref={listRef} data={chunks} keyExtractor={(chunk) => chunk.id} keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ width: '100%', maxWidth: 760, alignSelf: 'center', padding: 20, paddingBottom: 48, gap: 12 }}
         ListHeaderComponent={<View style={{ gap: 14, marginBottom: 12 }}>
-          <Pressable accessibilityRole="button" onPress={() => router.replace('/')}>
-            <Text style={{ color: theme.color.text.secondary }}>← All rooms</Text>
-          </Pressable>
-          <Text accessibilityRole="header" style={{ color: theme.color.text.primary, fontSize: 32, fontWeight: '700' }}>{room.name}</Text>
-          <Text style={{ color: theme.color.text.secondary }}>Stone stage: {room.stage}</Text>
+          <RoomHeader room={room} chunkCount={chunks.length} onBack={leaveRoom}
+            onAsk={() => listRef.current?.scrollToEnd({ animated: true })}
+            onNewNote={() => { listRef.current?.scrollToOffset({ offset: 0, animated: true }); composerRef.current?.focus(); }} />
           <View style={{ alignSelf: 'flex-start' }}><Button label="Open whiteboard" variant="outline" onPress={() => router.push(`/rooms/${room.id}/board`)} /></View>
           <Text style={{ color: theme.color.text.primary, fontSize: 20, fontWeight: '600', marginTop: 8 }}>Notes</Text>
-          <TextInput accessibilityLabel="Note content" placeholder="Write a note chunk" placeholderTextColor={theme.color.text.tertiary}
+          <TextInput ref={composerRef} accessibilityLabel="Note content" placeholder="Write a note chunk" placeholderTextColor={theme.color.text.tertiary}
             multiline textAlignVertical="top" value={content} onChangeText={setContent} style={[input, { minHeight: 100 }]} />
           <TextInput accessibilityLabel="Subject tags" placeholder="Subject tags, separated by commas" placeholderTextColor={theme.color.text.tertiary}
             value={tags} onChangeText={setTags} style={input} />

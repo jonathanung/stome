@@ -8,6 +8,7 @@ import { Icon } from '../ui/Icon';
 import { StageGlyph, stageName } from '../ui/StageGlyph';
 import { BackButton } from '../ui/kit';
 import type { Room } from '../data/models';
+import { ROOM_BACK_LABEL } from '../navigation/room-back';
 
 type ActionProps = { label: string; accessibilityLabel: string; onPress?: () => void; primary?: boolean; icon?: 'plus' | 'ask' };
 
@@ -43,7 +44,7 @@ export function RoomHeader({ room, chunkCount, onBack, onAsk, onNewNote }: {
   const success = theme.color.status.success;
   return <View style={{ gap: theme.space.base }}>
     <View style={{ gap: theme.space.xs }}>
-      <BackButton label="← rooms" accessibilityLabel="All rooms" onPress={onBack} />
+      <BackButton label={ROOM_BACK_LABEL} accessibilityLabel="All rooms" onPress={onBack} testID="room-back" />
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.base, flexWrap: 'wrap' }}>
         <StageGlyph stage={room.stage} size={phone ? 44 : 56} onCanvas />
         <Text accessibilityRole="header" style={[theme.text('screenTitle'), { color: theme.color.text.primary }]}>{room.name}</Text>
