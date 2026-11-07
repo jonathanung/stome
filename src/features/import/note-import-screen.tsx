@@ -1,7 +1,7 @@
 import { randomUUID } from 'expo-crypto';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, FlatList, ScrollView, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { createStyles } from '../../../design-theme/src/primitives';
@@ -13,7 +13,9 @@ import { sourceIdentity } from '../../import/markdown';
 import { pickNotes, type PickedNote } from '../../import/pick-notes';
 import { destinationForMapping, unsetRoomMapping, type RoomMapping } from '../../import/room-map';
 import { changeSourcePath, changeSubjects, createSubjectReview, type SubjectReview } from '../../import/review-draft';
+import { ImportChooseFiles, ImportSteps } from './import-choose-files';
 import { RoomMappingControl } from './room-mapping';
+import { router } from 'expo-router';
 
 interface Draft extends SubjectReview {
   id: string;
@@ -44,6 +46,7 @@ export default function NoteImportScreen() {
   const [errors, setErrors] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
+  const [stage, setStage] = useState<'choose' | 'review'>('choose');
   const [preview, setPreview] = useState<{ title: string; bodies: string[] } | null>(null);
 
   const refresh = useCallback(async () => setRooms(await listRooms(db)), [db]);
@@ -95,12 +98,36 @@ export default function NoteImportScreen() {
     } catch (error) { setErrors([String(error)]); }
   };
 
+  if (stage === 'choose') {
+    return (
+      <SafeAreaView edges={['bottom']} style={styles.root}>
+        <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.wide}>
+            <ImportChooseFiles
+              collection={collection} onCollection={setCollection} busy={busy}
+              rows={drafts.map((d) => ({ id: d.id, name: d.note.path, path: d.path, disabled: d.done }))}
+              onPath={(id, path) => changeReview(id, (draft) => changeSourcePath(draft, path))}
+              onRemove={(id) => setDrafts((items) => items.filter((item) => item.id !== id))}
+              onChoose={choose}
+              onCancel={() => { setDrafts([]); setErrors([]); }}
+              onPreview={() => setStage('review')}
+              onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+            />
+            {errors.map((error, i) => <Text key={i} accessibilityRole="alert" style={styles.error}>{error}</Text>)}
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView edges={['bottom']} style={styles.root}>
       <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <FlatList
           data={drafts} keyExtractor={(item) => item.id} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.page}
           ListHeaderComponent={<View style={styles.section}>
+            <ImportSteps current={2} />
+            <Action label="Back to files" onPress={() => setStage('choose')} />
             <Text style={styles.title}>Bring your notes</Text>
             <Text style={styles.text}>Import Markdown from Obsidian or another app. Choose up to 20 .md files, 1 MiB each. PDF and native notebook files are not supported yet.</Text>
             <Field label="Source collection" value={collection} onChangeText={setCollection} disabled={busy} />
@@ -139,6 +166,7 @@ const useStyles = createStyles((theme) => StyleSheet.create({
   root: { flex: 1, backgroundColor: theme.color.bg.canvas },
   page: { padding: 20, gap: 20, width: '100%', maxWidth: 720, alignSelf: 'center', paddingBottom: 48 },
   section: { gap: 12 },
+  wide: { padding: 20, paddingBottom: 48, gap: 12 },
   card: { backgroundColor: theme.color.bg.surface, padding: 20, gap: 12, borderRadius: 18, borderWidth: 1, borderColor: theme.color.border.hairline },
   title: { ...theme.text('screenTitle'), color: theme.color.text.primary },
   heading: { ...theme.text('title'), color: theme.color.text.primary },
