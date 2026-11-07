@@ -2,7 +2,7 @@ import { REVIEW_STATES } from './models.ts';
 
 export const DATABASE_NAME = 'stome.db';
 
-export const SUPPORTED_VERSION = 5;
+export const SUPPORTED_VERSION = 6;
 
 export { ROOM_STAGES, ANNOTATION_TYPES, REVIEW_STATES, type RoomStage, type AnnotationType, type ReviewState } from './models.ts';
 
@@ -135,9 +135,25 @@ export const MIGRATIONS: readonly Migration[] = [
   },
   {
     version: 5,
-    name: 'human review marks',
+    name: 'room whiteboards',
     sql: `
-      CREATE TABLE review_marks (
+      CREATE TABLE whiteboards (
+        room_id TEXT PRIMARY KEY NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+        revision INTEGER NOT NULL DEFAULT 1,
+        items TEXT NOT NULL CHECK (json_valid(items)),
+        updated_at INTEGER NOT NULL
+      );
+    `,
+  },
+  {
+    version: 6,
+    name: 'review marks and whiteboards both exist',
+    // Version 5 was published twice. #79 created review_marks. #123 replaced
+    // that same version with whiteboards. user_version cannot say which SQL
+    // ran, so this step does not renumber 5. It creates whichever table is
+    // absent and leaves an existing table, including its rows, alone.
+    sql: `
+      CREATE TABLE IF NOT EXISTS review_marks (
         chunk_id TEXT NOT NULL REFERENCES chunks (id) ON DELETE CASCADE,
         local_day TEXT NOT NULL CHECK (local_day GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
         state TEXT NOT NULL CHECK (state IN (${REVIEW_STATES.map((state) => `'${state}'`).join(', ')})),
@@ -145,6 +161,12 @@ export const MIGRATIONS: readonly Migration[] = [
         due_at INTEGER NOT NULL,
         time_zone TEXT NOT NULL CHECK (length(time_zone) BETWEEN 1 AND 64),
         PRIMARY KEY (chunk_id, local_day)
+      );
+      CREATE TABLE IF NOT EXISTS whiteboards (
+        room_id TEXT PRIMARY KEY NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+        revision INTEGER NOT NULL DEFAULT 1,
+        items TEXT NOT NULL CHECK (json_valid(items)),
+        updated_at INTEGER NOT NULL
       );
     `,
   },
