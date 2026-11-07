@@ -19,6 +19,16 @@ node scripts/browser-regression.mjs
 
 Chrome defaults to `/usr/bin/google-chrome`. Override it with `CHROME_PATH`. Spawn mode opens `http://127.0.0.1:8081/`, the address the document host binds, and sets the companion origin to that same address. Screenshots and `report.json` go to `/opt/cursor/artifacts/browser-regression/`.
 
+On macOS, or when a default port is taken, override the paths and ports. The script types the companion URL into the panel, so a non-default `STOME_COMPANION_PORT` works. Without `/proc`, cleanup reads `ps`. If `ps` is also unavailable, it signals the process groups it spawned.
+
+```bash
+STOME_PUPPETEER_ROOT=/tmp/stome-browser/package.json \
+CHROME_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+STOME_WEB_PORT=8091 EXPO_INTERNAL_PORT=8092 STOME_COMPANION_PORT=8790 \
+STOME_REGRESSION_OUT=/tmp/stome-regression \
+node scripts/browser-regression.mjs
+```
+
 Set `STOME_REGRESSION_NO_SPAWN=1` and `STOME_PAIRING_TOKEN` only when the companion and document host are already running. The script generates the token otherwise. It never prints the token. Screenshots hide the pairing-token field.
 
 ## What a pass checks

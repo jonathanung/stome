@@ -116,7 +116,46 @@ function startProcess(label, args, ownedMarker, extraEnv = {}) {
   return child;
 }
 
+// Linux exposes processes under /proc. macOS has no /proc, so read the same
+// pid, process group, and command line from `ps` there. When neither is
+// readable (a sandbox can deny `ps`), cleanup falls back to the process groups
+// this script spawned: each server is started detached as its own group
+// leader, and a group id is not reused while any member of that group lives.
+const hasProcFs = existsSync('/proc/self/stat');
+
+function psTable() {
+  try {
+    const out = execFileSync('ps', ['-axww', '-o', 'pid=,pgid=,command='], { encoding: 'utf8' });
+    return out
+      .split('\n')
+      .map((line) => /^\s*(\d+)\s+(\d+)\s(.*)$/.exec(line))
+      .filter(Boolean)
+      .map((match) => ({ pid: Number(match[1]), pgid: Number(match[2]), command: match[3] }));
+  } catch {
+    return null;
+  }
+}
+
+function canReadProcesses() {
+  return hasProcFs || psTable() !== null;
+}
+
+function groupExists(pgid) {
+  try {
+    process.kill(-pgid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function processIds() {
+  if (!hasProcFs) return (psTable() ?? []).map((entry) => entry.pid);
+  return readdirSync('/proc').filter((entry) => /^\d+$/.test(entry)).map(Number);
+}
+
 function commandLine(pid) {
+  if (!hasProcFs) return (psTable() ?? []).find((entry) => entry.pid === pid)?.command ?? '';
   try {
     return readFileSync(`/proc/${pid}/cmdline`).toString().replaceAll('\0', ' ');
   } catch {
@@ -129,14 +168,14 @@ function cmdlineIncludes(pid, marker) {
 }
 
 function processGroupMembers(pgid) {
+  if (!hasProcFs) return (psTable() ?? []).filter((entry) => entry.pgid === pgid).map((entry) => entry.pid);
   const members = [];
-  for (const entry of readdirSync('/proc')) {
-    if (!/^\d+$/.test(entry)) continue;
+  for (const entry of processIds()) {
     try {
       const stat = readFileSync(`/proc/${entry}/stat`, 'utf8');
       const commandEnd = stat.lastIndexOf(')');
       const fields = stat.slice(commandEnd + 2).split(' ');
-      if (Number(fields[2]) === pgid) members.push(Number(entry));
+      if (Number(fields[2]) === pgid) members.push(entry);
     } catch {
       // The process exited while the directory was being read.
     }
@@ -150,6 +189,7 @@ function ownedCommand(pid, markers) {
 
 function groupStillOwned(child) {
   if (!child?.pid) return false;
+  if (!canReadProcesses()) return groupExists(child.pid);
   const markers = child.groupMarkers ?? [child.ownedMarker];
   if (child.exitCode === null && !child.signalCode && cmdlineIncludes(child.pid, child.ownedMarker)) return true;
   return processGroupMembers(child.pid).some((pid) => ownedCommand(pid, markers));
@@ -157,6 +197,15 @@ function groupStillOwned(child) {
 
 function signalOwned(child, signal) {
   if (!child?.pid) return;
+  if (!canReadProcesses()) {
+    try {
+      process.kill(-child.pid, signal);
+      console.error(`signaled group ${child.pid} ${signal}`);
+    } catch {
+      // The group has already exited.
+    }
+    return;
+  }
   const markers = child.groupMarkers ?? [child.ownedMarker];
   const leaderAlive = child.exitCode === null && !child.signalCode && cmdlineIncludes(child.pid, child.ownedMarker);
   if (leaderAlive) {
@@ -237,11 +286,13 @@ function killOwnedBrowser() {
     }
   }
   if (!dataDir) return;
-  for (const entry of readdirSync('/proc')) {
-    if (!/^\d+$/.test(entry)) continue;
-    if (!commandLine(Number(entry)).includes(dataDir)) continue;
+  const commands = hasProcFs
+    ? processIds().map((pid) => ({ pid, command: commandLine(pid) }))
+    : psTable() ?? [];
+  for (const { pid, command: line } of commands) {
+    if (!line.includes(dataDir)) continue;
     try {
-      process.kill(Number(entry), 'SIGKILL');
+      process.kill(pid, 'SIGKILL');
     } catch {
       // That Chrome process has already exited.
     }
@@ -535,6 +586,9 @@ async function includeChunk(page) {
 }
 
 async function pasteToken(page) {
+  // The panel defaults to port 8787. Point it at the companion this run uses,
+  // so STOME_COMPANION_PORT works when 8787 is taken.
+  await fill(page, '[data-testid="companion-url"]', `http://127.0.0.1:${companionPort}`);
   await fill(page, '[data-testid="pairing-token"]', token);
 }
 
@@ -749,7 +803,7 @@ async function main() {
     screenshots.push(await shot(page, 'room-note-reloaded'));
 
     step('the room list keeps the room after reload');
-    await clickNamed(page, '← All rooms');
+    await clickNamed(page, 'All rooms');
     await page.waitForFunction(() => document.body.innerText.includes('Study rooms'), { timeout: 20000 });
     await reloadSeen(page, roomName);
     visible = await bodyText(page);

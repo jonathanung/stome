@@ -353,7 +353,7 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
           );
         })}
       </View>
-      <Text testID="harness-state">{`Session: ${status}`}</Text>
+      <Text style={styles.state} testID="harness-state">{`Session: ${status}`}</Text>
       <View style={styles.actions}>
         <Pressable
           accessibilityRole="button"
@@ -398,15 +398,15 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
             <>
               <Text style={styles.proposalTitle}>Proposed note edit</Text>
               <Text style={styles.label}>Before</Text>
-              <Text testID="proposal-before">{proposal.previousBody}</Text>
+              <Text style={styles.proposalText} testID="proposal-before">{proposal.previousBody}</Text>
               <Text style={styles.label}>After</Text>
-              <Text testID="proposal-after">{proposal.body}</Text>
+              <Text style={styles.proposalText} testID="proposal-after">{proposal.body}</Text>
               <Text style={styles.help}>{`Based on revision ${proposal.chunkRevision}. The saved note stays unchanged until you confirm.`}</Text>
             </>
           ) : (
             <>
               <Text style={styles.proposalTitle}>Proposed AI answer</Text>
-              <Text testID="proposal-body">{proposal.body}</Text>
+              <Text style={styles.proposalText} testID="proposal-body">{proposal.body}</Text>
               <AnswerCitations
                 chunks={chunks}
                 onOpen={onOpenCitation}
@@ -549,6 +549,13 @@ const useStyles = createStyles((theme) => {
       borderRadius: 8,
       marginTop: 12,
       padding: 12,
+    },
+    state: { ...theme.text('label'),
+      color: colors.state,
+      marginTop: 12,
+    },
+    proposalText: { ...theme.text('bodySmall'),
+      color: colors.proposalBody,
     },
     proposalTitle: {
       color: colors.proposalTitle,

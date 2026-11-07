@@ -85,3 +85,14 @@ test('the harness panel and citation list contain no hardcoded hex colors', () =
     );
   }
 });
+
+test('every Text in the harness panel takes a themed style', () => {
+  // An unstyled React Native Text renders black, which disappears on the dark
+  // scheme. The contrast pairs above cannot see a Text that has no style.
+  const root = path.resolve(import.meta.dirname, '..');
+  const source = readFileSync(path.join(root, 'src/screens/HarnessPanel.tsx'), 'utf8');
+  const unstyled = [...source.matchAll(/<Text\b[^>]*>/g)]
+    .map((match) => match[0])
+    .filter((tag) => !/\bstyle=/.test(tag));
+  assert.deepEqual(unstyled, [], 'every <Text> in HarnessPanel needs a style with a harness colour');
+});
