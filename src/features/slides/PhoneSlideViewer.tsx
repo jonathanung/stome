@@ -8,14 +8,16 @@ import { SAMPLE_DECK, clampPage, type PageNote, type SlideDeck, type SlidePage }
 
 const DOTS = 5;
 
-function IconButton({ icon, label, onPress }: { icon: IconName; label: string; onPress?: () => void }) {
+function IconButton({ icon, label, onPress, active }: { icon: IconName; label: string; onPress?: () => void; active?: boolean }) {
   const theme = useStoneTheme();
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ selected: !!active }}
       onPress={onPress}
       style={({ pressed }) => ({
+        backgroundColor: active ? theme.color.accent.bg : 'transparent',
         width: theme.layout.control,
         height: theme.layout.control,
         borderRadius: theme.radius.control,
@@ -24,7 +26,7 @@ function IconButton({ icon, label, onPress }: { icon: IconName; label: string; o
         opacity: pressed ? 0.6 : 1,
       })}
     >
-      <Icon name={icon} size={20} color={theme.color.text.secondary} />
+      <Icon name={icon} size={20} color={active ? theme.color.accent.fg : theme.color.text.secondary} />
     </Pressable>
   );
 }
@@ -178,6 +180,10 @@ export function PhoneSlideViewer({ deck = SAMPLE_DECK }: { deck?: SlideDeck }) {
   const params = useLocalSearchParams<{ id?: string; page?: string }>();
   const [page, setPage] = useState(() => clampPage(Number(params.page ?? 12), deck.pageCount));
   const [touchX, setTouchX] = useState<number | null>(null);
+  const [full, setFull] = useState(false);
+  const [highlightMode, setHighlightMode] = useState(false);
+  const [pinMode, setPinMode] = useState(false);
+  const [chunked, setChunked] = useState<Record<number, boolean>>({});
   const content = deck.pages[page];
   const column = Math.min(width, theme.layout.paperMax);
 
@@ -188,7 +194,31 @@ export function PhoneSlideViewer({ deck = SAMPLE_DECK }: { deck?: SlideDeck }) {
     setTouchX(null);
     if (Math.abs(dx) > 40) go(dx < 0 ? 1 : -1);
   };
+  const askAbout = () => router.push({ pathname: '/companion', params: { page: String(page), ...(params.id ? { room: params.id } : null) } } as never);
   const goBack = () => (router.canGoBack() ? router.back() : router.replace(params.id ? `/rooms/${params.id}` : '/'));
+
+  if (full) {
+    return (
+      <View
+        style={{ flex: 1, backgroundColor: theme.color.bg.canvas, justifyContent: 'center', padding: theme.space.base }}
+        onStartShouldSetResponder={() => true}
+        onResponderGrant={(e) => setTouchX(e.nativeEvent.pageX)}
+        onResponderRelease={onRelease}
+        onResponderTerminate={() => setTouchX(null)}
+      >
+        <View style={{ position: 'absolute', top: 52, right: theme.space.md }}>
+          <IconButton icon="fullscreen" label="exit full screen" onPress={() => setFull(false)} active />
+        </View>
+        {content ? <SlideCard slide={content.slide} /> : null}
+        <Text
+          accessibilityLabel={`page ${page} of ${deck.pageCount}`}
+          style={{ ...theme.text('caption'), color: theme.color.text.tertiary, textAlign: 'center', marginTop: theme.space.lg }}
+        >
+          {page} / {deck.pageCount}
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.color.bg.canvas }}>
@@ -199,7 +229,7 @@ export function PhoneSlideViewer({ deck = SAMPLE_DECK }: { deck?: SlideDeck }) {
             <Text accessibilityRole="header" style={{ ...theme.text('actionTitle'), color: theme.color.text.primary }}>{deck.title}</Text>
             <Text style={{ ...theme.text('fine'), color: theme.color.text.tertiary }}>{deck.roomName}</Text>
           </View>
-          <IconButton icon="fullscreen" label="full screen, or rotate your phone" />
+          <IconButton icon="fullscreen" label="full screen, or rotate your phone" onPress={() => setFull(true)} />
         </View>
 
         <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
@@ -226,6 +256,12 @@ export function PhoneSlideViewer({ deck = SAMPLE_DECK }: { deck?: SlideDeck }) {
               </Text>
             </View>
           </View>
+
+          {highlightMode || pinMode || chunked[page] ? (
+            <Text accessibilityLiveRegion="polite" style={{ ...theme.text('caption'), color: theme.color.text.secondary, textAlign: 'center', paddingTop: theme.space.lg }}>
+              {highlightMode ? 'drag across the page to highlight an area' : pinMode ? 'tap the page to drop a question pin' : 'chunk made from this page'}
+            </Text>
+          ) : null}
 
           <View style={{ padding: theme.space.base, paddingTop: theme.space.xxl, gap: theme.space.lg }}>
             <Text style={{ ...theme.text('eyebrow'), color: theme.color.text.tertiary }}>on this page</Text>
@@ -256,12 +292,13 @@ export function PhoneSlideViewer({ deck = SAMPLE_DECK }: { deck?: SlideDeck }) {
             ...theme.shadow.float,
           }}
         >
-          <IconButton icon="highlightArea" label="highlight area" />
-          <IconButton icon="questionPin" label="question pin" />
-          <IconButton icon="addPage" label="make a chunk from this page" />
+          <IconButton icon="highlightArea" label="highlight area" active={highlightMode} onPress={() => { setHighlightMode((v) => !v); setPinMode(false); }} />
+          <IconButton icon="questionPin" label="question pin" active={pinMode} onPress={() => { setPinMode((v) => !v); setHighlightMode(false); }} />
+          <IconButton icon="addPage" label="make a chunk from this page" active={!!chunked[page]} onPress={() => setChunked((c) => ({ ...c, [page]: !c[page] }))} />
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="ask about this page"
+            onPress={askAbout}
             style={({ pressed }) => ({
               flex: 1,
               minHeight: theme.layout.control,
