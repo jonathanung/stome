@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { createStyles } from '../../design-theme/src/primitives';
 
 import { expoDriver } from '../db/expo-driver';
@@ -14,7 +14,8 @@ import {
 } from '../harness/contract';
 import { harnessExecutor, openHarnessDatabase } from '../harness/expoDb';
 import { AnswerCitations } from '../features/ask/AnswerCitations';
-import { visiblePinError, type ChunkFocus } from '../features/ask/citations';
+import { AskSheetPhone } from '../features/ask/AskSheetPhone';
+import { chunkLabel, citationsForProposal, visiblePinError, type ChunkFocus } from '../features/ask/citations';
 import {
   beginQuestion,
   confirmFoundationQuestion,
@@ -42,10 +43,14 @@ type HarnessPanelProps = {
 
 type Activity = 'idle' | 'asking' | 'confirming' | 'discarding';
 
+const PHONE_MAX_WIDTH = 600;
 const DEFAULT_COMPANION_URL = 'http://127.0.0.1:8787';
 
 export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }: HarnessPanelProps) {
   const styles = useStyles();
+  const isPhone = useWindowDimensions().width < PHONE_MAX_WIDTH;
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [askedPrompt, setAskedPrompt] = useState<string | null>(null);
   const [database, setDatabase] = useState<SQLiteDatabase | null>(null);
   const [databaseError, setDatabaseError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -128,7 +133,7 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
     return chunks.filter((chunk) => wanted.has(chunk.id)).map(chunkViewFromFoundation);
   }
 
-  async function onAsk(continueSession: boolean) {
+  async function onAsk(continueSession: boolean, promptOverride?: string) {
     if (!database) {
       setError(databaseError ?? 'The harness database is not open');
       return;
@@ -144,6 +149,8 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
     setActivity('asking');
     setError(null);
     setProposal(null);
+    setAskedPrompt((promptOverride ?? prompt).trim());
+    if (isPhone) setSheetOpen(true);
     const controller = new AbortController();
     abortRef.current = controller;
     try {
@@ -151,7 +158,7 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
       const selected = continueSession ? pool : viewsFor(selectedIds);
       const prepared = await beginQuestion(harnessExecutor(database), {
         chunks: selected,
-        prompt,
+        prompt: promptOverride ?? prompt,
         continueSessionId: continueSession ? session?.id : null,
       });
       runRef.current = prepared;
@@ -254,9 +261,60 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
     busy || !database || !session || pending || (session.state !== 'failed' && session.state !== 'cancelled' && session.state !== 'completed');
   const confirmDisabled = busy || !session?.pendingOperationId;
 
+  const sheetCitations =
+    proposal && !isEditProposal(proposal)
+      ? citationsForProposal(session?.selectedChunkIds ?? [], chunks, proposal)
+      : null;
+  const includedLabels = (session?.selectedChunkIds?.length ? session.selectedChunkIds : selectedIds)
+    .map((id) => chunks.find((chunk) => chunk.id === id))
+    .filter((chunk): chunk is ChunkTarget => chunk !== undefined)
+    .map((chunk) => chunkLabel(chunk.body));
+
   return (
     <View style={styles.box} testID="harness-panel">
+      {isPhone ? (
+        <AskSheetPhone
+          busy={busy}
+          canConfirm={!confirmDisabled}
+          error={error}
+          included={includedLabels}
+          onAdd={() => setSheetOpen(false)}
+          onClose={() => setSheetOpen(false)}
+          onConfirm={() => {
+            void onConfirm();
+          }}
+          onDecline={() => {
+            void onDiscard();
+          }}
+          onFollowUp={(text) => {
+            void onAsk(true, text);
+          }}
+          onOpenSource={onOpenCitation}
+          problems={sheetCitations?.problems.map((problem) => problem.message) ?? []}
+          proposal={
+            proposal
+              ? isEditProposal(proposal)
+                ? { kind: 'edit', body: proposal.body, previousBody: proposal.previousBody }
+                : { kind: 'answer', body: proposal.body }
+              : null
+          }
+          question={askedPrompt}
+          sources={(sheetCitations?.citations ?? []).map((citation) => ({
+            chunkId: citation.chunkId,
+            label: citation.label,
+            quote: citation.anchored ? citation.quote : null,
+            anchorStart: citation.anchorStart,
+            anchorEnd: citation.anchorEnd,
+          }))}
+          visible={sheetOpen}
+        />
+      ) : null}
       <Text style={styles.heading}>Ask about selected chunks</Text>
+      {isPhone && (proposal || askedPrompt) && !sheetOpen ? (
+        <Pressable accessibilityRole="button" onPress={() => setSheetOpen(true)} style={styles.secondary} testID="open-ask-sheet">
+          <Text style={styles.secondaryText}>{proposal ? 'Review proposed answer' : 'Open ask'}</Text>
+        </Pressable>
+      ) : null}
       <Text style={styles.runtime} testID="harness-runtime">
         Mock companion. A confirmed answer is saved on the chunk. An edit replaces one whole note and stays marked AI. Older demo pins stay in the harness file and are not copied.
       </Text>
