@@ -5,11 +5,14 @@ import { Platform } from 'react-native';
 
 import { MAX_IMPORT_BYTES, parseMarkdown, type ParsedNote } from './markdown';
 import { parseOneNoteBytes, parseOneNoteText } from './onenote/parse';
+import { MAX_PDF_BYTES, parsePdf } from './pdf/parse';
 
 export interface PickedNote extends ParsedNote {
   fingerprint: string;
   /** Present for every file read here. Markdown stays on the Markdown parser. */
-  exportFormat?: 'markdown' | 'onenote-html' | 'onenote-mhtml' | 'onenote-docx';
+  exportFormat?: 'markdown' | 'onenote-html' | 'onenote-mhtml' | 'onenote-docx' | 'pdf';
+  /** PDF only: the page number of each body, in order. */
+  pages?: number[];
 }
 
 const TEXT_EXPORT = /\.(md|html?|mht|mhtml)$/i;
@@ -35,9 +38,16 @@ export async function pickNotes(): Promise<{ notes: PickedNote[]; errors: string
   if (result.assets.length > 20) errors.push('Only the first 20 files were read. Import the remaining files in another batch.');
   for (const asset of result.assets.slice(0, 20)) {
     try {
+      if (/\.pdf$/i.test(asset.name)) {
+        if (asset.size !== undefined && asset.size > MAX_PDF_BYTES) throw new Error('Each PDF must be at most 8 MiB.');
+        const bytes = ownedBytes(await readBoundedBytes(asset, MAX_PDF_BYTES));
+        const note = await parsePdf({ path: asset.name, bytes });
+        notes.push({ ...note, fingerprint: hexDigest(await digest(CryptoDigestAlgorithm.SHA256, bytes)) });
+        continue;
+      }
       if (asset.size !== undefined && asset.size > MAX_IMPORT_BYTES) throw new Error('Each note must be at most 1 MiB.');
       const docx = /\.docx$/i.test(asset.name);
-      if (!docx && !TEXT_EXPORT.test(asset.name)) throw new Error('Only UTF-8 Markdown or OneNote HTML, MHTML, and DOCX exports are supported.');
+      if (!docx && !TEXT_EXPORT.test(asset.name)) throw new Error('Only UTF-8 Markdown, OneNote HTML, MHTML and DOCX exports, and PDF files are supported.');
       if (docx) {
         const bytes = ownedBytes(await readBoundedBytes(asset));
         const note = await parseOneNoteBytes({ path: asset.name, bytes });
@@ -70,17 +80,22 @@ async function readBoundedText(asset: { uri: string; file?: { size: number; text
   return file.text();
 }
 
-async function readBoundedBytes(asset: { uri: string; file?: { size: number; arrayBuffer(): Promise<ArrayBuffer> } }): Promise<Uint8Array> {
+async function readBoundedBytes(
+  asset: { uri: string; file?: { size: number; arrayBuffer(): Promise<ArrayBuffer> } },
+  limit = MAX_IMPORT_BYTES,
+): Promise<Uint8Array> {
+  const mib = limit / 1024 / 1024;
+  const tooLarge = `Each file must be at most ${mib} MiB.`;
   if (Platform.OS === 'web') {
     if (!asset.file) throw new Error('The browser did not provide a readable file. Try selecting it again.');
-    if (asset.file.size > MAX_IMPORT_BYTES) throw new Error('Each note must be at most 1 MiB.');
+    if (asset.file.size > limit) throw new Error(tooLarge);
     const bytes = new Uint8Array(await asset.file.arrayBuffer());
-    if (bytes.byteLength > MAX_IMPORT_BYTES) throw new Error('Each note must be at most 1 MiB.');
+    if (bytes.byteLength > limit) throw new Error(tooLarge);
     return bytes;
   }
   const file = new File(asset.uri);
-  if (!file.exists || file.size > MAX_IMPORT_BYTES) throw new Error('The file is missing or exceeds 1 MiB.');
+  if (!file.exists || file.size > limit) throw new Error(`The file is missing or exceeds ${mib} MiB.`);
   const bytes = await file.bytes();
-  if (bytes.byteLength > MAX_IMPORT_BYTES) throw new Error('Each note must be at most 1 MiB.');
+  if (bytes.byteLength > limit) throw new Error(tooLarge);
   return bytes;
 }
