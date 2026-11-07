@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { createStyles } from '../../../design-theme/src/primitives';
 
 import {
   cancelRoomMapping,
@@ -13,6 +14,7 @@ import {
 } from '../../import/room-map';
 
 function Action({ label, onPress, disabled = false }: { label: string; onPress(): void; disabled?: boolean }) {
+  const styles = useStyles();
   return (
     <Pressable
       accessibilityRole="button"
@@ -42,6 +44,7 @@ export function RoomMappingControl({
   disabled?: boolean;
   onChange(mapping: RoomMapping): void;
 }) {
+  const styles = useStyles();
   const [open, setOpen] = useState(false);
   const subject = roomNameFromSubject(subjects);
   const destination = destinationForMapping(mapping);
@@ -117,30 +120,29 @@ export function RoomMappingControl({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = createStyles((theme) => StyleSheet.create({
   section: { gap: 12 },
-  text: { fontSize: 17, lineHeight: 25, color: '#3f4036' },
-  hint: { fontSize: 14, lineHeight: 21, color: '#626453' },
-  label: { fontSize: 15, color: '#3f4036', fontWeight: '600' },
+  text: { ...theme.text('body'), color: theme.color.text.secondary },
+  hint: { ...theme.text('bodySmall'), color: theme.color.text.tertiary },
+  label: { ...theme.text('buttonCompact'), color: theme.color.text.secondary, },
   field: { gap: 6 },
-  input: {
+  input: { ...theme.text('body'),
     minHeight: 48,
     borderWidth: 1,
-    borderColor: '#777b67',
+    borderColor: theme.color.border.strong,
     borderRadius: 10,
     padding: 12,
-    fontSize: 17,
-    color: '#292820',
-    backgroundColor: '#fffdf8',
+    color: theme.color.text.primary,
+    backgroundColor: theme.color.bg.inset,
   },
   button: {
     minHeight: 48,
     borderRadius: 12,
     padding: 12,
-    backgroundColor: '#424e35',
+    backgroundColor: theme.color.accent.bg,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  buttonText: { fontSize: 16, fontWeight: '600', color: '#ffffff' },
+  buttonText: { ...theme.text('buttonCompact'), color: theme.color.accent.fg },
   disabled: { opacity: 0.5 },
-});
+}));

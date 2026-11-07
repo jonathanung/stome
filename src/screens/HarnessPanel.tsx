@@ -1,6 +1,7 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { createStyles } from '../../design-theme/src/primitives';
 
 import { expoDriver } from '../db/expo-driver';
 import { companionProvider } from '../harness/companionClient';
@@ -44,6 +45,7 @@ type Activity = 'idle' | 'asking' | 'confirming' | 'discarding';
 const DEFAULT_COMPANION_URL = 'http://127.0.0.1:8787';
 
 export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }: HarnessPanelProps) {
+  const styles = useStyles();
   const [database, setDatabase] = useState<SQLiteDatabase | null>(null);
   const [databaseError, setDatabaseError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -456,41 +458,35 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = createStyles((theme) => StyleSheet.create({
   box: {
-    borderColor: '#cccccc',
+    borderColor: theme.color.border.hairline,
     borderRadius: 8,
     borderWidth: 1,
     marginTop: 16,
     padding: 12,
   },
-  heading: {
-    color: '#111111',
-    fontSize: 18,
-    fontWeight: '600',
+  heading: { ...theme.text('cardTitle'),
+    color: theme.color.text.primary,
   },
-  runtime: {
-    color: '#555555',
-    fontSize: 12,
+  runtime: { ...theme.text('label'),
+    color: theme.color.text.secondary,
     marginTop: 4,
   },
-  help: {
-    color: '#555555',
-    fontSize: 13,
+  help: { ...theme.text('label'),
+    color: theme.color.text.secondary,
     marginTop: 6,
   },
-  label: {
-    color: '#333333',
-    fontSize: 13,
+  label: { ...theme.text('label'),
+    color: theme.color.text.secondary,
     marginBottom: 6,
     marginTop: 12,
   },
-  input: {
-    borderColor: '#cccccc',
+  input: { ...theme.text('bodySmall'),
+    borderColor: theme.color.border.hairline,
     borderRadius: 8,
     borderWidth: 1,
-    color: '#111111',
-    fontSize: 16,
+    color: theme.color.text.primary,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
@@ -501,23 +497,21 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   scenario: {
-    borderColor: '#cccccc',
+    borderColor: theme.color.border.hairline,
     borderRadius: 8,
     borderWidth: 1,
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
   scenarioSelected: {
-    backgroundColor: '#111111',
-    borderColor: '#111111',
+    backgroundColor: theme.color.accent.bg,
+    borderColor: theme.color.text.primary,
   },
-  scenarioText: {
-    color: '#111111',
-    fontSize: 13,
+  scenarioText: { ...theme.text('label'),
+    color: theme.color.text.primary,
   },
-  scenarioTextSelected: {
-    color: '#ffffff',
-    fontSize: 13,
+  scenarioTextSelected: { ...theme.text('label'),
+    color: theme.color.accent.fg,
   },
   actions: {
     flexDirection: 'row',
@@ -526,7 +520,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   button: {
-    backgroundColor: '#111111',
+    backgroundColor: theme.color.accent.bg,
     borderRadius: 8,
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -534,35 +528,32 @@ const styles = StyleSheet.create({
   buttonDisabled: {
     opacity: 0.45,
   },
-  buttonText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '600',
+  buttonText: { ...theme.text('buttonCompact'),
+    color: theme.color.accent.fg,
   },
   secondary: {
-    borderColor: '#111111',
+    borderColor: theme.color.text.primary,
     borderRadius: 8,
     borderWidth: 1,
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
-  secondaryText: {
-    color: '#111111',
-    fontSize: 16,
+  secondaryText: { ...theme.text('bodySmall'),
+    color: theme.color.text.primary,
   },
   proposal: {
-    backgroundColor: '#f6f6f6',
+    backgroundColor: theme.color.bg.inset,
     borderRadius: 8,
     marginTop: 12,
     padding: 12,
   },
   proposalTitle: {
-    color: '#111111',
+    color: theme.color.text.primary,
     fontWeight: '600',
     marginBottom: 4,
   },
   error: {
-    color: '#8a1f1f',
+    color: theme.color.status.danger.text,
     marginTop: 8,
   },
-});
+}));

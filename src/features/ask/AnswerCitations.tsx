@@ -20,7 +20,7 @@ export function AnswerCitations({ selectedChunkIds, chunks, proposal, onOpen }: 
   const { citations, problems } = citationsForProposal(selectedChunkIds, chunks, proposal);
   return (
     <View style={{ gap: 8, marginTop: 8 }}>
-      <Text style={{ color: theme.color.text.primary, fontSize: 13, fontWeight: '600' }}>Sources</Text>
+      <Text style={[theme.text('label'), { color: theme.color.text.primary }]}>Sources</Text>
       {citations.map((citation) => {
         const label = citation.anchored
           ? `Show cited passage in ${citation.label}`
@@ -46,13 +46,13 @@ export function AnswerCitations({ selectedChunkIds, chunks, proposal, onOpen }: 
             }}
             testID={`citation-${citation.chunkId}`}
           >
-            <Text style={{ color: theme.color.text.primary, fontSize: 15 }}>{citation.label}</Text>
+            <Text style={[theme.text('bodySmall'), { color: theme.color.text.primary }]}>{citation.label}</Text>
             {citation.anchored ? (
-              <Text style={{ color: theme.color.text.secondary, fontSize: 14 }} testID={`citation-quote-${citation.chunkId}`}>
+              <Text style={[theme.text('bodySmall'), { color: theme.color.text.secondary }]} testID={`citation-quote-${citation.chunkId}`}>
                 {`Cited passage: ${citation.quote}`}
               </Text>
             ) : (
-              <Text style={{ color: theme.color.text.secondary, fontSize: 14 }}>Included in this question</Text>
+              <Text style={[theme.text('bodySmall'), { color: theme.color.text.secondary }]}>Included in this question</Text>
             )}
           </Pressable>
         );
@@ -61,7 +61,7 @@ export function AnswerCitations({ selectedChunkIds, chunks, proposal, onOpen }: 
         <Text
           accessibilityRole="alert"
           key={`${problem.code}-${problem.chunkId}`}
-          style={{ color: theme.color.status.danger.text, fontSize: 14 }}
+          style={[theme.text('bodySmall'), { color: theme.color.status.danger.text }]}
           testID={`citation-error-${problem.chunkId}`}
         >
           {problem.message}

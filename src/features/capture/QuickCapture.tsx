@@ -6,6 +6,8 @@ import { Platform, Pressable, Text, TextInput, View } from 'react-native';
 
 import { useStoneTheme } from '../../../design-theme/src/primitives';
 import { createCommit } from '../../data/commit';
+import { Icon } from '../../ui/Icon';
+import { Field, Notice } from '../../ui/kit';
 import { listRooms } from '../../data/queries';
 import { expoDriver } from '../../db/expo-driver';
 import { LAST_ROOM_KEY, canSubmit } from './draft';
@@ -132,22 +134,14 @@ export function QuickCapture() {
       ? CLEANUP_FAILED_MESSAGE
       : null;
   const ready = canSubmit(session.draft, session.busy);
-  const field = {
-    borderWidth: 1 as const,
-    borderColor: theme.color.border.strong,
-    borderRadius: theme.radius.control,
-    backgroundColor: theme.color.bg.surface,
-    color: theme.color.text.primary,
-    fontSize: 16,
-    padding: 12,
-  };
   const layer = {
     position: (Platform.OS === 'web' ? 'fixed' : 'absolute') as 'absolute',
-    right: 16,
-    bottom: 16,
+    right: theme.space.base,
+    bottom: theme.space.section,
     zIndex: 30,
-    width: 320,
-    gap: 8,
+    width: 340,
+    maxWidth: '92%' as const,
+    gap: theme.space.md,
   };
 
   return (
@@ -157,70 +151,89 @@ export function QuickCapture() {
           style={{
             backgroundColor: theme.color.bg.surface,
             borderColor: theme.color.border.hairline,
-            borderRadius: theme.radius.card,
+            borderRadius: theme.radius.float,
             borderWidth: 1,
-            gap: 8,
-            padding: 12,
+            gap: theme.space.xl,
+            padding: theme.space.base,
+            ...theme.shadow.float,
           }}
           testID="quick-capture-panel"
         >
-          <Text style={{ color: theme.color.text.primary, fontSize: 16, fontWeight: '600' }}>Quick capture</Text>
-          <TextInput
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
+            <Text style={[theme.text('cardTitle'), { color: theme.color.text.primary }]}>Quick capture</Text>
+            {Platform.OS === 'web' ? <Text style={[theme.text('label'), { color: theme.color.text.tertiary }]}>{CAPTURE_SHORTCUT_LABEL}</Text> : null}
+          </View>
+          <Field
             accessibilityLabel="Quick capture note"
             autoCapitalize="sentences"
             onChangeText={(text) => controller.edit(text)}
             onSubmitEditing={() => { void save(); }}
             placeholder="One line for this room"
-            placeholderTextColor={theme.color.text.tertiary}
             ref={inputRef}
-            style={field}
+            returnKeyType="done"
             testID="quick-capture-input"
             value={session.draft.text}
           />
           {needsRoom ? (
-            <Link href="/" style={{ color: theme.color.text.primary, textDecorationLine: 'underline' }} testID="quick-capture-create-room">
+            <Link href="/" style={[theme.text('bodySmall'), { color: theme.color.text.primary, textDecorationLine: 'underline' }]} testID="quick-capture-create-room">
               Create a room
             </Link>
           ) : null}
-          {error ? <Text accessibilityRole="alert" style={{ color: theme.color.status.danger.text }} testID="quick-capture-error">{error}</Text> : null}
-          {warning ? <Text accessibilityRole="alert" style={{ color: theme.color.status.warning.text }} testID="quick-capture-warning">{warning}</Text> : null}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={failed ? 'Retry capture' : 'Save capture'}
-            disabled={!ready}
-            onPress={() => { void save(); }}
-            style={{
-              alignSelf: 'flex-start',
-              backgroundColor: ready ? theme.color.accent.bg : theme.color.bg.inset,
-              borderRadius: theme.radius.control,
-              paddingHorizontal: 14,
-              paddingVertical: 10,
-            }}
-            testID={failed ? 'quick-capture-retry' : 'quick-capture-save'}
-          >
-            <Text style={{ color: ready ? theme.color.accent.fg : theme.color.text.disabled, fontSize: 16 }}>
-              {failed ? 'Retry' : 'Save'}
-            </Text>
-          </Pressable>
+          {error ? <Notice tone="danger" testID="quick-capture-error">{error}</Notice> : null}
+          {warning ? <Notice tone="warning" testID="quick-capture-warning">{warning}</Notice> : null}
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: theme.space.md }}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setOpen(false)}
+              style={({ pressed }) => ({ minHeight: theme.layout.control, paddingHorizontal: theme.space.base, borderRadius: theme.radius.lg, justifyContent: 'center', opacity: pressed ? 0.6 : 1 })}
+            >
+              <Text style={[theme.text('buttonCompact'), { color: theme.color.text.secondary }]}>Close</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={failed ? 'Retry capture' : 'Save capture'}
+              accessibilityState={{ disabled: !ready }}
+              disabled={!ready}
+              onPress={() => { void save(); }}
+              style={{
+                minHeight: theme.layout.control,
+                justifyContent: 'center',
+                backgroundColor: ready ? theme.color.accent.bg : theme.color.bg.inset,
+                borderRadius: theme.radius.lg,
+                paddingHorizontal: theme.layout.buttonCompactPadX,
+              }}
+              testID={failed ? 'quick-capture-retry' : 'quick-capture-save'}
+            >
+              <Text style={[theme.text('buttonCompact'), { color: ready ? theme.color.accent.fg : theme.color.text.disabled }]}>
+                {failed ? 'Retry' : 'Save'}
+              </Text>
+            </Pressable>
+          </View>
         </View>
       ) : null}
-      {warning && !open ? (
-        <Text accessibilityRole="alert" style={{ color: theme.color.status.warning.text }} testID="quick-capture-warning">{warning}</Text>
-      ) : null}
+      {warning && !open ? <Notice tone="warning" testID="quick-capture-warning">{warning}</Notice> : null}
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Quick capture"
+        accessibilityState={{ expanded: open }}
         onPress={() => setOpen((value) => !value)}
-        style={{
+        style={({ pressed }) => ({
           alignSelf: 'flex-end',
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: theme.space.md,
+          minHeight: 52,
+          paddingLeft: theme.space.base,
+          paddingRight: theme.space.card,
           backgroundColor: theme.color.accent.bg,
-          borderRadius: theme.radius.control,
-          paddingHorizontal: 14,
-          paddingVertical: 10,
-        }}
+          borderRadius: theme.radius.pill,
+          opacity: pressed ? 0.85 : 1,
+          ...theme.shadow.float,
+        })}
         testID="quick-capture-button"
       >
-        <Text style={{ color: theme.color.accent.fg, fontSize: 16 }}>Capture ({CAPTURE_SHORTCUT_LABEL})</Text>
+        <Icon name={open ? 'cross' : 'plus'} size={20} strokeWidth={2} color={theme.color.accent.fg} />
+        <Text style={[theme.text('buttonCompact'), { color: theme.color.accent.fg }]}>Capture</Text>
       </Pressable>
     </View>
   );
