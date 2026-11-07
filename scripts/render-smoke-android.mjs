@@ -125,8 +125,12 @@ let failed = false;
 try {
   await launchWait;
   await delay(3000);
-  await adb(['shell', 'input', 'keyevent', '82']).catch(() => {});
   for (const route of routes) {
+    const overlay = await uiXml().catch(() => '');
+    if (overlay.includes('React Native Dev Menu')) {
+      await adb(['shell', 'input', 'keyevent', '4']).catch(() => {});
+      await delay(500);
+    }
     await adb(['logcat', '-c']).catch(() => {});
     if (route.url) {
       await adb(['shell', 'am', 'start', '-W', '-a', 'android.intent.action.VIEW', '-d', route.url]);
