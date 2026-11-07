@@ -111,6 +111,7 @@ export function RoomsScreen() {
             <Text style={{ color: theme.color.text.primary, fontSize: 20, fontWeight: '600' }}>{item.name}</Text>
             <Text style={{ color: theme.color.text.secondary, marginTop: 4 }}>Open room →</Text>
           </Pressable>}
+          <Text style={{ color: theme.color.text.secondary }}>Stone stage: {item.stage}</Text>
           {deletingId === item.id ? <View style={{ gap: 8 }}>
             <Text style={{ color: theme.color.status.danger.text }}>Delete “{item.name}” and all its notes?</Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
