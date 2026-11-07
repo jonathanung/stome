@@ -6,9 +6,9 @@ import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button, Screen, useStoneTheme } from '../../../design-theme/src/primitives';
-import { StageGlyph } from '../../ui/StageGlyph';
-import { REVIEW_TONE, StatusMark } from '../../ui/StatusMark';
-import { BackButton, EmptyState, Group, Notice, ScreenHeader, SectionTitle, useColumn } from '../../ui/kit';
+import { Icon } from '../../ui/Icon';
+import { REVIEW_ICON, REVIEW_TONE, StatusMark } from '../../ui/StatusMark';
+import { EmptyState, Group, Notice, SectionTitle, useColumn } from '../../ui/kit';
 import { createCommit } from '../../data/commit';
 import type { ReviewMark, Room, RoomStage } from '../../data/models';
 import { getChunk, getRoom, latestReviewMark, listChunks } from '../../data/queries';
@@ -80,6 +80,7 @@ export function ReviewScreen() {
   const [cards, setCards] = useState<ReviewQueueChunk[]>([]);
   const [total, setTotal] = useState(0);
   const [done, setDone] = useState(0);
+  const [outcomes, setOutcomes] = useState<(ReviewState | 'skipped')[]>([]);
   const [scheduled, setScheduled] = useState<Scheduled[]>([]);
   const [saved, setSaved] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -125,6 +126,7 @@ export function ReviewScreen() {
         setCards(next.cards);
         setTotal(next.cards.length);
         setDone(0);
+        setOutcomes([]);
         setScheduled(next.scheduled);
         setSaved(null);
         setError(null);
@@ -205,6 +207,7 @@ export function ReviewScreen() {
           setSaved(`Saved ${REVIEW_LABEL[result.value.state]}. Due ${formatDueAt(result.value.dueAt)}.${promoted}`);
           setCards((current) => current.filter((item) => item.id !== seen.id));
           setDone((count) => count + 1);
+          setOutcomes((current) => [...current, result.value.state]);
         },
       });
       if (reviewMarkController.generation() !== gen) return;
@@ -251,28 +254,61 @@ export function ReviewScreen() {
     if (!card || marking.current) return;
     setCards((current) => current.filter((item) => item.id !== card.id));
     setDone((count) => count + 1);
+    setOutcomes((current) => [...current, 'skipped']);
     setError(null);
   }
 
   const ink = theme.color.text.primary;
   const muted = theme.color.text.secondary;
+  const tertiary = theme.color.text.tertiary;
+  const cardStyle = {
+    backgroundColor: theme.color.bg.surface,
+    borderColor: theme.color.border.hairline,
+    borderRadius: theme.radius.card,
+    borderWidth: 1,
+    gap: theme.space.base,
+    paddingHorizontal: theme.space.card,
+    paddingVertical: 20,
+  } as const;
+  const segmentColor = (index: number): string => {
+    if (index < done) {
+      const outcome = outcomes[index];
+      if (outcome && outcome !== 'skipped') return theme.color.status[REVIEW_TONE[outcome]].fill;
+      return theme.color.border.strong;
+    }
+    return index === done ? theme.color.accent.bg : theme.color.bg.inset;
+  };
 
   return (
     <Screen>
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'left', 'right']}>
-        <ScrollView contentContainerStyle={{ flexGrow: 1, paddingBottom: 120 }}>
-          <View style={[column, { gap: theme.space.section }]} testID="review-screen">
-            <ScreenHeader
-              back={<BackButton label={room?.name ?? 'Back'} accessibilityLabel="Back" onPress={leave} testID="review-back" />}
-              title="Review"
-            >
-              {room ? (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.md, marginTop: theme.space.xs }}>
-                  <StageGlyph stage={stage} size={28} />
-                  <Text testID="review-stage" style={[theme.text('bodySmall'), { color: muted }]}>Stone stage: {stage}</Text>
-                </View>
+        <ScrollView contentContainerStyle={{ flexGrow: 1, paddingBottom: theme.space.section }}>
+          <View style={[column, { flexGrow: 1, gap: theme.space.base }]} testID="review-screen">
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.md }}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="End review"
+                testID="review-back"
+                onPress={leave}
+                style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
+              >
+                <Icon name="cross" size={20} color={ink} />
+              </Pressable>
+              <View
+                accessibilityRole="progressbar"
+                accessibilityValue={{ min: 0, max: total, now: Math.min(done, total) }}
+                style={{ flex: 1, flexDirection: 'row', gap: 4 }}
+              >
+                {Array.from({ length: total }, (_, index) => (
+                  <View key={index} style={{ flex: 1, height: 8, borderRadius: theme.radius.sm, backgroundColor: segmentColor(index) }} />
+                ))}
+              </View>
+              {card ? (
+                <Text testID="review-progress" style={[theme.text('caption'), { color: tertiary, minWidth: 44, textAlign: 'center', fontVariant: ['tabular-nums'] }]}>
+                  {`Note ${Math.min(done + 1, total)} of ${total}`}
+                </Text>
               ) : null}
-            </ScreenHeader>
+            </View>
             {loading ? <ActivityIndicator color={theme.color.accent.bg} /> : null}
             {shownError ? <Notice tone="danger" testID="review-error">{shownError}</Notice> : null}
             {!loading && missing ? (
@@ -281,40 +317,46 @@ export function ReviewScreen() {
               </EmptyState>
             ) : null}
             {!loading && room ? (
-              <View style={{ gap: theme.space.section }}>
+              <View style={{ flexGrow: 1, gap: theme.space.base }}>
                 {saved ? <Notice tone="success" testID="review-saved">{saved}</Notice> : null}
                 {card && asked ? (
-                  <View style={{ backgroundColor: theme.color.bg.surface, borderColor: theme.color.border.hairline, borderRadius: theme.radius.card, borderWidth: 1, gap: theme.space.base, padding: theme.space.card, ...theme.shadow.card }}>
-                    <View style={{ gap: theme.space.md }}>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Text testID="review-progress" style={[theme.text('label'), { color: theme.color.text.tertiary }]}>
-                          {`Note ${Math.min(done + 1, total)} of ${total}`}
+                  <>
+                    <View accessibilityLabel="Question" style={[cardStyle, theme.shadow.card]}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: theme.space.md }}>
+                        <Text testID="review-stage" numberOfLines={1} style={[theme.text('eyebrow'), { flex: 1, color: tertiary }]}>
+                          {`${room.name} · Stone stage: ${stage}`}
                         </Text>
-                        <Text testID="review-revision" style={[theme.text('label'), { color: theme.color.text.tertiary }]}>{`Revision ${card.revision}`}</Text>
+                        <Text testID="review-revision" style={[theme.text('caption'), { color: tertiary }]}>{`Revision ${card.revision}`}</Text>
                       </View>
-                      <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ flexDirection: 'row', gap: 4 }}>
-                        {Array.from({ length: total }, (_, index) => (
-                          <View key={index} style={{ flex: 1, height: 4, borderRadius: 2, backgroundColor: index < done ? theme.color.accent.bg : theme.color.bg.inset }} />
-                        ))}
-                      </View>
+                      {asked.ok ? (
+                        <Text testID="review-question" accessibilityRole="header" style={[theme.text('actionTitle'), { color: ink, fontSize: 22, lineHeight: 28, letterSpacing: -0.4 }]}>
+                          {asked.question.split('\n')[0]}
+                        </Text>
+                      ) : (
+                        <View style={{ gap: theme.space.md, alignItems: 'flex-start' }}>
+                          <Text accessibilityRole="alert" testID="review-question-error" style={[theme.text('bodySmall'), { color: theme.color.status.danger.text }]}>{asked.message}</Text>
+                        </View>
+                      )}
                     </View>
-                    <Text testID="review-chunk" style={[theme.text('reading'), { color: ink }]}>{card.body}</Text>
-                    {asked.ok ? (
-                      <View style={{ backgroundColor: theme.color.bg.canvas, borderRadius: theme.radius.lg, padding: theme.space.base }}>
-                        <Text testID="review-question" style={[theme.text('actionTitle'), { color: ink }]}>{asked.question.split('\n')[0]}</Text>
+                    <View accessibilityLabel="Your note" style={[cardStyle, { gap: 10, paddingVertical: 18 }]}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text style={[theme.text('eyebrow'), { color: tertiary }]}>Your note</Text>
+                        <Pressable accessibilityRole="link" testID="review-open-room" onPress={() => void reviewMarkController.requestLeave(() => router.replace(`/rooms/${roomId}`))} style={{ minHeight: 44, justifyContent: 'center' }}>
+                          <Text style={[theme.text('caption'), { color: muted }]}>Open in room</Text>
+                        </Pressable>
                       </View>
-                    ) : (
-                      <View style={{ gap: theme.space.md, alignItems: 'flex-start' }}>
-                        <Text accessibilityRole="alert" testID="review-question-error" style={[theme.text('bodySmall'), { color: theme.color.status.danger.text }]}>{asked.message}</Text>
-                        <Button label="Skip this note" size="compact" variant="ghost" disabled={busy} onPress={skip} />
-                      </View>
-                    )}
-                    <View style={{ flexDirection: 'row', gap: theme.space.md }}>
+                      <Text testID="review-chunk" style={[theme.text('reading'), { color: ink, fontSize: 16, lineHeight: 26 }]}>{card.body}</Text>
+                    </View>
+                    <Text style={[theme.text('caption'), { color: tertiary, textAlign: 'center' }]}>How well did you know it?</Text>
+                    <View style={{ flexDirection: 'row', gap: theme.space.md, marginTop: 'auto' }}>
                       {(Object.keys(REVIEW_LABEL) as ReviewState[]).map((state) => (
-                        <MarkButton key={state} state={state} label={REVIEW_LABEL[state]} disabled={busy} onPress={() => void mark(state)} />
+                        <MarkButton key={state} state={state} label={REVIEW_LABEL[state]} hint={REVIEW_HINT[state]} disabled={busy} onPress={() => void mark(state)} />
                       ))}
                     </View>
-                  </View>
+                    <Pressable accessibilityRole="button" disabled={busy} onPress={skip} style={{ minHeight: 44, alignItems: 'center', justifyContent: 'center' }}>
+                      <Text style={[theme.text('nav'), { color: muted }]}>Skip this note</Text>
+                    </Pressable>
+                  </>
                 ) : (
                   <EmptyState
                     testID="review-empty"
@@ -346,10 +388,18 @@ export function ReviewScreen() {
   );
 }
 
-/** One review choice, tinted with its status wash so the three read apart at a glance. */
-function MarkButton({ state, label, disabled, onPress }: { state: ReviewState; label: string; disabled: boolean; onPress: () => void }) {
+/** When each mark comes back; matches the fixed due intervals in the review_marks decision (#40). */
+const REVIEW_HINT: Record<ReviewState, string> = {
+  missed: 'again soon',
+  unclear: 'in 1 day',
+  got_it: 'in 3 days',
+};
+
+/** One review choice: a solid status fill carrying its icon, label and next-due hint. */
+function MarkButton({ state, label, hint, disabled, onPress }: { state: ReviewState; label: string; hint: string; disabled: boolean; onPress: () => void }) {
   const theme = useStoneTheme();
-  const pair = theme.color.status[REVIEW_TONE[state]];
+  const fill = theme.color.status[REVIEW_TONE[state]].fill;
+  const onFill = theme.color.text.onFill;
   return (
     <Pressable
       accessibilityRole="button"
@@ -358,18 +408,18 @@ function MarkButton({ state, label, disabled, onPress }: { state: ReviewState; l
       onPress={onPress}
       style={({ pressed }) => ({
         flex: 1,
-        minHeight: 56,
-        borderRadius: theme.radius.lg,
-        backgroundColor: pair.wash,
+        minHeight: 64,
+        borderRadius: theme.radius.bubble,
+        backgroundColor: fill,
         alignItems: 'center',
         justifyContent: 'center',
-        gap: theme.space.xs,
-        paddingVertical: theme.space.md,
+        gap: 4,
         opacity: disabled ? 0.5 : pressed ? 0.75 : 1,
       })}
     >
-      <StatusMark state={state} size={22} />
-      <Text style={[theme.text('buttonCompact'), { color: pair.text }]}>{label}</Text>
+      <Icon name={REVIEW_ICON[state]} size={18} strokeWidth={2.75} color={onFill} />
+      <Text style={[theme.text('buttonCompact'), { color: onFill }]}>{label}</Text>
+      <Text style={[theme.text('eyebrow'), { color: onFill, opacity: 0.85, letterSpacing: 0, fontWeight: '400' }]}>{hint}</Text>
     </Pressable>
   );
 }
