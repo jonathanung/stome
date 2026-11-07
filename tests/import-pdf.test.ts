@@ -253,3 +253,36 @@ test('a parsed PDF saves through import.note with its page headings', async () =
   const saved = (await listChunks(db, room.id)).map((chunk) => chunk.body.split('\n')[0]);
   assert.deepEqual(saved, ['## Page 1', '## Page 2', '## Page 3']);
 });
+
+/* ------------------------- positioning, as real writers such as Chrome emit it */
+
+const WIDE = (fontName: string) => `<< /Type /Font /Subtype /TrueType /BaseFont /${fontName} /FirstChar 32 /LastChar 126 /Widths [${Array(95).fill(500).join(' ')}] /Encoding /WinAnsiEncoding >>`;
+
+test('glyph runs placed by small Td moves (kerning) are not split into words', async () => {
+  // Each glyph is 0.5 em = 5 units at size 10. The moves land within half a unit
+  // of where the previous run ended, as when a writer kerns "A" and "TP".
+  const note = await parse(onePage(WIDE('Arial'), 'BT /F1 10 Tf 1 0 0 1 0 0 Tm (Net ) Tj 19.5 0 Td (A) Tj 4.6 0 Td (TP) Tj 10.3 0 Td (, 2 NADH) Tj ET'));
+  assert.deepEqual(note.bodies, ['## Page 1\nNet ATP, 2 NADH']);
+});
+
+test('an inline run in another font and text block stays on the same line', async () => {
+  const b = new PdfBuilder();
+  const body = b.add(WIDE('Arial'));
+  const code = b.add(WIDE('Courier'));
+  const pagesId = b.reserve();
+  const content = b.stream('', [
+    'BT /F1 10 Tf 1 0 0 -1 0 100 Tm (Runs twice.) Tj ET',
+    'BT /F2 10 Tf 1 0 0 -1 58 101 Tm (acetyl-CoA) Tj ET',
+    'BT /F1 10 Tf 1 0 0 -1 111 100 Tm (enters.) Tj ET',
+    'BT /F1 10 Tf 1 0 0 -1 0 120 Tm (Next line.) Tj ET',
+  ].join('\n'));
+  const page = b.add(`<< /Type /Page /Parent ${pagesId} 0 R /Contents ${content} 0 R /Resources << /Font << /F1 ${body} 0 R /F2 ${code} 0 R >> >> >>`);
+  b.set(pagesId, `<< /Type /Pages /Kids [${page} 0 R] /Count 1 >>`);
+  const note = await parse(b.build(`/Root ${b.add(`<< /Type /Catalog /Pages ${pagesId} 0 R >>`)} 0 R`));
+  assert.deepEqual(note.bodies, ['## Page 1\nRuns twice. acetyl-CoA enters.\nNext line.']);
+});
+
+test('TL leading makes T* and the quote operators move down a line', async () => {
+  const note = await parse(onePage(HELVETICA, "BT /F1 12 Tf 14 TL 72 700 Td (first) Tj T* (second) Tj (third) ' ET"));
+  assert.deepEqual(note.bodies, ['## Page 1\nfirst\nsecond\nthird']);
+});

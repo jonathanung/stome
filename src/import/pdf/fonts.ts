@@ -5,6 +5,8 @@ export interface DecodedText {
   text: string;
   /** Codes this font could not map to Unicode. Reported, never guessed. */
   unknown: number;
+  /** Advance of the decoded glyphs, in ems (multiply by the font size). */
+  width: number;
 }
 
 export interface FontDecoder {
@@ -151,11 +153,57 @@ export function parseToUnicode(cmap: string): { map: Map<string, string>; widths
   return { map, widths: [...widths].filter((width) => width >= 1 && width <= 4).sort((a, b) => b - a) };
 }
 
+/** Glyph widths in thousandths of an em, from /Widths (simple) or /W (composite). */
+function widthTable(doc: PdfDocument, font: PdfDict | null, composite: boolean): (code: number) => number | null {
+  if (composite) {
+    const descendants = doc.resolve(font?.entries.get('DescendantFonts'));
+    const cid = doc.resolveDict(Array.isArray(descendants) ? descendants[0] : undefined);
+    const fallback = num(doc.resolve(cid?.entries.get('DW'))) ?? 1000;
+    const widths = new Map<number, number>();
+    const w = doc.resolve(cid?.entries.get('W'));
+    if (Array.isArray(w)) {
+      for (let i = 0; i < w.length && widths.size < 65_536; ) {
+        const first = num(doc.resolve(w[i]));
+        const next = doc.resolve(w[i + 1]);
+        if (first === null) break;
+        if (Array.isArray(next)) {
+          next.forEach((item, offset) => {
+            const width = num(doc.resolve(item));
+            if (width !== null) widths.set(first + offset, width);
+          });
+          i += 2;
+        } else {
+          const last = num(next);
+          const width = num(doc.resolve(w[i + 2]));
+          if (last === null || width === null) break;
+          for (let code = first; code <= Math.min(last, first + 65_535); code += 1) widths.set(code, width);
+          i += 3;
+        }
+      }
+    }
+    return (code) => widths.get(code) ?? fallback;
+  }
+  const firstChar = num(doc.resolve(font?.entries.get('FirstChar')));
+  const widths = doc.resolve(font?.entries.get('Widths'));
+  const descriptor = doc.resolveDict(font?.entries.get('FontDescriptor'));
+  const missing = num(doc.resolve(descriptor?.entries.get('MissingWidth')));
+  if (firstChar === null || !Array.isArray(widths)) return () => null;
+  return (code) => {
+    const width = num(doc.resolve(widths[code - firstChar]));
+    return width ?? missing ?? null;
+  };
+}
+
+/** Width used when a font gives none: about half an em per glyph. */
+const DEFAULT_WIDTH = 500;
+
 /** Builds the decoder for one font resource. */
 export async function fontDecoder(doc: PdfDocument, fontValue: PdfDict | null): Promise<FontDecoder> {
   const font = fontValue;
   const subtype = name(font?.entries.get('Subtype'));
   const composite = subtype === 'Type0';
+  const widthOf = widthTable(doc, font, composite);
+  const advance = (code: number) => (widthOf(code) ?? DEFAULT_WIDTH) / 1000;
   let toUnicode: { map: Map<string, string>; widths: number[] } | null = null;
   try {
     const cmapBytes = await doc.streamBytes(font?.entries.get('ToUnicode'));
@@ -165,37 +213,48 @@ export async function fontDecoder(doc: PdfDocument, fontValue: PdfDict | null): 
   }
 
   if (toUnicode && toUnicode.map.size) {
-    const widths = toUnicode.widths.length ? toUnicode.widths : [composite ? 2 : 1];
+    const codeWidths = toUnicode.widths.length ? toUnicode.widths : [composite ? 2 : 1];
     const map = toUnicode.map;
     return {
       decode(bytes) {
         let text = '';
         let unknown = 0;
+        let width = 0;
         for (let i = 0; i < bytes.length; ) {
           let matched = false;
-          for (const width of widths) {
-            if (i + width > bytes.length) continue;
-            const hit = map.get(`${width}:${codeOf(bytes.subarray(i, i + width))}`);
+          for (const size of codeWidths) {
+            if (i + size > bytes.length) continue;
+            const code = codeOf(bytes.subarray(i, i + size));
+            const hit = map.get(`${size}:${code}`);
             if (hit !== undefined) {
               text += hit;
-              i += width;
+              width += advance(code);
+              i += size;
               matched = true;
               break;
             }
           }
           if (!matched) {
+            const size = codeWidths[codeWidths.length - 1];
             unknown += 1;
-            i += widths[widths.length - 1];
+            width += advance(codeOf(bytes.subarray(i, i + size)));
+            i += size;
           }
         }
-        return { text, unknown };
+        return { text, unknown, width };
       },
     };
   }
 
   if (composite) {
     // Identity-H and similar CID fonts carry glyph ids, not characters.
-    return { decode: (bytes) => ({ text: '', unknown: Math.ceil(bytes.length / 2) }) };
+    return {
+      decode(bytes) {
+        let width = 0;
+        for (let i = 0; i + 1 < bytes.length; i += 2) width += advance((bytes[i] << 8) | bytes[i + 1]);
+        return { text: '', unknown: Math.ceil(bytes.length / 2), width };
+      },
+    };
   }
 
   const encodingValue = doc.resolve(font?.entries.get('Encoding'));
@@ -220,7 +279,9 @@ export async function fontDecoder(doc: PdfDocument, fontValue: PdfDict | null): 
   const symbolic = /Symbol|Dingbats/i.test(name(font?.entries.get('BaseFont')) ?? '');
   return {
     decode(bytes) {
-      if (symbolic) return { text: '', unknown: bytes.length };
+      let width = 0;
+      for (const byte of bytes) width += advance(byte);
+      if (symbolic) return { text: '', unknown: bytes.length, width };
       let text = '';
       let unknown = 0;
       for (const byte of bytes) {
@@ -230,7 +291,7 @@ export async function fontDecoder(doc: PdfDocument, fontValue: PdfDict | null): 
           else unknown += 1;
         } else text += mapped;
       }
-      return { text, unknown };
+      return { text, unknown, width };
     },
   };
 }
