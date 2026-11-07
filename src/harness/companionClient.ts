@@ -27,7 +27,11 @@ function asCode(value: unknown): HarnessErrorCode {
   return 'provider_error';
 }
 
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
+function isLoopbackHost(hostname: string): boolean {
+  // URL.hostname keeps the brackets on an IPv6 literal, so "[::1]" is the loopback host.
+  const bare = hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname;
+  return bare === 'localhost' || bare === '127.0.0.1' || bare === '::1';
+}
 
 export function assertCompanionUrl(baseUrl: string): string {
   let url: URL;
@@ -42,7 +46,7 @@ export function assertCompanionUrl(baseUrl: string): string {
   if (url.username !== '' || url.password !== '') {
     throw new HarnessError('provider_error', 'The companion address cannot include credentials');
   }
-  if (!LOOPBACK_HOSTS.has(url.hostname)) {
+  if (!isLoopbackHost(url.hostname)) {
     throw new HarnessError('provider_error', 'The companion must stay on loopback');
   }
   return url.origin;
