@@ -656,6 +656,10 @@ async function applyOperation(db: CommitDatabase, operation: Operation): Promise
         throw new InvalidOperationError(`Annotation ${id} already exists`);
       }
       const storedPayload: AnnotationPayload = { ...(payload.payload ?? {}) };
+      // Anchors are authoritative only at the top level, where they are
+      // bounds-checked. Drop any nested copy so it cannot be stored unvalidated.
+      delete storedPayload.anchorStart;
+      delete storedPayload.anchorEnd;
       if (payload.body !== undefined) {
         storedPayload.body = payload.body;
       }

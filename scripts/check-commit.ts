@@ -485,7 +485,31 @@ async function main(): Promise<void> {
   });
   const rollbackChunk = readChunk(rollbackDb, CHUNK_ID);
   assert(rollbackChunk !== null, 'the rollback fixture chunk should exist');
+
+  // Nested anchors must not bypass the top-level bounds check.
+  const nestedAnchorId = 'annotation-op-nested-anchor';
+  await commitOperation(rollbackCommit, {
+    opId: 'op-nested-anchor',
+    kind: 'annotation.create',
+    source: 'human',
+    confirmed: false,
+    expectedRevision: rollbackChunk.updated_at,
+    payload: {
+      chunkId: CHUNK_ID,
+      type: 'highlight',
+      payload: { anchorStart: 0, anchorEnd: 9999 },
+    },
+  });
+  const nestedAnnotation = readAnnotation(rollbackDb, nestedAnchorId);
+  assert(nestedAnnotation !== null, 'the nested-anchor annotation should be written');
+  const nestedPayload = JSON.parse(nestedAnnotation.payload) as Record<string, unknown>;
+  assert(
+    nestedPayload.anchorStart === undefined && nestedPayload.anchorEnd === undefined,
+    'nested anchors should not be stored unvalidated',
+  );
+
   const rollbackOperations = countRows(rollbackDb, 'operations');
+  const rollbackAnnotations = countRows(rollbackDb, 'annotations');
 
   const failingCommit = createCommitDatabase(rollbackDb, { failOperationsInsert: true });
   const failure = await expectAnyError(
@@ -505,8 +529,12 @@ async function main(): Promise<void> {
     'the simulated failure should surface',
   );
   assert(
-    countRows(rollbackDb, 'annotations') === 0,
+    readAnnotation(rollbackDb, 'annotation-op-rollback') === null,
     'a failure after the annotation write should roll back the annotation',
+  );
+  assert(
+    countRows(rollbackDb, 'annotations') === rollbackAnnotations,
+    'a failed commit should leave the annotation count unchanged',
   );
   assert(
     countRows(rollbackDb, 'operations') === rollbackOperations,
