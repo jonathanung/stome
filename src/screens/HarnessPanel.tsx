@@ -15,6 +15,7 @@ import {
 } from '../harness/contract';
 import { harnessExecutor, openHarnessDatabase } from '../harness/expoDb';
 import { AskProposalCard } from '../features/ask/AskProposalCard';
+import { EditProposalReview, StaleEditNotice } from '../features/ask/EditProposalReview';
 import { visiblePinError, type ChunkFocus } from '../features/ask/citations';
 import {
   beginQuestion,
@@ -409,50 +410,18 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
         />
       ) : null}
       {proposal && isEditProposal(proposal) ? (
-        <View style={styles.proposal} testID="proposal-card">
-          {isEditProposal(proposal) ? (
-            <>
-              <Text style={styles.proposalTitle}>Proposed note edit</Text>
-              <Text style={styles.label}>Before</Text>
-              <Text testID="proposal-before">{proposal.previousBody}</Text>
-              <Text style={styles.label}>After</Text>
-              <Text testID="proposal-after">{proposal.body}</Text>
-              <Text style={styles.help}>{`Based on revision ${proposal.chunkRevision}. The saved note stays unchanged until you confirm.`}</Text>
-            </>
-          ) : (
-            <>
-            </>
-          )}
-          <View style={styles.actions}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ disabled: confirmDisabled }}
-              disabled={confirmDisabled}
-              onPress={() => {
-                void onConfirm();
-              }}
-              style={[styles.button, confirmDisabled ? styles.buttonDisabled : null]}
-              testID="confirm-button"
-            >
-              <Text style={styles.buttonText}>{isEditProposal(proposal) ? 'Confirm and save' : 'Confirm and pin'}</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={isEditProposal(proposal) ? 'Discard the edit' : 'Decline without writing'}
-              accessibilityState={{ disabled: busy }}
-              disabled={busy}
-              onPress={() => {
-                void onDiscard();
-              }}
-              style={[styles.secondary, busy ? styles.buttonDisabled : null]}
-              testID="discard-button"
-            >
-              <Text style={styles.secondaryText}>{isEditProposal(proposal) ? 'Discard' : 'Decline'}</Text>
-            </Pressable>
-          </View>
-        </View>
+        <EditProposalReview
+          proposal={proposal}
+          title={`${chunks.find((chunk) => chunk.id === proposal.chunkId)?.body.split('\n')[0]?.slice(0, 60) || 'Chunk'}`}
+          confirmDisabled={confirmDisabled}
+          busy={busy}
+          onConfirm={() => { void onConfirm(); }}
+          onDiscard={() => { void onDiscard(); }}
+        />
       ) : null}
-      {error ? (
+      {error && proposal && isEditProposal(proposal) && error.startsWith('Stale revision') ? (
+        <StaleEditNotice disabled={busy} onAskAgain={() => { void onAsk(false); }} />
+      ) : error ? (
         <Text accessibilityRole="alert" style={styles.error} testID="harness-error">
           {error}
         </Text>
