@@ -249,7 +249,7 @@ test("extracted font files are the bytes embedded in the reference", () => {
     const manifest = JSON.parse(script(page, "__bundler/manifest")) as Manifest;
     return decodeEntry(manifest[id]);
   }
-  const files: Array<[string, string, string]> = [
+  const files: [string, string, string][] = [
     ["fonts/inter-latin.woff2", "stone theme sheet", "145dbb73-334a-4aa8-941a-da4a828c4df1"],
     ["fonts/outfit-latin.woff2", "stone theme sheet", "62b9ae9a-2ee7-40af-815e-5f4405bcfb38"],
     ["fonts/caveat-500-latin.woff2", "stome · whiteboard", "1cc382d3-2c7a-4030-a9e8-0c1c6ae7e7e3"],

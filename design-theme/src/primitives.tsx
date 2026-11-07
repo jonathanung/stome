@@ -35,7 +35,7 @@ export function useStoneTheme(): StoneTheme {
 export function createStyles<T>(factory: (theme: StoneTheme) => T): () => T {
   return function useStyles(): T {
     const theme = useStoneTheme();
-    return useMemo(() => factory(theme), [theme, factory]);
+    return useMemo(() => factory(theme), [theme]);
   };
 }
 

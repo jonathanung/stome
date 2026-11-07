@@ -49,14 +49,14 @@ function panel(scheme: "light" | "dark", title: string, palette: StonePalette): 
     scheme === "light"
       ? "0 0 0 0 0.2 0 0 0 0 0.19 0 0 0 0 0.16 0 0 0 0.6 0"
       : "0 0 0 0 0.9 0 0 0 0 0.88 0 0 0 0 0.84 0 0 0 0.6 0";
-  const backgrounds: Array<[string, keyof StonePalette]> = [
+  const backgrounds: [string, keyof StonePalette][] = [
     ["bg-canvas", "canvas"],
     ["bg-surface", "surface"],
     ["bg-surface-alt", "surfaceAlt"],
     ["bg-inset", "inset"],
     ["bg-inverse", "inverse"],
   ];
-  const texts: Array<[string, keyof StonePalette]> = [
+  const texts: [string, keyof StonePalette][] = [
     ["text-primary", "textPrimary"],
     ["text-secondary", "textSecondary"],
     ["text-tertiary", "textTertiary"],

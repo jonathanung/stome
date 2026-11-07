@@ -115,7 +115,7 @@ export function checkPalette(): PaletteCheck {
         if (ratio < 4.5) failures.push(`${name} ${text} on ${background} is ${ratio.toFixed(2)}`);
       }
     }
-    const pairs: Array<[string, string, string, number]> = [
+    const pairs: [string, string, string, number][] = [
       ["accent foreground", palette.accentForeground, palette.accent, 4.5],
       ["success text", palette.successText, palette.successWash, 4.5],
       ["warning text", palette.warningText, palette.warningWash, 4.5],

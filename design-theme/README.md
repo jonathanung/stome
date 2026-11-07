@@ -152,4 +152,4 @@ npx tsx design-theme/preview.ts
 
 `check-theme.ts` decodes the reference, compares both palettes and the layout measurements to the tokens, checks the font-file bytes, checks contrast, and checks that `preview.html` was generated from the same tokens. Regenerate the preview with the second command after any token edit, then re-run the test.
 
-Chrome screenshots of the reference boards and of `preview.html` are a separate step (`npx tsx design-theme/screenshot.ts`) and need `puppeteer-core` plus a local Chrome. There is no iOS or Android runtime in this environment, so the React Native primitives were typechecked against a stub of `react-native` and were not launched on a device or simulator.
+Chrome screenshots are `node design-theme/screenshot.mjs`. The tool is JavaScript and loads `puppeteer-core` at runtime, so the root `tsc` program does not resolve that package. Install it only to run the script (`npm install --no-save puppeteer-core` in a scratch directory, then `NODE_PATH` pointed at it). It is not an app dependency. There is no iOS simulator or Android emulator here, so the components were not launched on a device.
