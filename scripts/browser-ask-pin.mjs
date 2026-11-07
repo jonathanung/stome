@@ -151,9 +151,73 @@ try {
   if (!cancelKept) throw new Error('a late result replaced the cancel message');
   await hideToken();
   await shot('ask-cancelled');
+
+  await page.click('[data-testid="scenario-success"]');
+  await fill('[data-testid="pairing-token"]', token);
+  await fill('[data-testid="ask-input"]', 'Hold this proposal');
+  await page.click('[data-testid="ask-button"]');
+  await page.waitForSelector('[data-testid="proposal-card"]', { timeout: 20000 });
+  const heldQuote = await page.$eval('[data-testid^="citation-quote-"]', (node) =>
+    (node.textContent ?? '').replace(/^Cited passage:\s*/, ''),
+  );
+  if (!heldQuote) throw new Error('the open proposal has no passage');
+  const stillOld = await page.evaluate((prefix) => document.body.innerText.includes(prefix), heldQuote);
+  if (!stillOld) throw new Error('the open proposal lost the current passage');
+  await page.evaluate(() => { window.__staleMark = 'open'; });
+  const mutated = await page.evaluate(async (prefix) => {
+    const root = document.getElementById('root') ?? document.body;
+    const key = Object.keys(root).find((name) => name.startsWith('__reactContainer'));
+    let fiber = key ? root[key] : null;
+    if (fiber && fiber.stateNode && fiber.stateNode.current) fiber = fiber.stateNode.current;
+    const seen = new Set();
+    const stack = fiber ? [fiber] : [];
+    let database = null;
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (!node || seen.has(node)) continue;
+      seen.add(node);
+      const value = node.memoizedProps ? node.memoizedProps.value : null;
+      if (value && typeof value.runAsync === 'function' && typeof value.getAllAsync === 'function') {
+        database = value;
+        break;
+      }
+      if (node.child) stack.push(node.child);
+      if (node.sibling) stack.push(node.sibling);
+    }
+    if (!database) return { ok: false, reason: 'no-db' };
+    const rows = await database.getAllAsync('SELECT id, content FROM chunks');
+    const row = rows.find((item) => typeof item.content === 'string' && item.content.startsWith(prefix));
+    if (!row) return { ok: false, reason: 'no-row', count: rows.length };
+    const next = `${'Q'.repeat(prefix.length)}${row.content.slice(prefix.length)}`;
+    await database.runAsync(
+      'UPDATE chunks SET content = ?, revision = revision + 1, updated_at = ? WHERE id = ?',
+      next,
+      Date.now(),
+      row.id,
+    );
+    return { ok: true, after: next.slice(0, prefix.length) };
+  }, heldQuote);
+  if (!mutated.ok) throw new Error(`could not change the chunk under the open proposal (${mutated.reason})`);
+  const beforeConfirm = await page.evaluate((prefix) => document.body.innerText.includes(prefix), heldQuote);
+  if (!beforeConfirm) throw new Error('the screen refreshed before confirm');
+  await page.click('[data-testid="confirm-button"]');
+  await page.waitForFunction(() => {
+    const message = document.querySelector('[data-testid="harness-error"]')?.textContent ?? '';
+    return message.includes('Stale revision');
+  }, { timeout: 15000 });
+  await page.waitForFunction((prefix) => document.body.innerText.includes(prefix), { timeout: 15000 }, mutated.after);
+  const stayed = await page.evaluate(() => window.__staleMark);
+  if (stayed !== 'open') throw new Error('confirm reloaded the page');
+  const showedNew = await page.evaluate((prefix) => document.body.innerText.includes(prefix), mutated.after);
+  if (!showedNew) throw new Error('the rejected confirm left the old chunk on screen');
+  await hideToken();
+  await page.evaluate(() => {
+    document.querySelector('[data-testid="harness-error"]')?.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'auto' });
+  });
+  await shot('ask-stale-confirm');
   const failures = logs.filter((line) => line.startsWith('pageerror:'));
   if (failures.length > 0) throw new Error(failures.join('\n'));
-  process.stdout.write('browser ask/cite/pin/reload/cancel passed\n');
+  process.stdout.write('browser ask/cite/pin/reload/cancel/stale-confirm passed\n');
 } catch (error) {
   await hideToken().catch(() => undefined);
   await shot('ask-failed').catch(() => undefined);
