@@ -1,5 +1,6 @@
-import { SQLiteProvider, type SQLiteDatabase } from 'expo-sqlite';
+import { getRandomBytes } from 'expo-crypto';
 import { Stack } from 'expo-router';
+import { SQLiteProvider, type SQLiteDatabase } from 'expo-sqlite';
 import { StatusBar } from 'expo-status-bar';
 import { Component, Suspense, type ReactNode } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
@@ -10,8 +11,11 @@ import { migrateDb } from '../db/migrate';
 import { DATABASE_NAME } from '../db/schema';
 import { classifyStorageFailure, createStorageRetryGate, finishStartup } from '../db/storage-startup';
 import { QuickCapture } from '../features/capture/QuickCapture';
+import { installHarnessRandomBytes } from '../harness/ids';
 import { StorageOpening, StorageStartupScreen } from '../screens/StorageStartup';
 import { stackHeaderOptions } from '../theme/stack-header';
+
+installHarnessRandomBytes((size) => getRandomBytes(size));
 
 function prepareDatabase(db: SQLiteDatabase): Promise<void> {
   return finishStartup(

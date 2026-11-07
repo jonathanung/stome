@@ -20,6 +20,7 @@ import {
   type MockScenario,
   type StoredProposal,
 } from './contract';
+import { createHarnessId } from './ids';
 import { completeWithLimits, type Provider } from './provider';
 import {
   cancelRun,
@@ -68,7 +69,7 @@ function nowMs(now?: number): number {
 }
 
 function newId(): string {
-  return globalThis.crypto.randomUUID();
+  return createHarnessId();
 }
 
 export async function beginQuestion(
@@ -397,7 +398,7 @@ export async function confirmFoundationQuestion(
   const quote = current.body.slice(request.payload.anchorStart, request.payload.anchorEnd);
   const commit = createCommit(app, {
     now: () => now,
-    newId: () => globalThis.crypto.randomUUID(),
+    newId,
   });
   const saved = await commit(operationFromAssessment(request, quote));
   if (!saved.ok) {
@@ -467,7 +468,7 @@ async function confirmChunkEdit(
   }
   const commit = createCommit(app, {
     now: () => now,
-    newId: () => globalThis.crypto.randomUUID(),
+    newId,
   });
   const saved = await commit({
     opId: operationId,
