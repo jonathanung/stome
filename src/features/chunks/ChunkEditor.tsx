@@ -3,6 +3,7 @@ import { Pressable, Text, TextInput, View } from 'react-native';
 
 import { Button, StoneText, useStoneTheme } from '../../../design-theme/src/primitives';
 import type { Chunk } from '../../data/models';
+import { isSubmitShortcut, splitAt } from '../notes/note-ops';
 import { deleteAfterFlush, type AutosaveController, type AutosaveState } from './autosave';
 import { DraftRevision, saveBodyWithBase } from './draft-revision';
 import { readDraft, syncChunkDraft } from './draft-store';
@@ -33,6 +34,21 @@ export interface ChunkEditorProps {
   onExitReadView?(): void;
   testID?: string;
   nativeID?: string;
+  /**
+   * The note's text was cleared and the field left. The parent removes the
+   * note with an undo; `previousBody` is the last text it had, for Undo.
+   */
+  onEmptied?(previousBody: string, expectedRevision: number): Promise<EditResult>;
+  /** Split at the cursor: the note keeps `head`, a new note below gets `tail`. */
+  onSplit?(head: string, tail: string, expectedRevision: number): Promise<EditResult>;
+  /** Merge the next note into this one. Undefined when there is no next note. */
+  onMergeNext?(expectedRevision: number): Promise<EditResult>;
+  /** Open a composer for a new note right below this one. */
+  onAddBelow?(): void;
+  /** Reordering is off while the list is filtered (positions would be misleading). */
+  reorderDisabled?: boolean;
+  /** Rendered at the very bottom of the card (the "add below" composer). */
+  after?: ReactNode;
 }
 
 /**
@@ -42,6 +58,7 @@ export interface ChunkEditorProps {
 export function ChunkEditor({
   chunk, index, count, onSaveBody, onSetSubjects, onMove, onDelete, onError, children,
   highlighted = false, readView, onExitReadView, testID, nativeID,
+  onEmptied, onSplit, onMergeNext, onAddBelow, reorderDisabled = false, after,
 }: ChunkEditorProps) {
   const theme = useStoneTheme();
   const n = index + 1;
@@ -116,6 +133,36 @@ export function ChunkEditor({
   // the field to its content: a chunk is always shown whole.
   const [contentHeight, setContentHeight] = useState(0);
 
+  // The last text this note had, so emptying it can be undone.
+  const lastText = useRef(chunk.body);
+  useEffect(() => {
+    if (chunk.body.trim()) lastText.current = chunk.body;
+  }, [chunk.body]);
+  const caret = useRef<number | null>(null);
+
+  const leaveField = async () => {
+    await controller.flush();
+    const current = controller.current.text ?? chunk.body;
+    if (current.trim() || !onEmptied || !lastText.current.trim()) return;
+    const result = await deleteAfterFlush(
+      controller,
+      () => revisionsRef.current?.expectedStructural(chunkRevision.current) ?? chunk.revision,
+      (rev) => onEmptied(lastText.current, rev),
+    );
+    if (!result.ok) onError(result.message);
+  };
+
+  const split = () => {
+    if (!onSplit) return;
+    const text = controller.current.text ?? chunk.body;
+    const parts = splitAt(text, caret.current ?? -1);
+    if (!parts) {
+      onError('Put the cursor where the note should split, with text on both sides.');
+      return;
+    }
+    void run((rev) => onSplit(parts.head, parts.tail, rev));
+  };
+
   const [subjectDraft, setSubjectDraft] = useState('');
   const addSubjects = () => {
     const added = subjectDraft.split(',').map((s) => s.trim()).filter(Boolean);
@@ -158,7 +205,15 @@ export function ChunkEditor({
           setView({ written: revisions.written, frozen: revisions.frozen });
           controller.edit(text);
         }}
-        onBlur={() => void controller.flush()}
+        onBlur={() => void leaveField()}
+        onSelectionChange={(event) => {
+          caret.current = event.nativeEvent.selection.start;
+        }}
+        onKeyPress={(event) => {
+          if (!isSubmitShortcut(event as unknown as Parameters<typeof isSubmitShortcut>[0])) return;
+          (event as unknown as { preventDefault?: () => void }).preventDefault?.();
+          split();
+        }}
         onContentSizeChange={(event) => setContentHeight(event.nativeEvent.contentSize.height)}
         scrollEnabled={false}
         style={[
@@ -216,9 +271,16 @@ export function ChunkEditor({
         <StoneText role="fine" tone="tertiary">
           {`Chunk ${n} · edited ${new Date(chunk.updatedAt).toLocaleString()}`}
         </StoneText>
-        <View style={{ flexDirection: 'row', gap: theme.space.base }}>
-          <TextAction label="Up" accessibilityLabel={`Move chunk ${n} up`} disabled={index === 0} onPress={() => void run((rev) => onMove(index - 1, rev))} />
-          <TextAction label="Down" accessibilityLabel={`Move chunk ${n} down`} disabled={index === count - 1} onPress={() => void run((rev) => onMove(index + 1, rev))} />
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: theme.space.base }}>
+          {onAddBelow ? <TextAction label="Add below" accessibilityLabel={`Add a note below chunk ${n}`} onPress={onAddBelow} /> : null}
+          {onSplit ? <TextAction label="Split" accessibilityLabel={`Split chunk ${n} at the cursor`} disabled={Boolean(readView)} onPress={split} /> : null}
+          {onMergeNext ? (
+            <TextAction label="Merge next" accessibilityLabel={`Merge chunk ${n + 1} into chunk ${n}`} onPress={() => void run((rev) => onMergeNext(rev))} />
+          ) : null}
+          <TextAction label="Top" accessibilityLabel={`Move chunk ${n} to the top`} disabled={reorderDisabled || index === 0} onPress={() => void run((rev) => onMove(0, rev))} />
+          <TextAction label="Up" accessibilityLabel={`Move chunk ${n} up`} disabled={reorderDisabled || index === 0} onPress={() => void run((rev) => onMove(index - 1, rev))} />
+          <TextAction label="Down" accessibilityLabel={`Move chunk ${n} down`} disabled={reorderDisabled || index === count - 1} onPress={() => void run((rev) => onMove(index + 1, rev))} />
+          <TextAction label="Bottom" accessibilityLabel={`Move chunk ${n} to the bottom`} disabled={reorderDisabled || index === count - 1} onPress={() => void run((rev) => onMove(count - 1, rev))} />
           <TextAction
             label="Delete"
             accessibilityLabel={`Delete chunk ${n}`}
@@ -235,6 +297,7 @@ export function ChunkEditor({
           />
         </View>
       </View>
+      {after}
     </View>
   );
 }

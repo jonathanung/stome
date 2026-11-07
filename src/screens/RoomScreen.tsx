@@ -2,22 +2,25 @@ import { randomUUID } from 'expo-crypto';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
 import {
   ActivityIndicator, FlatList, KeyboardAvoidingView, Platform,
-  Text, View,
+  Pressable, Text, TextInput, View,
 } from 'react-native';
 
 import { Button, Screen, useStoneTheme } from '../../design-theme/src/primitives';
 import { createCommit } from '../data/commit';
 import type { Annotation, Chunk, Room } from '../data/models';
 import type { CommitError, CommitResult, OpKind } from '../data/operations';
-import { getRoom, listChunks, listRoomAnnotations } from '../data/queries';
+import { getChunk, getRoom, listChunks, listRoomAnnotations } from '../data/queries';
 import { expoDriver } from '../db/expo-driver';
 import { AnchoredChunkText, PinnedAnswer } from '../features/ask/AnchoredChunkText';
 import type { ChunkFocus } from '../features/ask/citations';
 import { ChunkEditor, type EditResult } from '../features/chunks/ChunkEditor';
+import { readDraft } from '../features/chunks/draft-store';
 import { pastedParagraphs } from '../features/chunks/paste';
+import { isSubmitShortcut, matchesQuery, mergeNotes } from '../features/notes/note-ops';
+import { PendingDeletes, type PendingDelete } from '../features/notes/pending-delete';
 import { ReviewEntry } from '../features/review/ReviewEntry';
 import { Icon } from '../ui/Icon';
 import { StageGlyph, stageName } from '../ui/StageGlyph';
@@ -110,6 +113,11 @@ export function RoomScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pasteNotice, setPasteNotice] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [belowId, setBelowId] = useState<string | null>(null);
+  const [belowText, setBelowText] = useState('');
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  const composerRef = useRef<ComponentRef<typeof TextInput>>(null);
 
   const load = useCallback(async () => {
     if (!id) return { room: null, chunks: [] as ChunkWithAnnotations[] };
@@ -193,6 +201,20 @@ export function RoomScreen() {
   }
   const human = { source: 'human' as const, confirmed: false };
 
+  /**
+   * After adding, show the new note (it is at the end, right above the
+   * composer) and keep typing. Scroll to the composer itself: the end of the
+   * list is the AI panel below it.
+   */
+  const showNewNote = () => {
+    requestAnimationFrame(() => {
+      const node = composerRef.current as unknown as { scrollIntoView?: (options: { block: 'center'; behavior: 'smooth' }) => void } | null;
+      if (Platform.OS === 'web' && node?.scrollIntoView) node.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      else listRef.current?.scrollToEnd({ animated: true });
+      composerRef.current?.focus();
+    });
+  };
+
   /** Pasting several paragraphs into the composer adds one chunk per paragraph. */
   function onContentChange(next: string) {
     const paragraphs = pastedParagraphs(content, next);
@@ -204,8 +226,105 @@ export function RoomScreen() {
       if (!result.ok) throw new Error(result.error.message);
       setContent('');
       setPasteNotice(`Added ${paragraphs.length} chunks from the pasted paragraphs.`);
+      showNewNote();
     });
   }
+
+  /** Subjects stay for the next note (consecutive notes usually share a topic); the source link does not. */
+  function addNote() {
+    if (!content.trim() || !room || busy) return;
+    void action(async () => {
+      const result = await commit({ opId: randomUUID(), kind: 'chunk.create', ...human,
+        payload: { roomId: room.id, bodies: [content], subjects: tags.split(','), sourceLink: source.trim() || null } });
+      if (!result.ok) throw new Error(result.error.message);
+      setContent(''); setSource(''); setPasteNotice(null);
+      showNewNote();
+    });
+  }
+
+  /** A new note right below `item`, taking its subjects. */
+  function addBelow(item: ChunkWithAnnotations) {
+    if (!belowText.trim() || !room || busy) return;
+    void action(async () => {
+      const result = await commit({ opId: randomUUID(), kind: 'chunk.create', ...human,
+        payload: { roomId: room.id, bodies: [belowText], subjects: item.subjects, index: item.position + 1 } });
+      if (!result.ok) throw new Error(result.error.message);
+      setBelowText(''); setBelowId(null);
+    });
+  }
+
+  /** Split: create the tail below first, then shorten this note, so a failure can duplicate text but never lose it. */
+  async function splitNote(item: ChunkWithAnnotations, head: string, tail: string, rev: number): Promise<EditResult> {
+    if (!room) return { ok: false, message: 'This room is not loaded.' };
+    const created = await commit({ opId: randomUUID(), kind: 'chunk.create', ...human,
+      payload: { roomId: room.id, bodies: [tail], subjects: item.subjects, index: item.position + 1 } });
+    if (!created.ok) {
+      await refresh().catch(() => undefined);
+      return { ok: false, message: readable(created.error) };
+    }
+    return edit(() => commit({ opId: randomUUID(), kind: 'chunk.update', ...human, expectedRevision: rev, payload: { chunkId: item.id, body: head } }));
+  }
+
+  /** Merge the next note into this one: write the joined text first, then remove the next note. */
+  async function mergeNext(item: ChunkWithAnnotations, rev: number): Promise<EditResult> {
+    const next = chunksRef.current.find((chunk) => chunk.position === item.position + 1);
+    if (!next) return { ok: false, message: 'There is no next note to merge.' };
+    if (next.annotations.length) return { ok: false, message: 'The next note has annotations, and merging would lose them. Keep the notes separate.' };
+    if (readDraft(next.id)) return { ok: false, message: 'The next note has unsaved changes. Let it save, then merge.' };
+    const [current, following] = await Promise.all([getChunk(db, item.id), getChunk(db, next.id)]);
+    if (!current || !following) return { ok: false, message: 'One of these notes no longer exists.' };
+    const merged = mergeNotes(current, following);
+    if ('error' in merged) return { ok: false, message: merged.error };
+    const updated = await edit(() => commit({ opId: randomUUID(), kind: 'chunk.update', ...human, expectedRevision: rev,
+      payload: { chunkId: item.id, body: merged.body, subjects: merged.subjects } }));
+    if (!updated.ok) return updated;
+    const removed = await commit({ opId: randomUUID(), kind: 'chunk.delete', ...human, expectedRevision: following.revision, payload: { chunkId: following.id } });
+    await refresh().catch(() => undefined);
+    if (!removed.ok) setError(`The notes were joined, but the next note could not be removed: ${readable(removed.error)}`);
+    return updated;
+  }
+
+  // Deletes wait out an undo window; the commit runs after this render, so
+  // the effect below keeps handing it the latest list and functions.
+  const chunksRef = useRef<ChunkWithAnnotations[]>([]);
+  const [deletes] = useState(() => new PendingDeletes({
+    commit: async () => ({ ok: true }),
+    onChange: setPendingDelete,
+    onError: setError,
+  }));
+  useEffect(() => {
+    chunksRef.current = chunks;
+    deletes.setCommit(async (entry) => {
+      const latest = chunksRef.current.find((chunk) => chunk.id === entry.chunkId);
+      if (!latest) return { ok: true };
+      const result = await commit({ opId: randomUUID(), kind: 'chunk.delete', source: 'human', confirmed: false,
+        expectedRevision: latest.revision, payload: { chunkId: latest.id } });
+      await refresh().catch(() => undefined);
+      return result.ok ? { ok: true } : { ok: false, message: readable(result.error) };
+    });
+  });
+  // Leaving the room commits a pending delete rather than dropping it.
+  useEffect(() => () => { void deletes.flush(); }, [deletes]);
+
+  async function removeLater(entry: PendingDelete): Promise<EditResult> {
+    if (deletes.isHidden(entry.chunkId)) return { ok: true };
+    await deletes.remove(entry);
+    return { ok: true };
+  }
+
+  async function undoDelete() {
+    const entry = deletes.undo();
+    if (!entry?.restoreBody) return;
+    const latest = chunksRef.current.find((chunk) => chunk.id === entry.chunkId);
+    if (!latest) return;
+    const result = await commit({ opId: randomUUID(), kind: 'chunk.update', ...human, expectedRevision: latest.revision,
+      payload: { chunkId: latest.id, body: entry.restoreBody } });
+    if (!result.ok) setError(readable(result.error));
+    await refresh().catch(() => undefined);
+  }
+
+  const searching = query.trim().length > 0;
+  const visibleChunks = chunks.filter((chunk) => !deletes.isHidden(chunk.id) && matchesQuery(chunk, query));
 
   if (loading) return <Screen><SafeAreaView style={{ flex: 1 }}><ActivityIndicator color={theme.color.accent.bg} style={{ marginTop: 40 }} /></SafeAreaView></Screen>;
   if (!room) return <Screen><SafeAreaView style={{ flex: 1 }}><View style={[column, { paddingTop: theme.space.page }]}>
@@ -216,7 +335,7 @@ export function RoomScreen() {
 
   return <Screen><SafeAreaView style={{ flex: 1 }}>
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-      <FlatList ref={listRef} data={chunks} extraData={focus} keyExtractor={(chunk) => chunk.id} keyboardShouldPersistTaps="handled" testID="chunk-list"
+      <FlatList ref={listRef} data={visibleChunks} extraData={[focus, belowId, belowText, pendingDelete]} keyExtractor={(chunk) => chunk.id} keyboardShouldPersistTaps="handled" testID="chunk-list"
         initialNumToRender={1} maxToRenderPerBatch={1} windowSize={1}
         onScroll={(event) => { scrollY.current = event.nativeEvent.contentOffset.y; }}
         scrollEventThrottle={16}
@@ -241,37 +360,73 @@ export function RoomScreen() {
             </View>
           </View>
           <ReviewEntry roomId={room.id} />
+          {error ? <Notice tone="danger">{error}</Notice> : null}
+          {chunks.length ? <View style={{ gap: theme.space.md }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: theme.space.md }}>
+              <SectionTitle>Notes</SectionTitle>
+              <Button label="New note" size="compact" variant="outline" onPress={showNewNote} />
+            </View>
+            <Field accessibilityLabel="Search this room" placeholder="Search notes and subjects in this room"
+              value={query} onChangeText={setQuery} autoCapitalize="none" autoCorrect={false} returnKeyType="search" />
+            {searching ? <Text style={[theme.text('label'), { color: theme.color.text.tertiary }]}>
+              {`${visibleChunks.length} of ${chunks.length} ${chunks.length === 1 ? 'note matches' : 'notes match'}. Reordering is off while searching.`}
+            </Text> : null}
+          </View> : null}
+        </View>}
+        ListEmptyComponent={searching
+          ? <EmptyState title="No notes match" body="Try fewer or different words, or clear the search." />
+          : <EmptyState title="No notes in this room yet" body="Write your first note below, or paste a few paragraphs at once." />}
+        ListFooterComponent={<View style={{ gap: theme.space.section }}>
           <View style={{ gap: theme.space.xl, backgroundColor: theme.color.bg.surface, borderRadius: theme.radius.float, borderWidth: 1, borderColor: theme.color.border.hairline, padding: theme.space.base, ...theme.shadow.card }}>
             <SectionTitle>New note</SectionTitle>
-            <Field accessibilityLabel="Note content" placeholder="Write a note chunk"
-              multiline value={content} onChangeText={onContentChange} style={{ minHeight: 112 }} />
+            <Field ref={composerRef} accessibilityLabel="Note content" placeholder="Write a note. Ctrl+Enter (or ⌘+Enter) adds it."
+              multiline value={content} onChangeText={onContentChange} style={{ minHeight: 112 }}
+              onKeyPress={(event) => {
+                if (!isSubmitShortcut(event as unknown as Parameters<typeof isSubmitShortcut>[0])) return;
+                (event as unknown as { preventDefault?: () => void }).preventDefault?.();
+                addNote();
+              }} />
             <Text style={[theme.text('label'), { color: pasteNotice ? theme.color.status.success.text : theme.color.text.tertiary }]}>
-              {pasteNotice ?? 'Paste paragraphs separated by a blank line to add one chunk per paragraph.'}
+              {pasteNotice ?? 'Paste paragraphs separated by a blank line to add one note per paragraph.'}
             </Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.space.md }}>
               <View style={{ flexGrow: 1, flexBasis: 200 }}>
-                <Field accessibilityLabel="Subject tags" placeholder="Subjects, comma separated" value={tags} onChangeText={setTags} />
+                <Field accessibilityLabel="Subject tags" placeholder="Subjects, comma separated (kept for the next note)" value={tags} onChangeText={setTags} />
               </View>
               <View style={{ flexGrow: 1, flexBasis: 200 }}>
                 <Field accessibilityLabel="Source link" placeholder="Source link (optional)"
                   value={source} onChangeText={setSource} autoCapitalize="none" keyboardType="url" />
               </View>
             </View>
-            <View style={{ alignSelf: 'flex-start' }}><Button label="Add note" disabled={!content.trim() || busy} onPress={() => void action(async () => {
-              const result = await commit({ opId: randomUUID(), kind: 'chunk.create', source: 'human', confirmed: false,
-                payload: { roomId: room.id, bodies: [content], subjects: tags.split(','), sourceLink: source.trim() || null } });
-              if (!result.ok) throw new Error(result.error.message);
-              setContent(''); setTags(''); setSource('');
-            })} /></View>
+            <View style={{ alignSelf: 'flex-start' }}><Button label="Add note" disabled={!content.trim() || busy} onPress={addNote} /></View>
           </View>
-          {error ? <Notice tone="danger">{error}</Notice> : null}
-          {chunks.length ? <SectionTitle>Notes</SectionTitle> : null}
+          <HarnessPanel roomId={room.id} chunks={chunks} appDb={sqlite} onOpenCitation={openCitation} onSaved={() => { void refresh(); }} />
         </View>}
-        ListEmptyComponent={<EmptyState title="No notes in this room yet" body="Write your first chunk above, or paste a few paragraphs at once." />}
-        ListFooterComponent={<HarnessPanel roomId={room.id} chunks={chunks} appDb={sqlite} onOpenCitation={openCitation} onSaved={() => { void refresh(); }} />}
-        renderItem={({ item, index }) => {
+        renderItem={({ item }) => {
+          const index = chunks.indexOf(item);
           const cited = focus?.chunkId === item.id ? focus : null;
+          const next = chunks[index + 1];
           return <ChunkEditor chunk={item} index={index} count={chunks.length} onError={setError}
+            reorderDisabled={searching}
+            onAddBelow={() => { setBelowId(item.id); setBelowText(''); }}
+            onSplit={(head, tail, rev) => splitNote(item, head, tail, rev)}
+            onMergeNext={!searching && next && !deletes.isHidden(next.id) ? (rev) => mergeNext(item, rev) : undefined}
+            onEmptied={(previousBody) => removeLater({ chunkId: item.id, label: 'Empty note removed', restoreBody: previousBody })}
+            after={belowId === item.id ? <View style={{ gap: theme.space.md, paddingTop: theme.space.md, borderTopWidth: 1, borderTopColor: theme.color.border.hairline }}>
+              <Field accessibilityLabel={`New note below chunk ${index + 1}`} placeholder="New note below this one. Ctrl+Enter adds, Esc cancels."
+                multiline autoFocus value={belowText} onChangeText={setBelowText} style={{ minHeight: 72 }}
+                onKeyPress={(event) => {
+                  const key = (event as unknown as { key?: string; nativeEvent?: { key?: string } });
+                  if ((key.key ?? key.nativeEvent?.key) === 'Escape') { setBelowId(null); return; }
+                  if (!isSubmitShortcut(event as unknown as Parameters<typeof isSubmitShortcut>[0])) return;
+                  (event as unknown as { preventDefault?: () => void }).preventDefault?.();
+                  addBelow(item);
+                }} />
+              <View style={{ flexDirection: 'row', gap: theme.space.md }}>
+                <Button label="Insert note" size="compact" disabled={!belowText.trim() || busy} onPress={() => addBelow(item)} />
+                <Button label="Cancel" size="compact" variant="ghost" onPress={() => setBelowId(null)} />
+              </View>
+            </View> : undefined}
             nativeID={`chunk-${item.id}`} testID={`chunk-${item.id}`} highlighted={Boolean(cited)}
             // While a citation points into this chunk, show the highlighted passage; "Edit text" closes it.
             readView={cited ? <AnchoredChunkText body={item.body} focus={cited} /> : undefined}
@@ -279,7 +434,7 @@ export function RoomScreen() {
             onSaveBody={(body, rev) => edit(() => commit({ opId: randomUUID(), kind: 'chunk.update', ...human, expectedRevision: rev, payload: { chunkId: item.id, body } }))}
             onSetSubjects={(subjects, rev) => edit(() => commit({ opId: randomUUID(), kind: 'chunk.update', ...human, expectedRevision: rev, payload: { chunkId: item.id, subjects } }))}
             onMove={(toIndex, rev) => edit(() => commit({ opId: randomUUID(), kind: 'chunk.move', ...human, expectedRevision: rev, payload: { chunkId: item.id, toIndex } }))}
-            onDelete={(rev) => edit(() => commit({ opId: randomUUID(), kind: 'chunk.delete', ...human, expectedRevision: rev, payload: { chunkId: item.id } }))}>
+            onDelete={() => removeLater({ chunkId: item.id, label: 'Note deleted' })}>
           {item.sourceLink ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.sm }}>
             <Icon name="link" size={14} color={theme.color.text.tertiary} />
             <Text numberOfLines={1} style={[theme.text('label'), { flex: 1, color: theme.color.text.tertiary }]}>Source: {item.sourceLink}</Text>
@@ -315,6 +470,14 @@ export function RoomScreen() {
         </ChunkEditor>;
         }}
       />
+      {pendingDelete ? (
+        <View accessibilityLiveRegion="polite" style={{ position: 'absolute', left: theme.space.base, bottom: theme.space.section, flexDirection: 'row', alignItems: 'center', gap: theme.space.base, paddingVertical: theme.space.md, paddingHorizontal: theme.space.base, borderRadius: theme.radius.control, backgroundColor: theme.color.accent.bg, ...theme.shadow.float }}>
+          <Text style={[theme.text('bodySmall'), { color: theme.color.accent.fg }]}>{pendingDelete.label}</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel={`Undo: ${pendingDelete.label}`} hitSlop={12} onPress={() => void undoDelete()}>
+            <Text style={[theme.text('buttonCompact'), { color: theme.color.accent.fg, textDecorationLine: 'underline' }]}>Undo</Text>
+          </Pressable>
+        </View>
+      ) : null}
     </KeyboardAvoidingView>
   </SafeAreaView></Screen>;
 }

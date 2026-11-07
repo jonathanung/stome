@@ -41,6 +41,11 @@ export class PendingDeletes {
     this.opts = { delayMs: UNDO_WINDOW_MS, schedule: realSchedule, ...options };
   }
 
+  /** Replaces the commit function, e.g. when the screen re-renders with newer data. */
+  setCommit(commit: PendingDeleteOptions['commit']): void {
+    this.opts.commit = commit;
+  }
+
   get pending(): PendingDelete | null {
     return this.current;
   }
