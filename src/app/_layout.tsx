@@ -1,135 +1,78 @@
-import {
-  Inter_400Regular,
-  Inter_500Medium,
-  Inter_600SemiBold,
-  Inter_700Bold,
-  useFonts,
-} from '@expo-google-fonts/inter';
-import { Outfit_700Bold, Outfit_800ExtraBold, Outfit_900Black } from '@expo-google-fonts/outfit';
-import { SQLiteProvider, type SQLiteDatabase } from 'expo-sqlite';
+import { SQLiteProvider } from 'expo-sqlite';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Component, Suspense, type ReactNode } from 'react';
-import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
-import { ThemeProvider, useStoneTheme } from '../../design-theme/src/primitives';
+import { ThemeProvider } from '../../design-theme/src/primitives';
 import { expoDriver } from '../db/expo-driver';
 import { migrateDb } from '../db/migrate';
 import { DATABASE_NAME } from '../db/schema';
-import { classifyStorageFailure, createStorageRetryGate, finishStartup } from '../db/storage-startup';
-import { QuickCapture } from '../features/capture/QuickCapture';
-import { StorageOpening, StorageStartupScreen } from '../screens/StorageStartup';
-import { stackHeaderOptions } from '../theme/stack-header';
-
-function prepareDatabase(db: SQLiteDatabase): Promise<void> {
-  return finishStartup(
-    db,
-    (database) => migrateDb(expoDriver(database)),
-    (database) => database.closeAsync(),
-  );
-}
 
 type BoundaryState = {
   error: Error | null;
-  retrying: boolean;
 };
 
 class DatabaseBoundary extends Component<{ children: ReactNode }, BoundaryState> {
-  state: BoundaryState = { error: null, retrying: false };
-
-  private readonly retryGate = createStorageRetryGate();
+  state: BoundaryState = { error: null };
 
   static getDerivedStateFromError(error: Error): BoundaryState {
-    return { error, retrying: false };
+    return { error };
   }
-
-  componentDidCatch(error: Error, info: { componentStack?: string | null }) {
-    console.error('DatabaseBoundary caught', error, info.componentStack);
-  }
-
-  retry = () => {
-    const error = this.state.error;
-    if (!error || this.state.retrying || Platform.OS !== 'web') return;
-    const failure = classifyStorageFailure(error);
-    if (!failure.canRetry) return;
-    const started = this.retryGate.request(() => {
-      window.location.reload();
-    });
-    if (started) this.setState({ retrying: true });
-  };
 
   render() {
     if (this.state.error) {
-      const failure = classifyStorageFailure(this.state.error);
-      const onRetry = failure.canRetry && Platform.OS === 'web' ? this.retry : undefined;
-      return <StorageStartupScreen failure={failure} retrying={this.state.retrying} onRetry={onRetry} />;
+      return (
+        <View style={styles.centered}>
+          <Text accessibilityRole="alert">Could not open the local database.</Text>
+          <Text>{this.state.error.message}</Text>
+        </View>
+      );
     }
     return this.props.children;
   }
 }
 
-function AppStack() {
-  const theme = useStoneTheme();
+function Opening() {
   return (
-    <Stack screenOptions={stackHeaderOptions(theme)}>
-      <Stack.Screen name="index" options={{ headerShown: false }} />
-      <Stack.Screen name="today" options={{ headerShown: false }} />
-      <Stack.Screen name="rooms/[id]" options={{ headerShown: false }} />
-      <Stack.Screen name="recent" options={{ headerShown: false }} />
-      <Stack.Screen name="rooms/[id]/review" options={{ headerShown: false }} />
-      <Stack.Screen name="stone" options={{ headerShown: false }} />
-    </Stack>
+    <View style={styles.centered}>
+      <ActivityIndicator />
+      <Text>Opening local notes…</Text>
+    </View>
   );
 }
 
-function ThemedRoot({ children }: { children: ReactNode }) {
-  const theme = useStoneTheme();
-  return <View style={[styles.root, { backgroundColor: theme.color.bg.canvas }]}>{children}</View>;
-}
-
-function ThemedStatusBar() {
-  const theme = useStoneTheme();
-  return <StatusBar style={theme.scheme === 'dark' ? 'light' : 'dark'} />;
-}
-
 export default function RootLayout() {
-  const [loaded, error] = useFonts({
-    Inter_400Regular,
-    Inter_500Medium,
-    Inter_600SemiBold,
-    Inter_700Bold,
-    Outfit_700Bold,
-    Outfit_800ExtraBold,
-    Outfit_900Black,
-  });
-  // A font that fails to load falls back to the system face rather than blocking the app.
-  const ready = loaded || Boolean(error);
-  if (!ready) {
-    return (
-      <ThemeProvider>
-        <ThemedRoot><ActivityIndicator style={{ flex: 1 }} /></ThemedRoot>
-      </ThemeProvider>
-    );
-  }
   return (
-    <ThemeProvider fontMode={error ? 'css' : 'expo'}>
-      <ThemedRoot>
-        <ThemedStatusBar />
-        <DatabaseBoundary>
-          <Suspense fallback={<StorageOpening />}>
-            <SQLiteProvider databaseName={DATABASE_NAME} onInit={prepareDatabase} useSuspense>
-              <AppStack />
-              <QuickCapture />
-            </SQLiteProvider>
-          </Suspense>
-        </DatabaseBoundary>
-      </ThemedRoot>
+    <ThemeProvider>
+    <View style={styles.root}>
+      <StatusBar style="auto" />
+      <DatabaseBoundary>
+        <Suspense fallback={<Opening />}>
+          <SQLiteProvider databaseName={DATABASE_NAME} onInit={(db) => migrateDb(expoDriver(db))} useSuspense>
+            <Stack screenOptions={{ headerTitle: 'stome', headerStyle: { backgroundColor: '#f6f4ee' }, headerTintColor: '#292820' }}>
+              <Stack.Screen name="index" options={{ headerShown: false }} />
+              <Stack.Screen name="rooms/[id]" options={{ headerShown: false }} />
+              <Stack.Screen name="rooms/[id]/board" options={{ headerShown: false }} />
+            </Stack>
+          </SQLiteProvider>
+        </Suspense>
+      </DatabaseBoundary>
+    </View>
     </ThemeProvider>
   );
 }
 
 const styles = StyleSheet.create({
   root: {
+    backgroundColor: '#ffffff',
     flex: 1,
+  },
+  centered: {
+    alignItems: 'center',
+    flex: 1,
+    gap: 8,
+    justifyContent: 'center',
+    padding: 24,
   },
 });
