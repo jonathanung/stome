@@ -225,19 +225,40 @@ export function pairingTtlMs(raw: string | undefined): number {
   return ttl;
 }
 
-function main(): void {
+export type LiveConfig = { provider: Provider; status: CompanionStatus; banner: string };
+
+/** STOME_PROVIDER=anthropic (alias api-key) selects the live provider. Anything else is the mock. */
+export async function liveConfigFromEnv(env: Record<string, string | undefined>): Promise<LiveConfig | null> {
+  if (env.STOME_PROVIDER !== 'anthropic' && env.STOME_PROVIDER !== 'api-key') {
+    return null;
+  }
+  const { createAnthropicProvider, sdkMessageClient, parseEffort, DEFAULT_MODEL } = await import('./providers/anthropic.ts');
+  const model = env.STOME_MODEL?.trim() || DEFAULT_MODEL;
+  const effort = parseEffort(env.STOME_EFFORT);
+  const keySet = Boolean(env.ANTHROPIC_API_KEY);
+  return {
+    provider: createAnthropicProvider({ client: sdkMessageClient(), model, effort }),
+    status: { provider: 'anthropic', model, live: true, tools: [...ALLOWED_TOOL_NAMES] },
+    banner: `Provider: Anthropic ${model} (effort ${effort}). Live model calls cost money. ANTHROPIC_API_KEY env var: ${
+      keySet ? 'set' : 'not set (the SDK will try an ant auth login profile)'
+    }.`,
+  };
+}
+
+async function main(): Promise<void> {
   const origin = process.env.STOME_APP_ORIGIN ?? 'http://localhost:8081';
   const token = process.env.STOME_PAIRING_TOKEN ?? randomBytes(16).toString('hex');
   const ttl = pairingTtlMs(process.env.STOME_PAIRING_TTL_MS);
   const expiresAt = Date.now() + ttl;
-  const kind = process.env.STOME_PROVIDER === 'api-key' ? 'api-key' : 'mock';
-  const provider = createProvider(kind);
+  const live = await liveConfigFromEnv(process.env);
+  const provider = live ? live.provider : createProvider('mock');
   const server = createServer((request, response) => {
     void handle(request, response, {
       origin,
       token,
       expiresAt,
       provider,
+      ...(live ? { status: live.status } : {}),
     });
   });
   const port = Number(process.env.STOME_COMPANION_PORT ?? 8787);
@@ -254,7 +275,7 @@ function main(): void {
         `App origin: ${origin}`,
         `Pairing token (expires in ${lifetime}, keep it out of browser storage): ${token}`,
         `Pairing deadline: ${expiresAt}`,
-        'Provider: deterministic mock. No live model call.',
+        live ? live.banner : 'Provider: deterministic mock. No live model call.',
         '',
       ].join('\n'),
     );
@@ -263,5 +284,8 @@ function main(): void {
 
 const entry = process.argv[1];
 if (entry && import.meta.url === pathToFileURL(entry).href) {
-  main();
+  main().catch((error: unknown) => {
+    process.stderr.write(`${error instanceof Error ? error.message : 'The companion failed to start'}\n`);
+    process.exitCode = 1;
+  });
 }

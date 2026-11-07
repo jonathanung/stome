@@ -34,7 +34,7 @@ STOME_APP_ORIGIN=http://localhost:8081 STOME_COMPANION_PORT=8787 npm run compani
 | Confirmed AI answer | `annotations` in `stome.db` | `source: 'ai'`, `confirmed: true`. `expectedRevision` is the revision stored on the proposal when it was created. A newer chunk revision rejects the confirm. Replay of that operation id does not insert again |
 | Confirmed AI note edit | `chunks.content` in `stome.db` | `chunk.update`, `source: 'ai'`, `confirmed: true`. The proposal stores the body it read and that revision. Confirm sends that revision, not a newer read. Cancel, discard, refusal, and a stale revision leave the saved text unchanged. Replay does not write again |
 | Legacy demo rows | `stome-harness.db` | Removed by the v3 harness migration. A `note:*` selection still fails confirm and is never copied into `annotations` |
-| Model calls | deterministic mock in the companion | No live provider |
+| Model calls | deterministic mock by default; live Anthropic model when the companion starts with `STOME_PROVIDER=anthropic` | The key stays in the companion process. `npm run check` and CI always use the mock. See [Live mode](#live-mode) |
 
 A companion payload is not a write permission. Confirmation re-reads the chunk, then calls `createCommit`:
 
@@ -55,6 +55,28 @@ A companion payload is not a write permission. Confirmation re-reads the chunk, 
 ```
 
 `createCommit` writes the annotation, checks the revision, and records `applied_ops` in one transaction. Room saves and a confirm share one queue for that database, so a human note or highlight waits until the pin transaction finishes. A failed pin rolls back only its own transaction. The session flag is a separate write in `stome-harness.db`. A retry reads `applied_ops` before it checks the chunk again. If that operation id already committed an annotation, the session flag is repaired and nothing is inserted, even when the chunk was edited or deleted afterward. A new operation id still rejects a stale or missing chunk and writes nothing. The proposal and its operation id are stored in the same session update. A completed proposal that has no operation id gets one stable id on the next open. There is exactly one commit path: `confirmFoundationQuestion` calls `createCommit` (FND.2), and the harness stores only sessions, messages, and operation ids.
+
+## Live mode
+
+The companion can answer with a real model. It is opt-in, and every question costs money.
+
+```bash
+ANTHROPIC_API_KEY=... STOME_PROVIDER=anthropic npm run companion
+```
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `STOME_PROVIDER` | unset (mock) | `anthropic` selects the live provider. `api-key` is a legacy alias. Anything else is the mock. |
+| `STOME_MODEL` | `claude-opus-5-5` | Exact model id, no date suffix. |
+| `STOME_EFFORT` | `medium` | `low`, `medium`, `high`, `xhigh`, or `max`. Sent as `output_config.effort`. |
+| `ANTHROPIC_API_KEY` | none | Resolved by the official SDK, as is an `ant auth login` profile. |
+
+- The key and any login profile live only in the companion process. The app never sees them: it holds the pairing token, and `GET /v1/status` reports `{provider, model, live, tools}` and nothing secret. The startup log names the provider and model and says whether the env var is set, never its value.
+- With no credential the first request fails with a `provider_error` ("No Anthropic credentials: set ANTHROPIC_API_KEY or run ant auth login"). The companion does not crash.
+- The provider is `companion/providers/anthropic.ts`, built on `@anthropic-ai/sdk`. It lives under `companion/` so Metro never bundles the SDK. It serves all five tools with structured outputs (`output_config.format`), no `thinking`, no sampling parameters, no forced tool use, and the server-side refusal fallback beta. Retries are capped at 1 so they cannot outlast the 30 s limit; Cancel and the limit abort the HTTP call.
+- Note, board, and import text is wrapped in `<content>` delimiters and the model is told it is data, not instructions. Output still goes through the same parsers and scope checks as the mock, and nothing is written without a human confirm.
+- `notes.proposeAnnotation` asks the model for a verbatim quote and computes `anchorStart`/`anchorEnd` with `indexOf`. If the quote is not found, the first sentence (or the whole chunk, if short) is anchored.
+- `npm run check` and CI use the mock and a fake client in `scripts/check-live-provider.test.ts`. No test calls the network.
 
 ## Session states
 
