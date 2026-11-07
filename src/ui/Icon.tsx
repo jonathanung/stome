@@ -28,7 +28,12 @@ export type IconName =
   | 'undo'
   | 'redo'
   | 'chat'
-  | 'arrowUp';
+  | 'arrowUp'
+  | 'fullscreen'
+  | 'highlightArea'
+  | 'questionPin'
+  | 'addPage'
+  | 'pin';
 
 /** 24px stroke glyphs, drawn the way the Stone boards draw them (1.75 stroke, round caps). */
 function Glyph({ name }: { name: IconName }) {
@@ -83,6 +88,16 @@ function Glyph({ name }: { name: IconName }) {
       return <Path d="M4 5h16v11H9l-5 4z" />;
     case 'arrowUp':
       return <><Path d="M12 19V5" /><Path d="m5 12 7-7 7 7" /></>;
+    case 'fullscreen':
+      return <Path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />;
+    case 'highlightArea':
+      return <Rect x="4" y="5" width="16" height="14" rx="2" strokeDasharray="3 3" />;
+    case 'questionPin':
+      return <Path d="M4 5h16v11H9l-5 4z" />;
+    case 'addPage':
+      return <><Path d="M6 3h9l4 4v14H6z" /><Path d="M12 10v6M9 13h6" /></>;
+    case 'pin':
+      return <><Path d="M12 17v5" /><Path d="M9 3h6l-1 6 3 3H7l3-3z" /></>;
     case 'spark':
       return <><Path d="M12 3v3" /><Path d="M12 18v3" /><Path d="M3 12h3" /><Path d="M18 12h3" /><Path d="m6 6 2 2" /><Path d="m16 16 2 2" /><Path d="m6 18 2-2" /><Path d="m16 8 2-2" /></>;
   }
