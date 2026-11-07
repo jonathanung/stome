@@ -17,6 +17,7 @@ import {
   CLEANUP_FAILED_MESSAGE,
   STORAGE_DEGRADED_MESSAGE,
   createCaptureController,
+  createMemoryStorage,
   loadCaptureState,
   readStorageItem,
   writeStorageItem,
@@ -25,9 +26,13 @@ import {
 } from './session';
 import { chooseCaptureRoom, roomIdFromPath } from './target';
 
+const nativeStorage = { local: createMemoryStorage(), session: createMemoryStorage() };
+
 // React Native defines `window` as the global object without DOM APIs, so gate on web, not on `window`.
+// Native gets in-memory storage: null would read as a storage failure and show the degraded warning on every launch.
 function browserStorage(kind: 'local' | 'session'): CaptureStorage | null {
-  if (Platform.OS !== 'web' || typeof window === 'undefined') return null;
+  if (Platform.OS !== 'web') return nativeStorage[kind];
+  if (typeof window === 'undefined') return null;
   try {
     return kind === 'local' ? window.localStorage : window.sessionStorage;
   } catch {
