@@ -185,11 +185,11 @@ export function noteIdFromChunk(chunkId: string): number | null {
   return Number(match[1]);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function exactKeys(value: Record<string, unknown>, keys: readonly string[]): void {
+export function exactKeys(value: Record<string, unknown>, keys: readonly string[]): void {
   const actual = Object.keys(value).sort();
   const expected = [...keys].sort();
   if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
@@ -197,14 +197,14 @@ function exactKeys(value: Record<string, unknown>, keys: readonly string[]): voi
   }
 }
 
-function requireString(value: unknown, label: string): string {
+export function requireString(value: unknown, label: string): string {
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new HarnessError('invalid_shape', `${label} must be a non-empty string`);
   }
   return value;
 }
 
-function requireInteger(value: unknown, label: string): number {
+export function requireInteger(value: unknown, label: string): number {
   if (typeof value !== 'number' || !Number.isInteger(value)) {
     throw new HarnessError('invalid_shape', `${label} must be an integer`);
   }
@@ -330,6 +330,19 @@ export const TOOL_REGISTRY = {
 } as const;
 
 const NOTE_TOOLS = [TOOL_NAME, EDIT_TOOL_NAME].sort();
+
+/**
+ * Every tool name the companion may run: the two note proposals plus the
+ * read-only suggestion tools in tools.ts. There is still no shell, file, or
+ * plugin tool. Keep this list literal so a new tool is a reviewed change.
+ */
+export const ALLOWED_TOOL_NAMES = [
+  TOOL_NAME,
+  EDIT_TOOL_NAME,
+  'review.generateQuestion',
+  'board.proposeStickies',
+  'import.suggestRooms',
+] as const;
 
 export function assertRegistryIsNotesOnly(): void {
   const names = Object.keys(TOOL_REGISTRY).sort();

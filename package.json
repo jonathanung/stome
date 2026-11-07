@@ -38,7 +38,7 @@
     "web:sqlite": "node scripts/serve-web.mjs",
     "typecheck": "tsc --noEmit",
     "check:schema": "node --experimental-sqlite --experimental-strip-types scripts/check-schema.ts",
-    "check:harness": "node --experimental-sqlite --experimental-strip-types --import ./scripts/register-harness.mjs --test scripts/check-harness.test.ts",
+    "check:harness": "node --experimental-sqlite --experimental-strip-types --import ./scripts/register-harness.mjs --test \"scripts/check-*.test.ts\"",
     "companion": "node --experimental-strip-types --import ./scripts/register-harness.mjs companion/server.ts",
     "lint": "expo lint",
     "check": "npm run typecheck && npm run lint && npm run check:schema && npm run check:harness && npm test && npm run check:writes",

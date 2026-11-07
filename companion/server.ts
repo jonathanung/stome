@@ -4,15 +4,26 @@ import { pathToFileURL } from 'node:url';
 
 import { PAIRING_TTL_MS, PROVIDER_LIMITS, HarnessError, type HarnessErrorCode } from '../src/harness/contract.ts';
 import { createProvider, type Provider, type ProviderRequest } from '../src/harness/provider.ts';
+import { ALLOWED_TOOL_NAMES } from '../src/harness/contract.ts';
+import type { CompanionStatus } from '../src/harness/tools.ts';
 
 const LOOPBACK_HOST = '127.0.0.1';
 const RAW_BODY_LIMIT = PROVIDER_LIMITS.maxRequestChars + 2_000;
+
+export const MOCK_STATUS: CompanionStatus = {
+  provider: 'mock',
+  model: null,
+  live: false,
+  tools: [...ALLOWED_TOOL_NAMES],
+};
 
 type CompanionOptions = {
   origin: string;
   token: string;
   expiresAt: number;
   provider: Provider;
+  /** What GET /v1/status reports. Defaults to the mock. Never holds a key. */
+  status?: CompanionStatus;
 };
 
 export type CompanionHandle = {
@@ -56,7 +67,10 @@ function statusFor(code: HarnessErrorCode): number {
 function sendJson(
   response: ServerResponse,
   status: number,
-  body: { ok: true; provider: 'mock'; output: unknown } | { ok: false; error: { code: string; message: string } },
+  body:
+    | { ok: true; provider: CompanionStatus['provider']; output: unknown }
+    | { ok: true; status: CompanionStatus }
+    | { ok: false; error: { code: string; message: string } },
   extraHeaders: Record<string, string>,
 ): void {
   const payload = JSON.stringify(body);
@@ -76,7 +90,7 @@ function corsHeaders(origin: string | undefined, allowed: string): Record<string
   }
   return {
     'access-control-allow-origin': allowed,
-    'access-control-allow-methods': 'POST, OPTIONS',
+    'access-control-allow-methods': 'GET, POST, OPTIONS',
     'access-control-allow-headers': 'content-type, x-stome-token',
     'access-control-max-age': '600',
     vary: 'Origin',
@@ -147,7 +161,9 @@ async function handle(request: IncomingMessage, response: ServerResponse, option
     response.end();
     return;
   }
-  if (request.method !== 'POST' || request.url !== '/v1/tool') {
+  const isTool = request.method === 'POST' && request.url === '/v1/tool';
+  const isStatus = request.method === 'GET' && request.url === '/v1/status';
+  if (!isTool && !isStatus) {
     sendJson(response, 404, { ok: false, error: { code: 'not_found', message: 'Unknown companion route' } }, cors);
     return;
   }
@@ -159,6 +175,11 @@ async function handle(request: IncomingMessage, response: ServerResponse, option
   const provided = Array.isArray(header) ? header[0] : header;
   if (!provided || !tokenMatches(provided, options.token)) {
     sendJson(response, 401, { ok: false, error: { code: 'unauthorized', message: 'The pairing token does not match' } }, cors);
+    return;
+  }
+  const status = options.status ?? MOCK_STATUS;
+  if (isStatus) {
+    sendJson(response, 200, { ok: true, status }, cors);
     return;
   }
   const controller = new AbortController();
@@ -176,7 +197,7 @@ async function handle(request: IncomingMessage, response: ServerResponse, option
     if (response.writableEnded) {
       return;
     }
-    sendJson(response, 200, { ok: true, provider: 'mock', output }, cors);
+    sendJson(response, 200, { ok: true, provider: status.provider, output }, cors);
   } catch (error) {
     if (response.writableEnded) {
       return;
