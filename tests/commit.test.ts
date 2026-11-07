@@ -240,6 +240,61 @@ test('rename bumps the room revision', async () => {
   assert.equal((await listRooms(s.db)).length, 1);
 });
 
+test('a stale chunk revision rejects an AI annotation and leaves the chunk unchanged', async () => {
+  const s = await setup();
+  const roomId = await room(s);
+  const created = await s.commit(s.op('chunk.create', { roomId, bodies: ['glycolysis makes 2 atp'] }));
+  assert.ok(created.ok);
+  const chunkId = created.value.chunkIds[0];
+  const payload: Payloads['annotation.create'] = {
+    chunkId,
+    type: 'ai_answer',
+    anchor: { start: 0, end: 10 },
+    payload: { body: 'net 2' },
+  };
+  const stale = await s.commit(
+    s.op('annotation.create', payload, { source: 'ai', confirmed: true, expectedRevision: 0 }),
+  );
+  assert.equal(stale.ok, false);
+  if (!stale.ok) assert.equal(stale.error.code, 'stale_revision');
+  assert.equal(await count(s.db, 'annotations'), 0);
+  assert.equal(await count(s.db, 'applied_ops'), 2);
+  const [chunk] = await listChunks(s.db, roomId);
+  assert.equal(chunk.body, 'glycolysis makes 2 atp');
+  assert.equal(chunk.revision, 1);
+});
+
+test('a matching chunk revision pins an AI answer without changing the chunk', async () => {
+  const s = await setup();
+  const roomId = await room(s);
+  const created = await s.commit(s.op('chunk.create', { roomId, bodies: ['glycolysis makes 2 atp'] }));
+  assert.ok(created.ok);
+  const chunkId = created.value.chunkIds[0];
+  const op = s.op(
+    'annotation.create',
+    { chunkId, type: 'ai_answer', anchor: { start: 0, end: 10 }, payload: { body: 'net 2' } },
+    { source: 'ai', confirmed: true, expectedRevision: 1 },
+  );
+  const saved = await s.commit(op);
+  assert.equal(saved.ok, true);
+  if (!saved.ok) return;
+  assert.equal(saved.duplicate, false);
+  const replay = await s.commit(op);
+  assert.equal(replay.ok, true);
+  if (!replay.ok) return;
+  assert.equal(replay.duplicate, true);
+  assert.deepEqual(replay.value, saved.value);
+  assert.equal(await count(s.db, 'annotations'), 1);
+  assert.equal(await count(s.db, 'applied_ops'), 3);
+  const [chunk] = await listChunks(s.db, roomId);
+  assert.equal(chunk.body, 'glycolysis makes 2 atp');
+  assert.equal(chunk.revision, 1);
+  const [annotation] = await listAnnotations(s.db, chunkId);
+  assert.equal(annotation.type, 'ai_answer');
+  assert.deepEqual(annotation.anchor, { start: 0, end: 10 });
+  assert.deepEqual(annotation.payload, { body: 'net 2' });
+});
+
 test('concurrent commits are serialized, never interleaved', async () => {
   const s = await setup();
   const roomId = await room(s);
