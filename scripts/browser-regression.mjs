@@ -18,8 +18,9 @@
 import { spawn, execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { Buffer } from 'node:buffer';
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { createConnection } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const repoRoot = new URL('..', import.meta.url).pathname;
@@ -28,6 +29,9 @@ const chromePath = process.env.CHROME_PATH ?? '/usr/bin/google-chrome';
 const webUrl = process.env.STOME_WEB_URL ?? 'http://localhost:8081/';
 const outDir = process.env.STOME_REGRESSION_OUT ?? '/opt/cursor/artifacts/browser-regression';
 const spawnServers = process.env.STOME_REGRESSION_NO_SPAWN !== '1';
+const webPort = Number(process.env.STOME_WEB_PORT ?? 8081);
+const expoPort = Number(process.env.EXPO_INTERNAL_PORT ?? 8082);
+const companionPort = Number(process.env.STOME_COMPANION_PORT ?? 8787);
 const token = process.env.STOME_PAIRING_TOKEN ?? randomBytes(16).toString('hex');
 
 if (!existsSync(puppeteerRoot)) {
@@ -80,45 +84,247 @@ function sha() {
   }
 }
 
-function startProcess(label, args, extraEnv = {}) {
+let ownedBrowser = null;
+let cleanupPromise = null;
+let signalExitStarted = false;
+
+function startProcess(label, args, ownedMarker, extraEnv = {}) {
   const child = spawn(args[0], args.slice(1), {
     cwd: repoRoot,
     env: { ...process.env, BROWSER: 'none', EXPO_NO_TELEMETRY: '1', ...extraEnv },
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: true,
   });
+  child.ownedMarker = ownedMarker;
+  child.groupMarkers = ownedMarker === 'serve-web.mjs'
+    ? ['serve-web.mjs', 'expo start', "npm exec expo", "'expo' start"]
+    : [ownedMarker];
+  child.spawnError = null;
   children.push(child);
   const take = (chunk) => {
     for (const line of chunk.toString().split('\n')) remember(`${label}: ${line}`);
   };
   child.stdout.on('data', take);
   child.stderr.on('data', take);
-  child.on('exit', (code) => remember(`${label}: exit ${code}`));
+  child.on('error', (error) => {
+    child.spawnError = error;
+    remember(`${label}: error ${error.message}`);
+  });
+  child.on('exit', (code, signal) => remember(`${label}: exit ${code ?? signal}`));
   return child;
 }
 
-function signalGroup(child, signal) {
-  if (!child?.pid) return;
+function commandLine(pid) {
   try {
-    process.kill(-child.pid, signal);
+    return readFileSync(`/proc/${pid}/cmdline`).toString().replaceAll('\0', ' ');
   } catch {
+    return '';
+  }
+}
+
+function cmdlineIncludes(pid, marker) {
+  return commandLine(pid).includes(marker);
+}
+
+function processGroupMembers(pgid) {
+  const members = [];
+  for (const entry of readdirSync('/proc')) {
+    if (!/^\d+$/.test(entry)) continue;
     try {
-      child.kill(signal);
+      const stat = readFileSync(`/proc/${entry}/stat`, 'utf8');
+      const commandEnd = stat.lastIndexOf(')');
+      const fields = stat.slice(commandEnd + 2).split(' ');
+      if (Number(fields[2]) === pgid) members.push(Number(entry));
     } catch {
-      // The process group has already exited.
+      // The process exited while the directory was being read.
+    }
+  }
+  return members;
+}
+
+function ownedCommand(pid, markers) {
+  return markers.some((marker) => cmdlineIncludes(pid, marker));
+}
+
+function groupStillOwned(child) {
+  if (!child?.pid) return false;
+  const markers = child.groupMarkers ?? [child.ownedMarker];
+  if (child.exitCode === null && !child.signalCode && cmdlineIncludes(child.pid, child.ownedMarker)) return true;
+  return processGroupMembers(child.pid).some((pid) => ownedCommand(pid, markers));
+}
+
+function signalOwned(child, signal) {
+  if (!child?.pid) return;
+  const markers = child.groupMarkers ?? [child.ownedMarker];
+  const leaderAlive = child.exitCode === null && !child.signalCode && cmdlineIncludes(child.pid, child.ownedMarker);
+  if (leaderAlive) {
+    try {
+      process.kill(-child.pid, signal);
+      console.error(`signaled group ${child.pid} ${signal}`);
+      return;
+    } catch (error) {
+      console.error(`group signal ${child.pid} ${signal} failed: ${error instanceof Error ? error.message : String(error)}`);
+      if (error?.code !== 'ESRCH') {
+        try {
+          if (cmdlineIncludes(child.pid, child.ownedMarker)) child.kill(signal);
+        } catch {
+          // The owned leader has already exited.
+        }
+      }
+    }
+  }
+  for (const pid of processGroupMembers(child.pid)) {
+    if (!ownedCommand(pid, markers)) continue;
+    try {
+      process.kill(pid, signal);
+    } catch {
+      // That group member has already exited.
     }
   }
 }
 
 async function stopChildren() {
-  for (const child of children) signalGroup(child, 'SIGTERM');
-  const deadline = Date.now() + 4000;
-  while (children.some((child) => child.exitCode === null && !child.signalCode) && Date.now() < deadline) {
+  const started = Date.now();
+  let signal = 'SIGTERM';
+  let emptyPasses = 0;
+  while (Date.now() - started < 6000) {
+    const alive = children.some((child) => groupStillOwned(child));
+    if (!alive) {
+      emptyPasses += 1;
+      if (emptyPasses >= 2) return;
+    } else {
+      emptyPasses = 0;
+      if (Date.now() - started > 4000) signal = 'SIGKILL';
+      for (const child of children) signalOwned(child, signal);
+    }
     await delay(200);
   }
   for (const child of children) {
-    if (child.exitCode === null && !child.signalCode) signalGroup(child, 'SIGKILL');
+    if (groupStillOwned(child)) signalOwned(child, 'SIGKILL');
   }
+}
+
+async function cleanupOwned() {
+  if (cleanupPromise) return cleanupPromise;
+  cleanupPromise = (async () => {
+    const browser = ownedBrowser;
+    if (browser) {
+      const chrome = typeof browser.process === 'function' ? browser.process() : null;
+      await Promise.race([browser.close().catch(() => undefined), delay(4000)]);
+      if (chrome && chrome.exitCode === null && !chrome.signalCode) killOwnedBrowser();
+    }
+    ownedBrowser = null;
+    if (spawnServers) await stopChildren();
+  })();
+  return cleanupPromise;
+}
+
+function killOwnedBrowser() {
+  const browser = ownedBrowser;
+  const chrome = browser && typeof browser.process === 'function' ? browser.process() : null;
+  if (!chrome?.pid) return;
+  const command = commandLine(chrome.pid);
+  const dataDir = /--user-data-dir=(\S+)/.exec(command)?.[1] ?? '';
+  try {
+    process.kill(-chrome.pid, 'SIGKILL');
+  } catch {
+    try {
+      process.kill(chrome.pid, 'SIGKILL');
+    } catch {
+      // Chrome has already exited.
+    }
+  }
+  if (!dataDir) return;
+  for (const entry of readdirSync('/proc')) {
+    if (!/^\d+$/.test(entry)) continue;
+    if (!commandLine(Number(entry)).includes(dataDir)) continue;
+    try {
+      process.kill(Number(entry), 'SIGKILL');
+    } catch {
+      // That Chrome process has already exited.
+    }
+  }
+}
+
+function installSignalHandlers() {
+  const finish = (signal) => {
+    if (signalExitStarted) return;
+    signalExitStarted = true;
+    const code = signal === 'SIGINT' ? 130 : 143;
+    const stayAlive = setInterval(() => {}, 1000);
+    console.error(`signal: ${signal}`);
+    // Signal handlers can lose the event loop before an async cleanup finishes.
+    // Kill the groups this process spawned before returning.
+    killOwnedBrowser();
+    for (const child of children) signalOwned(child, 'SIGKILL');
+    cleanupOwned()
+      .then(() => {
+        console.error(`signal cleanup done: ${signal}`);
+      })
+      .catch((error) => {
+        console.error(`signal cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
+      })
+      .finally(() => {
+        clearInterval(stayAlive);
+        process.exit(code);
+      });
+  };
+  process.on('SIGINT', () => finish('SIGINT'));
+  process.on('SIGTERM', () => finish('SIGTERM'));
+}
+
+function portBusy(port) {
+  return new Promise((resolve) => {
+    const socket = createConnection({ host: '127.0.0.1', port });
+    const finish = (busy) => {
+      socket.removeAllListeners();
+      socket.destroy();
+      resolve(busy);
+    };
+    socket.once('connect', () => finish(true));
+    socket.once('error', () => finish(false));
+  });
+}
+
+async function assertPortsFree(ports) {
+  const busy = [];
+  for (const port of ports) {
+    if (await portBusy(port)) busy.push(port);
+  }
+  if (busy.length > 0) {
+    throw new Error(
+      `spawn mode refused occupied port ${busy.join(', ')}. This script does not kill unrelated listeners.`,
+    );
+  }
+}
+
+function requireChild(child, label) {
+  if (child.spawnError) throw new Error(`${label} failed to start: ${child.spawnError.message}`);
+  if (child.exitCode !== null || child.signalCode) {
+    throw new Error(`${label} exited before it was ready (${child.exitCode ?? child.signalCode})`);
+  }
+}
+
+function identity() {
+  const checkoutSha = sha();
+  let productHead = 'unknown';
+  try {
+    productHead = execFileSync('git', ['merge-base', 'HEAD', 'origin/main'], { cwd: repoRoot, encoding: 'utf8' }).trim();
+  } catch {
+    productHead = 'unknown';
+  }
+  return {
+    checkoutSha,
+    productHead,
+    server: spawnServers
+      ? { mode: 'spawn', servedFromCheckout: true }
+      : {
+          mode: 'external',
+          servedFromCheckout: false,
+          servedSha: null,
+          note: 'An external server was already running. checkoutSha is this working tree, not the code that server is serving.',
+        },
+  };
 }
 
 async function waitFor(label, predicate, timeoutMs) {
@@ -157,7 +363,7 @@ async function fill(page, selector, value) {
 
 async function clickNamed(page, name) {
   const handle = await page.evaluateHandle((wanted) => {
-    const nodes = [...document.querySelectorAll('[role="button"], button')];
+    const nodes = [...document.querySelectorAll('[role="button"], button, a, [role="link"]')];
     return (
       nodes.find((element) => (element.getAttribute('aria-label') || element.textContent || '').replace(/\s+/g, ' ').trim() === wanted) ??
       null
@@ -172,7 +378,7 @@ async function clickNamed(page, name) {
 
 async function buttonDisabled(page, name) {
   return page.evaluate((wanted) => {
-    const nodes = [...document.querySelectorAll('[role="button"], button')];
+    const nodes = [...document.querySelectorAll('[role="button"], button, a, [role="link"]')];
     const match = nodes.find((element) => (element.getAttribute('aria-label') || element.textContent || '').replace(/\s+/g, ' ').trim() === wanted);
     if (!match) return 'missing';
     return match.getAttribute('aria-disabled') === 'true' || match.hasAttribute('disabled') ? 'disabled' : 'enabled';
@@ -181,6 +387,30 @@ async function buttonDisabled(page, name) {
 
 async function bodyText(page) {
   return page.evaluate(() => document.body.innerText);
+}
+
+async function leavesOutsideHarness(page) {
+  return page.evaluate(() => {
+    const blocked = ['[data-testid="harness-panel"]', '[data-testid="proposal-card"]']
+      .map((selector) => document.querySelector(selector))
+      .filter(Boolean);
+    const leaves = [];
+    for (const element of document.body.querySelectorAll('*')) {
+      if (blocked.some((node) => node.contains(element))) continue;
+      if (element.childElementCount !== 0) continue;
+      const text = element.textContent ?? '';
+      if (text.trim().length === 0) continue;
+      leaves.push(text);
+    }
+    return leaves;
+  });
+}
+
+function assertLeaf(leaves, expected, message) {
+  assert(
+    leaves.includes(expected),
+    `${message}. Saved leaves did not include the complete text (${expected.length} characters).`,
+  );
 }
 
 async function textOutsideProposal(page) {
@@ -355,40 +585,60 @@ async function storageProbe(page) {
 }
 
 async function main() {
+  installSignalHandlers();
   mkdirSync(outDir, { recursive: true });
-  const testedSha = sha();
+  const runIdentity = identity();
   const screenshots = [];
-  let browser;
   try {
   if (spawnServers) {
     step('start mock companion and expo web');
-    startProcess('companion', ['node', '--experimental-strip-types', '--import', './scripts/register-harness.mjs', 'companion/server.ts'], {
-      STOME_APP_ORIGIN: 'http://localhost:8081',
-      STOME_PAIRING_TOKEN: token,
-      STOME_PROVIDER: 'mock',
+    await assertPortsFree([webPort, expoPort, companionPort]);
+    const companionChild = startProcess(
+      'companion',
+      ['node', '--experimental-strip-types', '--import', './scripts/register-harness.mjs', 'companion/server.ts'],
+      'companion/server.ts',
+      {
+        STOME_APP_ORIGIN: new URL(webUrl).origin,
+        STOME_PAIRING_TOKEN: token,
+        STOME_PROVIDER: 'mock',
+        STOME_COMPANION_PORT: String(companionPort),
+      },
+    );
+    const webChild = startProcess('web', ['node', 'scripts/serve-web.mjs'], 'serve-web.mjs', {
+      STOME_WEB_PORT: String(webPort),
+      EXPO_INTERNAL_PORT: String(expoPort),
     });
-    const webChild = startProcess('web', ['node', 'scripts/serve-web.mjs']);
-    await waitFor('companion', async () => serverLog.some((line) => line.includes('companion:') && line.includes('listening on')), 30000);
+    await waitFor('companion', async () => {
+      requireChild(companionChild, 'companion');
+      return serverLog.some((line) => line.startsWith('companion:') && line.includes(`listening on http://127.0.0.1:${companionPort}`));
+    }, 30000);
     await waitFor('expo web', async () => {
-      if (webChild.exitCode !== null) {
-        throw new Error('expo web exited before it was ready');
-      }
+      requireChild(webChild, 'expo web');
+      if (!serverLog.some((line) => line.includes(`Document host http://127.0.0.1:${webPort}`))) return false;
       try {
-        const response = await fetch('http://127.0.0.1:8081/');
+        const response = await fetch(`http://127.0.0.1:${webPort}/`);
         const text = await response.text();
-        return response.ok && !text.includes('Expo web is not ready') && text.toLowerCase().includes('<html');
-      } catch {
+        requireChild(webChild, 'expo web');
+        return (
+          response.status === 200 &&
+          response.headers.get('cross-origin-opener-policy') === 'same-origin' &&
+          response.headers.get('cross-origin-embedder-policy') === 'credentialless' &&
+          (text.includes('id="root"') || text.includes('expo-reset') || text.includes('/_expo/'))
+        );
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('exited before')) throw error;
         return false;
       }
     }, 180000);
   }
 
-  browser = await puppeteer.launch({
+  ownedBrowser = await puppeteer.launch({
     executablePath: chromePath,
     headless: true,
     protocolTimeout: 180000,
     args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
   });
+  const browser = ownedBrowser;
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 1600, deviceScaleFactor: 1 });
   page.setDefaultTimeout(20000);
@@ -453,6 +703,24 @@ async function main() {
     visible = await bodyText(page);
     assert(visible.includes(roomName) && !visible.includes('No rooms yet.'), 'the room list did not keep the room');
     screenshots.push(await shot(page, 'room-list-reloaded'));
+
+    step('Today stays empty when the new note has no review mark');
+    await page.click('[data-testid="open-today"]');
+    await page.waitForSelector('[data-testid="today-empty"]', { timeout: 20000 });
+    visible = await bodyText(page);
+    assert(visible.includes('Nothing due today'), 'Today did not show the empty state');
+    assert(!visible.includes(note), 'the new note appeared on Today without a review mark');
+    assert((await page.$$('[data-testid^="today-item-"]')).length === 0, 'Today listed a due item');
+    await page.click('[data-testid="today-refresh"]');
+    await page.waitForSelector('[data-testid="today-empty"]', { timeout: 10000 });
+    await reloadSeen(page, 'Nothing due today');
+    visible = await bodyText(page);
+    assert(visible.includes('Today') && visible.includes('Nothing due today') && !visible.includes(note), 'Today did not stay empty after reload');
+    assert((await page.$$('[data-testid^="today-item-"]')).length === 0, 'reload put the note on Today');
+    screenshots.push(await shot(page, 'today-empty-reloaded'));
+    await clickNamed(page, 'Open a room');
+    await page.waitForFunction((expected) => document.body.innerText.includes('Study rooms') && document.body.innerText.includes(expected), { timeout: 20000 }, roomName);
+
     await clickNamed(page, `Open ${roomName}`);
     await page.waitForFunction((expected) => document.body.innerText.includes(expected), { timeout: 20000 }, note);
 
@@ -529,25 +797,26 @@ async function main() {
     const after = await page.$eval('[data-testid="proposal-after"]', (element) => element.textContent ?? '');
     assert(before.includes(note), 'the proposal lost the current note');
     assert(after.includes('Mock edit (') && after.includes(editPrompt) && after.includes(note), 'the proposed edit was not the mock edit');
-    const duringProposal = await textOutsideProposal(page);
-    assert(duringProposal.includes(note) && !duringProposal.includes('Mock edit ('), 'the proposal overwrote the saved note before confirm');
-    const mockCount = await page.evaluate(() => (document.body.innerText.match(/Mock edit \(/g) ?? []).length);
-    assert(mockCount === 1, `the mock edit appeared ${mockCount} times before confirm`);
+    const duringProposal = await leavesOutsideHarness(page);
+    assertLeaf(duringProposal, before, 'the saved chunk was not the complete proposal before text');
+    assert(!duringProposal.includes(after), 'the saved chunk already equalled the complete proposal after text');
     screenshots.push(await shot(page, 'edit-proposed'));
     await page.click('[data-testid="confirm-button"]');
     await page.waitForFunction((expected) => {
-      if (document.querySelector('[data-testid="proposal-card"]')) return false;
-      const text = document.body.innerText;
-      return (text.match(/Mock edit \(/g) ?? []).length === 1 && text.includes(expected);
-    }, { timeout: 15000 }, editPrompt);
-    visible = await bodyText(page);
-    assert(visible.includes(note) && visible.includes(editPrompt), 'confirm did not refresh the saved note');
+      const blocked = ['[data-testid="harness-panel"]', '[data-testid="proposal-card"]']
+        .map((selector) => document.querySelector(selector))
+        .filter(Boolean);
+      return [...document.body.querySelectorAll('*')].some((element) => {
+        if (blocked.some((node) => node.contains(element))) return false;
+        return element.childElementCount === 0 && (element.textContent ?? '') === expected;
+      });
+    }, { timeout: 15000 }, after);
+    assertLeaf(await leavesOutsideHarness(page), after, 'confirm did not put the complete edit on the saved chunk');
     screenshots.push(await shot(page, 'edit-confirmed'));
     await reloadSeen(page, editPrompt);
+    assertLeaf(await leavesOutsideHarness(page), after, 'reload did not keep the complete edit on the saved chunk');
     visible = await bodyText(page);
-    const reloadedMocks = (visible.match(/Mock edit \(/g) ?? []).length;
-    assert(reloadedMocks === 1, `reload showed ${reloadedMocks} mock edits`);
-    assert(visible.includes(note) && visible.includes(question) && !visible.includes('This room was not found.'), 'reload lost the edited note or the pinned answer');
+    assert(visible.includes(question) && !visible.includes('This room was not found.'), 'reload lost the pinned answer or the room');
     const tokenAfterEdit = await page.$eval('[data-testid="pairing-token"]', (element) => element.value ?? '');
     assert(!tokenAfterEdit.includes(token), 'the pairing token returned after the edit reload');
     screenshots.push(await shot(page, 'edit-reloaded'));
@@ -568,30 +837,38 @@ async function main() {
     );
     screenshots.push(await shot(page, 'stale-rejected'));
     await reloadSeen(page, humanEdit);
-    const saved = await textOutsideProposal(page);
-    assert(saved.includes(humanEdit), 'the later chunk text did not survive reload');
-    assert(!saved.includes(stalePrompt) && !saved.includes('Mock edit ('), 'the rejected proposal overwrote the later chunk text');
-    if (await page.$('[data-testid="proposal-card"]')) {
-      await page.click('[data-testid="confirm-button"]');
-      await page.waitForFunction(
-        () => (document.querySelector('[data-testid="harness-error"]')?.textContent ?? '').includes('The chunk changed after the proposal'),
-        { timeout: 15000 },
-      );
-      const still = await textOutsideProposal(page);
-      assert(still.includes(humanEdit) && !still.includes(stalePrompt), 'confirming the restored proposal overwrote the later text');
-    }
+    const restored = await page.waitForSelector('[data-testid="proposal-card"]', { timeout: 15000 });
+    assert(restored, 'reload did not restore the stale proposal');
+    const persisted = await leavesOutsideHarness(page);
+    assertLeaf(persisted, humanEdit, 'reload did not keep the later chunk text');
+    assert(
+      !persisted.some((text) => text.includes(stalePrompt) || text.includes('Mock edit (')),
+      'the saved chunk contained the rejected proposal after reload',
+    );
+    await page.click('[data-testid="confirm-button"]');
+    await page.waitForFunction(
+      () => (document.querySelector('[data-testid="harness-error"]')?.textContent ?? '').includes('The chunk changed after the proposal'),
+      { timeout: 15000 },
+    );
+    const still = await leavesOutsideHarness(page);
+    assertLeaf(still, humanEdit, 'confirming the restored proposal changed the later chunk text');
+    assert(
+      !still.some((text) => text.includes(stalePrompt) || text.includes('Mock edit (')),
+      'the stale refusal wrote the proposal onto the saved chunk',
+    );
     screenshots.push(await shot(page, 'stale-reloaded'));
+    assert(pageErrors.length === 0, `unexpected page error: ${pageErrors.join(' | ')}`);
 
     const report = redact({
       ok: true,
-      sha: testedSha,
+      ...runIdentity,
       url: webUrl,
       origin: isolated.origin,
       crossOriginIsolated: isolated.crossOriginIsolated,
       documentHeaders,
       roomPath,
       storage: { ...stored, tokenStored: stored.tokenStored },
-      staleSetup: 'same-connection chunk write because the room screen has no chunk editor',
+      staleSetup: 'direct SQL UPDATE on the open Expo SQLite connection; not a human edit and not a human flow',
       staleBump: bumped,
       screenshots,
       steps,
@@ -610,7 +887,7 @@ async function main() {
   } catch (error) {
     const failure = redact({
       ok: false,
-      sha: testedSha,
+      ...runIdentity,
       message: error instanceof Error ? error.message : String(error),
       steps,
       pageErrors,
@@ -627,15 +904,14 @@ async function main() {
     writeFileSync(`${outDir}/report.json`, serialized);
     console.error(serialized);
     throw error;
-  } finally {
-    await browser?.close().catch(() => undefined);
   }
   } finally {
-    if (spawnServers) await stopChildren();
+    await cleanupOwned();
   }
 }
 
 main().catch((error) => {
+  if (signalExitStarted) return;
   console.error(error instanceof Error ? error.message.split(token).join('[redacted]') : 'browser regression failed');
   process.exit(1);
 });

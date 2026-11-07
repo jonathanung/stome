@@ -1,6 +1,6 @@
 # Browser regression smoke
 
-One Chrome pass against the current Expo web app. It is not part of `npm run check` or GitHub Actions. It does not boot a simulator, sign a build, or call a live model.
+One Chrome pass against the current Expo web app, tracked by issue #93. `npm run check` and GitHub Actions do not run it. A green Node check is not browser coverage. The script does not boot a simulator, sign a build, or call a live model.
 
 The script starts the mock companion and `scripts/serve-web.mjs`, then stops both. Puppeteer is loaded from outside this repo so `package.json` and `package-lock.json` stay unchanged. That is the same idea as `scripts/browser-harness.mjs`.
 
@@ -32,19 +32,25 @@ Assertions use the room name, note text, and mock wording for this run. They do 
 - A mock ask shows a proposal without saving it. Confirm pins an AI answer, the note refreshes immediately, and reload still shows that answer. The token field is empty and the token is not in web storage.
 - Mock timeout and provider error leave the saved note and the pinned answer unchanged.
 - Cancelling a proposed note edit ends on "You cancelled this question." and does not write `Mock edit`.
-- A successful edit proposal leaves the saved note unchanged until Confirm. Confirm refreshes the note immediately. Reload shows that edit once.
-- A later chunk write, then Confirm, is rejected with "The chunk changed after the proposal." Reload keeps the later text. Confirming the restored proposal rejects it again.
+- A successful edit proposal leaves the saved chunk unchanged until Confirm. The saved leaf outside the harness and the proposal card equals the complete proposal-before text. After Confirm, and again after reload, that same leaf equals the complete proposal-after text captured from the card. A selection preview inside the harness does not satisfy this check.
+- A direct SQL `UPDATE` on the open Expo SQLite connection, then Confirm, is rejected with "The chunk changed after the proposal." Reload must show the proposal card again. Confirming that restored card is rejected again, and the saved leaf stays the later text. This is not a human edit. The room screen has no chunk editor. Issues #38 and #39, owned by emmyfong, cover that editor and autosave. This smoke does not patch them. Until a usable editor is on the screen, this step is not a human flow.
+- The run fails if the page reported any unexpected error.
+- Today, opened from the home screen, shows "Nothing due today" for a new note that has no review mark. Refresh and reload keep that empty state. There is no control on the room screen that writes a review mark, so this pass does not invent a due row.
 
-The room screen has no control that edits a chunk body. Highlighting checks the chunk revision and does not bump it, so a person cannot make a pending proposal stale from the screen. The stale step writes the later text through the open Expo SQLite connection, then presses the real Confirm button. That is the product gap, not a second harness.
+## Spawn and identity
 
-## Observed on `c830b7fcc4603f70fa72c815cd9f3a61d44c673a`
+Spawn mode refuses to start when port 8081, 8082, or 8787 is already taken. It does not kill that listener. Readiness requires the spawned child to still be alive, the child's own "Document host" log, status 200, the SQLite document headers, and an Expo root marker. Any other HTML page is not treated as this checkout.
 
-These are product gaps the smoke does not patch.
+`SIGINT` and `SIGTERM` run one cleanup. Before that handler returns, it kills the Chrome process this script launched and the process groups it spawned (`serve-web.mjs`, including its Expo child, and `companion/server.ts`). It checks `/proc/<pid>/cmdline` and does not signal any other listener. A second signal does not start a second cleanup. A normal exit still asks those groups to stop, then kills them if they stay up.
 
-- Cancel sets "You cancelled this question. Saved chunks were not changed." The in-flight ask then replaces that with "You cancelled this question." The saved note stays unchanged either way.
-- Confirming a stale edit does not refresh the room. The alert says the chunk changed, and the note card keeps the previous body until reload. Reload shows the later text and restores the proposal, which is rejected again.
-- The room screen has no chunk editor. Saving a highlight checks the chunk revision and does not bump it, so a person cannot make a pending proposal stale from the screen. The stale step writes through the open Expo SQLite connection, then presses Confirm.
+The report's `checkoutSha` is this working tree. `productHead` is `git merge-base HEAD origin/main`. In spawn mode `server.mode` is `spawn` and `server.servedFromCheckout` is true. With `STOME_REGRESSION_NO_SPAWN=1`, `server.mode` is `external`, `servedFromCheckout` is false, and `servedSha` is null. That run does not claim the external server is the checkout. A spawn error or a child that exits before ready fails the run instead of accepting another page on the port.
+
+## What this smoke does not patch
+
+#85 owns the HarnessPanel cancel-copy and stale-reject refresh fixes. This script does not change `HarnessPanel`. A rejected confirm can leave the previous note body on the card until reload. The stale step is a direct SQL `UPDATE` on the open Expo SQLite connection. It is not a human edit. #80 owns the editor. Until that editor is usable, this step is not a human flow.
+
+`npm run check` does not open Chrome. A green check is not browser coverage. iOS, Android, and a live model are not run.
 
 ## What a pass does not prove
 
-iOS, Android, and the Node `npm run check` suite are separate. `scripts/browser-harness.mjs` still drives the original notes screen. This smoke drives study rooms.
+iOS and Android were not run. `npm run check` is the Node suite only. `scripts/browser-harness.mjs` still drives the original notes screen. This smoke drives study rooms and the empty Today list.
