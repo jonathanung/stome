@@ -10,12 +10,11 @@ import { listChunks, listRooms } from '../../data/queries';
 import { expoDriver } from '../../db/expo-driver';
 import { sourceIdentity } from '../../import/markdown';
 import { pickNotes, type PickedNote } from '../../import/pick-notes';
+import { changeSourcePath, changeSubjects, createSubjectReview, type SubjectReview } from '../../import/review-draft';
 
-interface Draft {
+interface Draft extends SubjectReview {
   id: string;
   note: PickedNote;
-  path: string;
-  subjects: string;
   roomId: string | null;
   name: string;
   result?: string;
@@ -50,6 +49,7 @@ export default function NoteImportScreen() {
     return () => { active = false; };
   }, [db]);
   const update = (id: string, patch: Partial<Draft>) => setDrafts((items) => items.map((item) => item.id === id ? { ...item, ...patch } : item));
+  const changeReview = (id: string, transition: (draft: Draft) => Draft) => setDrafts((items) => items.map((item) => item.id === id ? transition(item) : item));
 
   const choose = async () => {
     if (busyRef.current) return;
@@ -59,7 +59,7 @@ export default function NoteImportScreen() {
       const result = await pickNotes();
       if (result) {
         setErrors(result.errors);
-        setDrafts(result.notes.map((note) => ({ id: randomUUID(), note, path: note.path, subjects: note.subjects.join(', '), roomId: null, name: note.title.slice(0, 80) })));
+        setDrafts(result.notes.map((note) => ({ id: randomUUID(), note, ...createSubjectReview(note.path, note.subjects), roomId: null, name: note.title.slice(0, 80) })));
       }
     } catch (error) { setErrors([String(error)]); }
     finally { busyRef.current = false; setBusy(false); }
@@ -108,10 +108,11 @@ export default function NoteImportScreen() {
             <Text style={styles.heading}>{item.note.title}</Text>
             <Text style={styles.text}>{item.note.bodies.length} chunks · suggested subjects need review</Text>
             {item.note.warnings.map((warning) => <Text key={warning} style={styles.hint}>{warning}</Text>)}
+            {item.folderWarning ? <Text style={styles.hint}>{item.folderWarning}</Text> : null}
             <Action label={`Preview ${item.note.title}`} onPress={() => setPreview({ title: item.note.title, bodies: item.note.bodies })} />
-            <Field label={`Source path for ${item.note.title}`} value={item.path} disabled={busy || item.done} onChangeText={(path) => update(item.id, { path })} />
-            <Text style={styles.hint}>Include its original folder if another note has the same filename.</Text>
-            <Field label={`Subjects for ${item.note.title} (comma separated)`} value={item.subjects} disabled={busy || item.done} onChangeText={(subjects) => update(item.id, { subjects })} />
+            <Field label={`Source path for ${item.note.title}`} value={item.path} disabled={busy || item.done} onChangeText={(path) => changeReview(item.id, (draft) => changeSourcePath(draft, path))} />
+            <Text style={styles.hint}>Include its original folder if another note has the same filename. Folders suggest subjects until you edit subjects.</Text>
+            <Field label={`Subjects for ${item.note.title} (comma separated)`} value={item.subjects} disabled={busy || item.done} onChangeText={(subjects) => changeReview(item.id, (draft) => changeSubjects(draft, subjects))} />
             <Action label={item.roomId ? `Room: ${rooms.find((room) => room.id === item.roomId)?.name ?? 'unavailable'}` : 'Destination: new room'} disabled={busy || item.done} onPress={() => setRoomPicker(item.id)} />
             {!item.roomId ? <Field label={`New room name for ${item.note.title}`} value={item.name} disabled={busy || item.done} onChangeText={(name) => update(item.id, { name })} /> : null}
             <Action label={item.done ? 'Imported' : `Confirm import of ${item.note.title}`} onPress={() => save(item)} disabled={busy || item.done} />

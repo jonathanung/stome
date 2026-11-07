@@ -106,6 +106,30 @@ It should include a regression scenario that edits a reviewed path after file
 selection and verifies both the resulting suggestion and preservation of user
 subject edits. A general YAML parser or an LLM is not necessary for this gap.
 
+### #27 follow-up (2026-11-07)
+
+The historical picker-workflow gap above is addressed by
+[`review-draft.ts`](../../src/import/review-draft.ts). The original file-derived
+subjects form a fixed baseline. Changing the reviewed source path adds its
+current parent folder, replaces an older folder suggestion, or removes that
+suggestion when the path is a filename, blank or temporarily invalid. Invalid
+paths still fail the existing source-identity validation when saving.
+
+An explicit subject edit, including clearing the field, prevents subsequent
+path changes from replacing that value. Suggestions use Foundation length/count
+limits and case-insensitive deduplication; an omitted folder gets a visible
+warning rather than silently disappearing. The existing no-subject warning now
+specifies that it describes the file, so it remains accurate if a folder is
+supplied later. The screen continues to label every suggestion for review and
+requires confirmation before saving. No numeric confidence score or new
+provenance schema is introduced.
+
+[`import-review.test.ts`](../../tests/import-review.test.ts) covers supplying,
+changing and removing folders, backslash/whitespace normalization, incomplete
+and invalid paths, duplicate subjects, subject limits, warning transitions and
+preservation of manual overrides and unrelated draft state. This follow-up
+does not resolve #23/#28's research gates or add a binary importer.
+
 ## #28 and parser readiness
 
 #28 requires the feasibility outcomes from #18–21 and a decision recorded on
