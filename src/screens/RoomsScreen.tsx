@@ -82,7 +82,8 @@ export function RoomsScreen() {
             <Text accessibilityRole="header" style={{ color: theme.color.text.primary, fontSize: 32, fontWeight: '700' }}>Study rooms</Text>
           </View>
           <Text style={{ color: theme.color.text.secondary }}>Your rooms and notes stay on this device.</Text>
-          <View style={{ flexDirection: 'row', gap: 16 }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 16 }}>
+            <Link href="/recent" style={{ color: theme.color.text.primary, textDecorationLine: 'underline' }}>Recent notes</Link>
             <Link href="/import" style={{ color: theme.color.text.primary, textDecorationLine: 'underline' }}>Import Markdown</Link>
             <Link href="/notes" style={{ color: theme.color.text.primary, textDecorationLine: 'underline' }}>Original notes and companion</Link>
           </View>
