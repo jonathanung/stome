@@ -265,15 +265,31 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
         const sx = nativeEvent.pageX;
         const sy = nativeEvent.pageY;
         const [bx, by] = screenToBoard(sx, sy, t);
-        refs.setTextEditRef.current!({
-          id: newId(),
-          x: bx,
-          y: by,
-          screenX: sx,
-          screenY: sy,
-          value: '',
-          isEditing: false,
-        });
+        // If tapping on an existing text element, edit it instead of creating new
+        const hit = [...refs.elementsRef.current!].reverse().find((el) => hitTest(el, bx, by));
+        if (hit?.type === 'text') {
+          const el = hit as TextElement;
+          const [sxEl, syEl] = boardToScreen(el.x, el.y, t);
+          refs.setTextEditRef.current!({
+            id: el.id,
+            x: el.x,
+            y: el.y,
+            screenX: sxEl,
+            screenY: syEl,
+            value: el.text,
+            isEditing: true,
+          });
+        } else {
+          refs.setTextEditRef.current!({
+            id: newId(),
+            x: bx,
+            y: by,
+            screenX: sx,
+            screenY: sy,
+            value: '',
+            isEditing: false,
+          });
+        }
         return;
       }
 

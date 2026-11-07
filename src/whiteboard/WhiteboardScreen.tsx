@@ -164,6 +164,15 @@ export function WhiteboardScreen() {
     return () => node.removeEventListener('wheel', onWheel);
   }, []);
 
+  // Prevent SVG text selection on web (cursor drag would otherwise highlight text)
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const el = document.createElement('style');
+    el.textContent = 'svg text { user-select: none; -webkit-user-select: none; cursor: default; }';
+    document.head.appendChild(el);
+    return () => { document.head.removeChild(el); };
+  }, []);
+
   // Delete key on web
   useEffect(() => {
     if (Platform.OS !== 'web') return;
