@@ -11,6 +11,14 @@ export const SOURCES = ['human', 'import', 'ai'] as const;
 export type Source = (typeof SOURCES)[number];
 
 export interface Payloads {
+  /** One reviewed source note, saved atomically with its provenance. */
+  'import.note': {
+    sourceId: string;
+    fingerprint: string;
+    destination: { roomId: string } | { name: string };
+    bodies: string[];
+    subjects: string[];
+  };
   'room.create': { roomId?: string; name: string };
   'room.rename': { roomId: string; name: string };
   /** Always needs `confirmed: true`, whatever the source. */
@@ -41,6 +49,7 @@ export interface Payloads {
 }
 
 export interface Results {
+  'import.note': { roomId: string; chunkIds: string[]; skipped: boolean };
   'room.create': { roomId: string; revision: number };
   'room.rename': { roomId: string; revision: number };
   'room.delete': { roomId: string };
@@ -55,6 +64,7 @@ export interface Results {
 export type OpKind = keyof Payloads;
 
 export const OP_KINDS = [
+  'import.note',
   'room.create',
   'room.rename',
   'room.delete',
@@ -92,7 +102,7 @@ export const NEEDS_REVISION: ReadonlySet<OpKind> = new Set<OpKind>([
 /** Which sources may run which ops. Humans may do anything. */
 export const PERMISSIONS: Record<Source, ReadonlySet<OpKind>> = {
   human: new Set<OpKind>(OP_KINDS),
-  import: new Set<OpKind>(['room.create', 'chunk.create']),
+  import: new Set<OpKind>(['room.create', 'chunk.create', 'import.note']),
   ai: new Set<OpKind>(['annotation.create']),
 };
 

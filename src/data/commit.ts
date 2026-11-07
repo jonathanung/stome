@@ -107,6 +107,20 @@ function normalize(op: Operation): Normalized {
   const p: Record<string, unknown> = isObject(op.payload) ? op.payload : reject('invalid', 'payload must be an object');
 
   switch (op.kind) {
+    case 'import.note': {
+      if (typeof p.sourceId !== 'string' || !p.sourceId.startsWith('markdown:') || p.sourceId.length > 2048 || p.sourceId.length <= 9) {
+        reject('invalid', 'import needs a stable Markdown collection/path identity');
+      }
+      if (typeof p.fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(p.fingerprint)) reject('invalid', 'import needs a SHA-256 fingerprint');
+      if (!isObject(p.destination)) return reject('invalid', 'choose an import destination');
+      const d = p.destination;
+      if ((d.roomId === undefined) === (d.name === undefined)) reject('invalid', 'choose an existing room or a new room name');
+      const destination = d.roomId !== undefined ? { roomId: requireId(d.roomId, 'roomId') } : { name: roomName(d.name) };
+      if (!Array.isArray(p.bodies) || !p.bodies.length || p.bodies.length > LIMITS.bodiesPerOp) reject('invalid', 'invalid import chunk count');
+      const bodies = (p.bodies as unknown[]).map((body) => chunkBody(body, { allowEmpty: false }));
+      if (bodies.reduce((size, body) => size + body.length, 0) > 1024 * 1024) reject('invalid', 'import is too large');
+      return { kind: op.kind, payload: { sourceId: p.sourceId as string, fingerprint: p.fingerprint as string, destination, bodies, subjects: normalizeSubjects(p.subjects) } };
+    }
     case 'room.create':
       return { kind: op.kind, payload: { roomId: optionalId(p.roomId, 'roomId'), name: roomName(p.name) } };
     case 'room.rename':
@@ -209,6 +223,36 @@ async function apply(db: Db, op: Operation, n: Normalized, deps: CommitDeps): Pr
   const run = (sql: string, params: SqlValue[]) => db.run(sql, params);
 
   switch (n.kind) {
+    case 'import.note': {
+      const { sourceId, fingerprint, destination, bodies, subjects } = n.payload;
+      const prior = await db.get<{ fingerprint: string; room_id: string; chunk_ids: string }>(
+        'SELECT fingerprint, room_id, chunk_ids FROM import_sources WHERE source_id = ?', [sourceId],
+      );
+      if (prior) {
+        if (prior.fingerprint !== fingerprint) reject('conflict', 'This source has changed since import. Your notes were kept. Use a different source path to save a separate copy.');
+        return { roomId: prior.room_id, chunkIds: JSON.parse(prior.chunk_ids), skipped: true };
+      }
+      let roomId: string;
+      if ('roomId' in destination) {
+        roomId = destination.roomId;
+        if (!await db.get('SELECT 1 FROM rooms WHERE id = ?', [roomId])) reject('not_found', 'the destination room no longer exists');
+      } else {
+        roomId = deps.newId();
+        await run('INSERT INTO rooms (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)', [roomId, destination.name, now, now]);
+      }
+      const start = (await db.get<{ n: number }>('SELECT COUNT(*) AS n FROM chunks WHERE room_id = ?', [roomId]))!.n;
+      const chunkIds = bodies.map(() => deps.newId());
+      for (let i = 0; i < bodies.length; i++) {
+        await run('INSERT INTO chunks (id, room_id, position, body, source_link, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [chunkIds[i], roomId, start + i, bodies[i], sourceId, now, now]);
+        for (let s = 0; s < subjects.length; s++) {
+          await run('INSERT INTO chunk_subjects (chunk_id, subject, position) VALUES (?, ?, ?)', [chunkIds[i], subjects[s], s]);
+        }
+      }
+      await run('INSERT INTO import_sources (source_id, fingerprint, room_id, chunk_ids, imported_at) VALUES (?, ?, ?, ?, ?)',
+        [sourceId, fingerprint, roomId, JSON.stringify(chunkIds), now]);
+      return { roomId, chunkIds, skipped: false };
+    }
     case 'room.create': {
       const roomId = n.payload.roomId ?? deps.newId();
       if (await db.get('SELECT 1 FROM rooms WHERE id = ?', [roomId])) reject('conflict', 'a room with that id already exists');
@@ -324,8 +368,8 @@ export function createCommit(db: Db, deps: CommitDeps): Commit {
     try {
       normalized = normalize(op);
       if (!PERMISSIONS[op.source].has(op.kind)) reject('forbidden', `${op.source} changes cannot ${op.kind}`);
-      if ((op.source === 'ai' || op.kind === 'room.delete') && !op.confirmed) {
-        reject('unconfirmed', op.source === 'ai' ? 'AI changes need confirmation' : 'deleting a room needs confirmation');
+      if ((op.source === 'ai' || op.kind === 'room.delete' || op.kind === 'import.note') && !op.confirmed) {
+        reject('unconfirmed', op.kind === 'import.note' ? 'importing needs review and confirmation' : op.source === 'ai' ? 'AI changes need confirmation' : 'deleting a room needs confirmation');
       }
     } catch (error) {
       return failure(error);

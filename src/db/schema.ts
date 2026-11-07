@@ -111,6 +111,20 @@ export const MIGRATIONS: readonly Migration[] = [
       DROP TABLE notes;
     `,
   },
+  {
+    version: 3,
+    name: 'import source provenance',
+    sql: `
+      CREATE TABLE import_sources (
+        source_id   TEXT PRIMARY KEY NOT NULL,
+        fingerprint TEXT NOT NULL,
+        room_id     TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+        chunk_ids   TEXT NOT NULL CHECK (json_valid(chunk_ids)),
+        imported_at INTEGER NOT NULL
+      );
+      CREATE INDEX import_sources_room ON import_sources (room_id);
+    `,
+  },
 ];
 
 export const SUPPORTED_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version;
