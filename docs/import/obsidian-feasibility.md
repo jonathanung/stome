@@ -5,6 +5,12 @@ already merged in [PR #59](https://github.com/jonathanung/stome/pull/59).
 
 ## Recommendation for IMPORT.11 (#28)
 
+The expanded user request also selects PDF, OneNote offline exports and Freeform
+visual references; see the [current plan](../note-import.md#expanded-implementation-scope-2026-11-07).
+Markdown keeps the same bounded behavior and evidence below. Its original
+recommendation to exclude the other source routes is superseded; full vault/ZIP
+and plugin compatibility remain outside the selected Markdown route.
+
 Choose individual UTF-8 `.md` files for v1. Text can be retained without an
 Obsidian runtime or network account. Limit the claim to a reviewed text import:
 this is not full vault migration, attachment copying, link resolution, or

@@ -486,3 +486,46 @@ export async function recordFoundationEdit(
  * A confirmed answer is written by createCommit in stome.db. The harness only
  * records that the operation landed so a replay can repair the session flag.
  */
+
+export type HarnessSessionSummary = {
+  id: string;
+  roomId: string;
+  state: SessionState;
+  question: string;
+  chunkCount: number;
+  isEdit: boolean;
+  errorCode: string | null;
+  errorMessage: string | null;
+  hasPinnedAnswer: boolean;
+  updatedAt: number;
+};
+
+/** Newest-first list for the companion screen. Read-only. */
+export async function listSessionSummaries(db: SqlExecutor, limit = 50): Promise<HarnessSessionSummary[]> {
+  const rows = await db.all<
+    SessionRow & { question: string | null }
+  >(
+    `SELECT s.*, (
+       SELECT m.body FROM harness_messages m
+       WHERE m.session_id = s.id AND m.role = 'user'
+       ORDER BY m.created_at ASC, m.id ASC LIMIT 1
+     ) AS question
+     FROM harness_sessions s ORDER BY s.updated_at DESC, s.id DESC LIMIT ?`,
+    [limit],
+  );
+  return rows.map((row) => {
+    const session = mapSession(row);
+    return {
+      id: session.id,
+      roomId: session.roomId,
+      state: session.state,
+      question: row.question ?? '',
+      chunkCount: session.selectedChunkIds.length,
+      isEdit: session.proposal?.type === 'chunk_edit',
+      errorCode: session.errorCode,
+      errorMessage: session.errorMessage,
+      hasPinnedAnswer: session.confirmedOperationId !== null,
+      updatedAt: session.updatedAt,
+    };
+  });
+}

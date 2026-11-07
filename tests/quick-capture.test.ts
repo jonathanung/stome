@@ -15,6 +15,8 @@ import {
   CLEANUP_FAILED_MESSAGE,
   STORAGE_DEGRADED_MESSAGE,
   createCaptureController,
+  createMemoryStorage,
+  loadCaptureState,
   type CaptureStorage,
   type SaveResult,
 } from '../src/features/capture/session.ts';
@@ -392,4 +394,16 @@ test('throwing storage reads and writes keep the line and warn instead of crashi
   assert.equal(chunks.length, 1);
   assert.equal(chunks[0]?.body, 'kept while storage throws');
   db.close();
+});
+
+test('memory storage loads a clean session without the degraded notice', () => {
+  const storage = createMemoryStorage();
+  let id = 0;
+  const fresh = loadCaptureState(storage, () => `id-${++id}`);
+  assert.equal(fresh.notice, null);
+  storage.setItem('k', 'v');
+  assert.equal(storage.getItem('k'), 'v');
+  storage.removeItem('k');
+  assert.equal(storage.getItem('k'), null);
+  assert.equal(loadCaptureState(null, () => 'x').notice?.kind, 'degraded');
 });

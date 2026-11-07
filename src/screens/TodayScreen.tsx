@@ -6,11 +6,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button, Screen, useStoneTheme } from '../../design-theme/src/primitives';
 import type { DueChunk } from '../data/models';
-import { listDueChunks } from '../data/queries';
+import { listDueChunks, listRooms } from '../data/queries';
 import { planToday } from '../data/today';
 import { expoDriver } from '../db/expo-driver';
 import { reviewMarkController } from '../features/review/mark-attempt';
 import { reviewHref } from '../features/review/session';
+import { TodaySummary } from './TodaySummary';
 import { StatusMark } from '../ui/StatusMark';
 import { BackButton, EmptyState, Group, Notice, RoundAction, Row, ScreenHeader, useColumn } from '../ui/kit';
 
@@ -24,12 +25,19 @@ function todayLabel(): string {
   return new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
 }
 
+function dueLabel(dueAt: number): string {
+  const day = (t: number) => new Date(t).setHours(0, 0, 0, 0);
+  if (day(dueAt) < day(Date.now())) return 'earlier';
+  return 'today';
+}
+
 export function TodayScreen() {
   const sqlite = useSQLiteContext();
   const db = useMemo(() => expoDriver(sqlite), [sqlite]);
   const theme = useStoneTheme();
   const column = useColumn();
   const [items, setItems] = useState<DueChunk[]>([]);
+  const [roomNames, setRoomNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,6 +45,7 @@ export function TodayScreen() {
     setError(null);
     const due = await listDueChunks(db, Date.now());
     setItems(planToday(due));
+    setRoomNames(Object.fromEntries((await listRooms(db)).map((room) => [room.id, room.name])));
   }, [db]);
 
   useFocusEffect(useCallback(() => {
@@ -44,10 +53,11 @@ export function TodayScreen() {
     let ticket = 0;
     const load = () => {
       const mine = ++ticket;
-      return listDueChunks(db, Date.now())
-        .then((due) => {
+      return Promise.all([listDueChunks(db, Date.now()), listRooms(db)])
+        .then(([due, rooms]) => {
           if (!active || mine !== ticket) return;
           setItems(planToday(due));
+          setRoomNames(Object.fromEntries(rooms.map((room) => [room.id, room.name])));
           setLoading(false);
         })
         .catch((reason: unknown) => {
@@ -65,6 +75,12 @@ export function TodayScreen() {
       unsubscribe();
     };
   }, [db]));
+
+  const groups = useMemo(() => {
+    const byRoom = new Map<string, DueChunk[]>();
+    for (const item of items) byRoom.set(item.chunk.roomId, [...(byRoom.get(item.chunk.roomId) ?? []), item]);
+    return [...byRoom].map(([roomId, list]) => ({ roomId, items: list }));
+  }, [items]);
 
   const back = () => (router.canGoBack() ? router.back() : router.replace('/'));
 
@@ -88,13 +104,7 @@ export function TodayScreen() {
                 });
               }}
             />}
-          >
-            <Text style={[theme.text('bodySmall'), { color: theme.color.text.secondary }]}>
-              {!loading && items.length
-                ? `${items.length} ${items.length === 1 ? 'note is' : 'notes are'} due. Missed notes come first.`
-                : 'Due notes from this device. The list is built when you open it.'}
-            </Text>
-          </ScreenHeader>
+          />
           {error ? <Notice tone="danger">{error}</Notice> : null}
           {loading ? <ActivityIndicator color={theme.color.accent.bg} /> : null}
           {!loading && items.length === 0 ? (
@@ -103,23 +113,35 @@ export function TodayScreen() {
               <Button label="Capture a note" size="compact" variant="outline" onPress={() => router.navigate('/notes')} />
             </EmptyState>
           ) : null}
+          {items.length ? <TodaySummary items={items} /> : null}
+          {groups.map((group) => (
+            <View key={group.roomId} style={{ gap: theme.space.xs }}>
+              <Text style={[theme.text('label'), { color: theme.color.text.tertiary, letterSpacing: 0.8, textTransform: 'lowercase' }]}>
+                {roomNames[group.roomId] ?? 'Room'}
+              </Text>
+              <Group>
+                {group.items.map((item) => {
+                  const title = item.chunk.body.split('\n')[0]?.slice(0, 80) || 'Empty chunk';
+                  return (
+                    <Row
+                      key={item.chunk.id}
+                      title={title}
+                      subtitle={`${STATE_LABEL[item.mark.state]} · due ${dueLabel(item.mark.dueAt)}`}
+                      leading={<StatusMark state={item.mark.state} />}
+                      accessibilityLabel={`Review ${title}`}
+                      onPress={() => router.push(reviewHref(item.chunk.roomId, item.chunk.id))}
+                      testID={`today-item-${item.chunk.id}`}
+                    />
+                  );
+                })}
+              </Group>
+            </View>
+          ))}
           {items.length ? (
-            <Group>
-              {items.map((item) => {
-                const title = item.chunk.body.split('\n')[0]?.slice(0, 80) || 'Empty chunk';
-                return (
-                  <Row
-                    key={item.chunk.id}
-                    title={title}
-                    subtitle={STATE_LABEL[item.mark.state]}
-                    leading={<StatusMark state={item.mark.state} />}
-                    accessibilityLabel={`Review ${title}`}
-                    onPress={() => router.push(reviewHref(item.chunk.roomId, item.chunk.id))}
-                    testID={`today-item-${item.chunk.id}`}
-                  />
-                );
-              })}
-            </Group>
+            <Button
+              label={`Review all ${items.length}`}
+              onPress={() => router.push(reviewHref(items[0].chunk.roomId, items[0].chunk.id))}
+            />
           ) : null}
         </View>
         </ScrollView>
