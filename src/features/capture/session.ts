@@ -15,6 +15,10 @@ export const STORAGE_DEGRADED_MESSAGE =
 export const CLEANUP_FAILED_MESSAGE =
   'The note was saved. The draft could not be cleared and may still be here after a reload.';
 
+function errorMessage(reason: unknown): string {
+  return reason instanceof Error && reason.message ? reason.message : 'Could not save';
+}
+
 /** The text and room frozen when a save starts. A later edit does not change this. */
 export type BoundAttempt = {
   opId: string;
@@ -270,9 +274,16 @@ export function createCaptureController(deps: {
 }): CaptureController {
   let session = deps.initial ?? loadCaptureState(deps.storage, deps.newId);
   let live: CaptureLive = { commit: deps.commit, destination: deps.destination };
+  let owned: { opId: string; text: string } | null = null;
   const replace = (next: CaptureSession) => {
     session = next;
     deps.onChange?.(next);
+  };
+  const detachOwned = (draft: CaptureDraft): CaptureDraft => {
+    if (owned && draft.opId === owned.opId && draft.text.trim() !== owned.text) {
+      return { text: draft.text, opId: deps.newId() };
+    }
+    return draft;
   };
   return {
     getState: () => session,
@@ -280,7 +291,8 @@ export function createCaptureController(deps: {
       live = next;
     },
     edit(text) {
-      const next = editText(session, text, deps.newId);
+      const edited = editText(session, text, deps.newId);
+      const next = { ...edited, draft: detachOwned(edited.draft) };
       const stored = persistDraft(deps.storage, next.draft);
       replace(stored ? next : degraded(next));
     },
@@ -303,52 +315,85 @@ export function createCaptureController(deps: {
       replace(next);
     },
     async save() {
-      const target = await live.destination();
-      const roomId = 'roomId' in target ? target.roomId : null;
-      const begun = beginSave(session, roomId, deps.newId);
-      if (!begun.ok) {
-        replace(begun.session);
-        return { closePanel: false };
-      }
-      const attemptStored = begun.recover ? true : persistAttempt(deps.storage, begun.sent);
-      const draftStored = persistDraft(deps.storage, begun.session.draft);
-      replace({
-        ...begun.session,
-        notice: attemptStored && draftStored ? begun.session.notice : { kind: 'degraded' },
-      });
-      const roomNow = async () => {
-        const after = await live.destination();
-        return 'roomId' in after ? after.roomId : roomId;
-      };
-      if (begun.recover) {
-        const recovered = await live.commit(captureOperation(
-          { text: begun.recover.text, opId: begun.recover.opId },
-          begun.recover.roomId,
-        ));
-        const roomAfter = await roomNow();
-        const latest = session.draft;
-        if (!recovered.ok) {
-          replace(settleFailed(session, begun.recover, latest, recovered.message));
+      if (session.busy) return { closePanel: false };
+      const intentText = session.draft.text.trim();
+      if (!intentText) return { closePanel: false };
+      const intent: CaptureDraft = { text: session.draft.text, opId: session.draft.opId };
+      owned = { opId: intent.opId, text: intentText };
+      replace({ ...session, busy: true, notice: null });
+      const finish = async (): Promise<{ closePanel: boolean }> => {
+        let roomId: string | null;
+        try {
+          const target = await live.destination();
+          roomId = 'roomId' in target ? target.roomId : null;
+        } catch (reason) {
+          replace({
+            ...session,
+            busy: false,
+            draft: detachOwned(session.draft),
+            notice: { kind: 'error', message: errorMessage(reason) },
+          });
           return { closePanel: false };
         }
-        const settled = settleSaved(session, begun.recover, latest, true, deps.newId, roomAfter);
-        const cleanupOk = persistSettled(deps.storage, settled);
-        const shown = cleanupOk ? settled : keepAfterCleanupFailure(settled, begun.recover, latest);
-        replace(shown);
-        return { closePanel: false };
+        const begun = beginSave({ ...session, busy: false, draft: intent }, roomId, deps.newId);
+        if (!begun.ok) {
+          replace({ ...session, busy: false, notice: begun.session.notice });
+          return { closePanel: false };
+        }
+        const newer = session.draft.opId !== intent.opId || session.draft.text.trim() !== intentText;
+        const shownDraft = newer ? session.draft : begun.session.draft;
+        const attemptStored = begun.recover ? true : persistAttempt(deps.storage, begun.sent);
+        const draftStored = persistDraft(deps.storage, shownDraft);
+        replace({
+          ...begun.session,
+          draft: shownDraft,
+          busy: true,
+          notice: attemptStored && draftStored ? null : { kind: 'degraded' },
+        });
+        const roomAfterCommit = async (fallback: string | null) => {
+          try {
+            const after = await live.destination();
+            return 'roomId' in after ? after.roomId : fallback;
+          } catch {
+            return fallback;
+          }
+        };
+        const landed = async (
+          sent: BoundAttempt,
+          result: SaveResult,
+        ): Promise<{ closePanel: boolean }> => {
+          const roomAfter = await roomAfterCommit(sent.roomId);
+          const latest = detachOwned(session.draft);
+          if (!result.ok) {
+            replace(settleFailed(session, sent, latest, result.message));
+            return { closePanel: false };
+          }
+          const settled = settleSaved(session, sent, latest, true, deps.newId, roomAfter);
+          const cleanupOk = persistSettled(deps.storage, settled);
+          const shown = cleanupOk ? settled : keepAfterCleanupFailure(settled, sent, latest);
+          replace(shown);
+          return { closePanel: shown.draft.text.trim().length === 0 };
+        };
+        try {
+          if (begun.recover) {
+            const recovered = await live.commit(captureOperation(
+              { text: begun.recover.text, opId: begun.recover.opId },
+              begun.recover.roomId,
+            ));
+            return await landed(begun.recover, recovered);
+          }
+          const result = await live.commit(begun.operation);
+          return await landed(begun.sent, result);
+        } catch (reason) {
+          replace(settleFailed(session, begun.recover ?? begun.sent, detachOwned(session.draft), errorMessage(reason)));
+          return { closePanel: false };
+        }
+      };
+      try {
+        return await finish();
+      } finally {
+        owned = null;
       }
-      const result = await live.commit(begun.operation);
-      const roomAfter = await roomNow();
-      const latest = session.draft;
-      if (!result.ok) {
-        replace(settleFailed(session, begun.sent, latest, result.message));
-        return { closePanel: false };
-      }
-      const settled = settleSaved(session, begun.sent, latest, true, deps.newId, roomAfter);
-      const cleanupOk = persistSettled(deps.storage, settled);
-      const shown = cleanupOk ? settled : keepAfterCleanupFailure(settled, begun.sent, latest);
-      replace(shown);
-      return { closePanel: shown.draft.text.trim().length === 0 };
     },
   };
 }

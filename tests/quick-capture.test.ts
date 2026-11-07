@@ -198,6 +198,109 @@ test('text typed while a save is pending stays after that save lands', async () 
   db.close();
 });
 
+test('typing and a second press during the room lookup keep the first line and the new draft', async () => {
+  const db = nodeDb();
+  await migrateDb(db);
+  const { commit, roomId } = await lecture(db, 'room', 'Lecture');
+  let release!: () => void;
+  let lookups = 0;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let ids = 0;
+  const bodies: string[] = [];
+  const controller = createCaptureController({
+    storage: memoryStorage(),
+    newId: () => `op-${++ids}`,
+    destination: async () => {
+      lookups += 1;
+      if (lookups === 1) await gate;
+      return { roomId };
+    },
+    commit: async (operation) => {
+      bodies.push(operation.payload.bodies[0] ?? '');
+      const result = await commit(operation);
+      return result.ok ? { ok: true, duplicate: result.duplicate } : { ok: false, message: result.error.message };
+    },
+  });
+  controller.edit('line A');
+  const first = controller.save();
+  const second = controller.save();
+  assert.equal(controller.getState().busy, true);
+  controller.edit('line B');
+  assert.equal(controller.getState().draft.text, 'line B');
+  release();
+  const [firstResult, secondResult] = await Promise.all([first, second]);
+  assert.equal(firstResult.closePanel, false);
+  assert.equal(secondResult.closePanel, false);
+  assert.equal(controller.getState().busy, false);
+  assert.equal(controller.getState().draft.text, 'line B');
+  assert.deepEqual(bodies, ['line A']);
+  const chunks = await listChunks(db, roomId);
+  assert.equal(chunks.length, 1);
+  assert.equal(chunks[0]?.body, 'line A');
+  assert.equal(lookups, 2);
+  db.close();
+});
+
+test('a room lookup failure settles, and a later refresh failure does not undo a landed note', async () => {
+  const db = nodeDb();
+  await migrateDb(db);
+  const { commit, roomId } = await lecture(db, 'room', 'Lecture');
+  let release!: () => void;
+  let started!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const startedPromise = new Promise<void>((resolve) => { started = resolve; });
+  let lookups = 0;
+  let commits = 0;
+  let ids = 0;
+  const controller = createCaptureController({
+    storage: memoryStorage(),
+    newId: () => `op-${++ids}`,
+    destination: async () => {
+      lookups += 1;
+      if (lookups === 1 || lookups === 3 || lookups === 4) throw new Error('rooms unavailable');
+      return { roomId };
+    },
+    commit: async (operation) => {
+      commits += 1;
+      if (commits === 1) {
+        started();
+        await gate;
+      }
+      const result = await commit(operation);
+      return result.ok ? { ok: true, duplicate: result.duplicate } : { ok: false, message: result.error.message };
+    },
+  });
+  controller.edit('line A');
+  const failed = await controller.save();
+  assert.equal(failed.closePanel, false);
+  assert.equal(controller.getState().busy, false);
+  assert.equal(controller.getState().draft.text, 'line A');
+  assert.equal(controller.getState().notice?.kind, 'error');
+  assert.equal((await listChunks(db, roomId)).length, 0);
+
+  const saving = controller.save();
+  await startedPromise;
+  controller.edit('line B');
+  release();
+  const saved = await saving;
+  assert.equal(saved.closePanel, false);
+  assert.equal(controller.getState().busy, false);
+  assert.equal(controller.getState().draft.text, 'line B');
+  assert.notEqual(controller.getState().notice?.kind, 'error');
+  assert.equal((await listChunks(db, roomId)).length, 1);
+  assert.equal((await listChunks(db, roomId))[0]?.body, 'line A');
+
+  const retried = await controller.save();
+  assert.equal(retried.closePanel, false);
+  assert.equal(controller.getState().busy, false);
+  assert.equal(controller.getState().draft.text, 'line B');
+  assert.equal(controller.getState().notice?.kind, 'error');
+  const chunks = await listChunks(db, roomId);
+  assert.equal(chunks.length, 1);
+  assert.equal(chunks[0]?.body, 'line A');
+  db.close();
+});
+
 test('a landed save with failed cleanup is recovered after reload, an edit, and a room change', async () => {
   const db = nodeDb();
   await migrateDb(db);

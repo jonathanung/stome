@@ -110,8 +110,12 @@ export function QuickCapture() {
   }, [open]);
 
   async function save() {
-    const result = await controller.save();
-    if (result.closePanel) setOpen(false);
+    try {
+      const result = await controller.save();
+      if (result.closePanel) setOpen(false);
+    } catch {
+      // The controller settles its own busy flag. Nothing here may reject into the press handler.
+    }
   }
 
   const failed = session.notice?.kind === 'error';
