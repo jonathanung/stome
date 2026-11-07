@@ -165,11 +165,15 @@ export function CompanionScreen() {
         </View>
         <Option title="API key" body="Set the key in the companion's environment. It is never stored in the app. Not live yet." />
         <Option title="Sign in with a subscription" body="Codex or Grok sign-in, still being researched" />
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: 16, rowGap: 4 }}>
-          <Text style={meta}>timeout {PROVIDER_LIMITS.timeoutMs / 1000} s</Text>
-          <Text style={meta}>max request {PROVIDER_LIMITS.maxRequestChars.toLocaleString()} characters</Text>
-          <Text style={meta}>max answer {PROVIDER_LIMITS.maxOutputChars.toLocaleString()} characters</Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: 16, rowGap: 8 }}>
+          <LimitField label="timeout" unit="s" testID="companion-limit-timeout" value={settings.limits.timeoutSec}
+            onChange={(timeoutSec) => updateCompanionSettings({ limits: { ...settings.limits, timeoutSec } })} />
+          <LimitField label="max" unit="chunks per question" testID="companion-limit-chunks" value={settings.limits.maxChunks}
+            onChange={(maxChunks) => updateCompanionSettings({ limits: { ...settings.limits, maxChunks } })} />
+          <LimitField label="max answer" unit="characters" testID="companion-limit-answer" value={settings.limits.maxAnswerChars}
+            onChange={(maxAnswerChars) => updateCompanionSettings({ limits: { ...settings.limits, maxAnswerChars } })} />
         </View>
+        <Text style={meta}>Limits are placeholders until the harness documents them. Today it uses {PROVIDER_LIMITS.timeoutMs / 1000} s and {PROVIDER_LIMITS.maxOutputChars.toLocaleString()} characters.</Text>
       </View>
     </Card>
   );
@@ -179,7 +183,7 @@ export function CompanionScreen() {
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'left', 'right']}>
         <ScrollView contentContainerStyle={{ width: '100%', maxWidth: theme.layout.mainMax, alignSelf: 'center', padding: wide ? 40 : theme.space.card, paddingBottom: 120, gap: theme.space.section }}>
           <View style={{ gap: 6 }}>
-            <BackButton label="Rooms" accessibilityLabel="All rooms" onPress={() => router.replace('/')} />
+            <BackButton label="Settings" accessibilityLabel="Back to settings" onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
             <Text accessibilityRole="header" style={[theme.text('screenTitle'), { color: theme.color.text.primary }]}>AI companion</Text>
             <Text style={[theme.text('body'), { color: theme.color.text.secondary }]}>
               AI runs in a small program on your laptop, not in this app. It only sees the chunks you tick, and every change waits for you to confirm.
@@ -194,6 +198,7 @@ export function CompanionScreen() {
               <SectionTitle aside={<Text style={meta}>Saved on this device · a session stays in one room</Text>}>Sessions</SectionTitle>
               {loadError ? <Notice tone="danger">{loadError}</Notice> : null}
               {sessions.length === 0 && !loadError ? <Text style={meta}>No questions yet. Tick chunks in a room and ask.</Text> : null}
+              {wide && sessions.length > 0 ? <SessionHeader /> : null}
               {sessions.map((session) => (
                 <SessionRow key={session.id} session={session} room={roomNames[session.roomId] ?? 'Unknown room'} wide={wide} />
               ))}
@@ -203,6 +208,33 @@ export function CompanionScreen() {
         </ScrollView>
       </SafeAreaView>
     </Screen>
+  );
+}
+
+function LimitField({ label, unit, value, onChange, testID }: { label: string; unit: string; value: string; onChange: (value: string) => void; testID: string }) {
+  const theme = useStoneTheme();
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+      <Text style={[theme.text('bodySmall'), { color: theme.color.text.tertiary }]}>{label}</Text>
+      <TextInput accessibilityLabel={`${label} ${unit}`} keyboardType="number-pad" value={value} onChangeText={(text) => onChange(text.replace(/[^0-9]/g, ''))} testID={testID}
+        style={[theme.text('bodySmall'), { minWidth: 52, textAlign: 'center', paddingVertical: 4, paddingHorizontal: 8, borderRadius: theme.radius.control, borderWidth: 1, borderColor: theme.color.border.strong, backgroundColor: theme.color.bg.canvas, color: theme.color.text.primary }]} />
+      <Text style={[theme.text('bodySmall'), { color: theme.color.text.tertiary }]}>{unit}</Text>
+    </View>
+  );
+}
+
+function SessionHeader() {
+  const theme = useStoneTheme();
+  const head = [theme.text('eyebrow'), { color: theme.color.text.tertiary, textTransform: 'uppercase' as const }];
+  return (
+    <View style={{ flexDirection: 'row', gap: 6 }}>
+      <Text style={[head, { flex: 3 }]}>Question</Text>
+      <Text style={[head, { flex: 2 }]}>Room</Text>
+      <Text style={[head, { flex: 2 }]}>Scope</Text>
+      <Text style={[head, { flex: 2 }]}>State</Text>
+      <Text style={[head, { flex: 3 }]}>Result</Text>
+      <View style={{ flex: 1 }} />
+    </View>
   );
 }
 
@@ -248,8 +280,9 @@ function SessionRow({ session, room, wide }: { session: HarnessSessionSummary; r
   const theme = useStoneTheme();
   const scope = `${session.chunkCount} chunk${session.chunkCount === 1 ? '' : 's'}${session.isEdit ? ' · edit' : ''}`;
   const canContinue = session.state === 'failed' || session.state === 'cancelled';
+  const running = session.state === 'running';
   const action = (
-    <Button size="compact" variant="outline" label={canContinue ? 'Continue' : 'Open'}
+    <Button size="compact" variant="outline" label={running ? 'Cancel' : canContinue ? 'Continue' : 'Open'}
       onPress={() => router.push(`/rooms/${session.roomId}`)} />
   );
   const muted = { color: theme.color.text.tertiary };
