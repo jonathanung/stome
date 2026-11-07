@@ -31,6 +31,15 @@ export interface OneNoteNote extends ParsedNote {
   exportFormat: 'onenote-html' | 'onenote-mhtml' | 'onenote-docx';
 }
 
+/** OneNote exports carry headings but no Markdown properties, tags or wikilinks. */
+function emptyMetadata(sections: string[][]): ParsedNote['metadata'] {
+  const headings = sections.flat()
+    .map((line) => /^(#{1,6})\s+(.+)$/.exec(line))
+    .filter((match): match is RegExpExecArray => match !== null)
+    .map((match) => ({ level: match[1].length, text: match[2].trim() }));
+  return { headings, properties: [], tags: [], wikilinks: [], skippedAttachments: [] };
+}
+
 function finish(rawPath: string, format: OneNoteNote['exportFormat'], title: string | null, sections: string[][], warnings: Set<string>): OneNoteNote {
   const path = normalizeOnenotePath(rawPath);
   const visible = sections.filter((section) => section.some((line) => line.trim()));
@@ -39,7 +48,7 @@ function finish(rawPath: string, format: OneNoteNote['exportFormat'], title: str
   const alreadyTitled = visible.some((section) => section.some((line) => line.replace(/^#{1,6}\s+/, '').trim().toLowerCase() === pageTitle.toLowerCase()));
   if (!alreadyTitled) visible.unshift([`# ${pageTitle}`]);
   warnings.add(UNSUPPORTED_WARNING);
-  return { path, title: pageTitle, bodies: packSections(visible, warnings), subjects: [], warnings: [...warnings], exportFormat: format };
+  return { path, title: pageTitle, bodies: packSections(visible, warnings), subjects: [], warnings: [...warnings], exportFormat: format, metadata: emptyMetadata(visible) };
 }
 
 export function parseOneNoteText(input: { path: string; text: string }): OneNoteNote {

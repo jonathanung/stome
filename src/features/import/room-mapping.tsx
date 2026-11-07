@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { createStyles, useStoneTheme } from '../../../design-theme/src/primitives';
 
 import {
   cancelRoomMapping,
@@ -12,17 +13,32 @@ import {
   type RoomMapping,
 } from '../../import/room-map';
 
-function Action({ label, onPress, disabled = false }: { label: string; onPress(): void; disabled?: boolean }) {
+function Option({ label, detail, selected, disabled, onPress, children }: {
+  label: string;
+  detail?: string;
+  selected: boolean;
+  disabled: boolean;
+  onPress(): void;
+  children?: ReactNode;
+}) {
+  const styles = useStyles();
   return (
     <Pressable
-      accessibilityRole="button"
+      accessibilityRole="radio"
       accessibilityLabel={label}
-      accessibilityState={{ disabled }}
+      accessibilityState={{ selected, disabled }}
       disabled={disabled}
       onPress={onPress}
-      style={[styles.button, disabled && styles.disabled]}
+      style={[styles.opt, selected && styles.optOn, disabled && styles.disabled]}
     >
-      <Text style={styles.buttonText}>{label}</Text>
+      <View style={[styles.radio, selected && styles.radioOn]} />
+      <View style={styles.optBody}>
+        <Text style={styles.optText}>
+          <Text style={styles.optStrong}>{label}</Text>
+          {detail ? <Text style={styles.meta}>{` · ${detail}`}</Text> : null}
+        </Text>
+        {children}
+      </View>
     </Pressable>
   );
 }
@@ -42,105 +58,92 @@ export function RoomMappingControl({
   disabled?: boolean;
   onChange(mapping: RoomMapping): void;
 }) {
-  const [open, setOpen] = useState(false);
+  const styles = useStyles();
+  const theme = useStoneTheme();
   const subject = roomNameFromSubject(subjects);
   const destination = destinationForMapping(mapping);
   const matches = matchingRooms(rooms, subjects);
   const matchIds = new Set(matches.map((room) => room.id));
   const ordered = [...matches, ...rooms.filter((room) => !matchIds.has(room.id))];
-  const chosen = mapping.status === 'existing'
-    ? rooms.find((room) => room.id === mapping.roomId)?.name ?? 'unavailable'
-    : null;
 
   return (
-    <View style={styles.section} testID={`room-mapping-${title}`}>
-      <Text style={styles.label}>{subject ? `Map “${subject}” to a room` : 'Map this note to a room'}</Text>
+    <View style={styles.box} accessibilityRole="radiogroup" testID={`room-mapping-${title}`}>
+      <Text style={styles.eyebrow}>{subject ? `ROOM FOR SUBJECT “${subject.toUpperCase()}”` : 'ROOM FOR THIS NOTE'}</Text>
       <Text style={styles.hint}>
-        Choose an existing room or name a new one. Other subjects stay on the note. Importing does not change the stone stage.
+        {matches.length > 0
+          ? 'An existing room matches this subject. Choose it, or name a new room.'
+          : 'Choose an existing room or name a new one. Other subjects stay on the note. Importing does not change the stone stage.'}
       </Text>
-      {matches.length > 0 && mapping.status === 'unset' ? (
-        <Text style={styles.hint}>An existing room matches this subject. Choose it, or name a new room.</Text>
-      ) : null}
-      {mapping.status === 'existing' ? <Text style={styles.text}>Mapped to existing room {chosen}.</Text> : null}
-      {mapping.status === 'new' && destination && 'name' in destination ? (
-        <Text style={styles.text}>New room “{destination.name}” is created when you confirm.</Text>
-      ) : null}
-      {mapping.status === 'new' ? (
-        <View style={styles.field}>
-          <Text style={styles.label}>{`New room name for ${title}`}</Text>
-          <TextInput
-            accessibilityLabel={`New room name for ${title}`}
-            value={mapping.name}
-            onChangeText={(name) => onChange(chooseNewRoom(name))}
-            editable={!disabled}
-            autoCapitalize="none"
-            autoCorrect={false}
-            style={styles.input}
-          />
-        </View>
-      ) : null}
-      {open ? (
-        <View style={styles.section}>
-          {ordered.map((room) => (
-            <Action
-              key={room.id}
-              label={`Use existing room ${room.name} for ${title}`}
-              disabled={disabled}
-              onPress={() => {
-                onChange(chooseExistingRoom(room.id));
-                setOpen(false);
-              }}
-            />
-          ))}
-          <Action
-            label={`Name a new room for ${title}`}
-            disabled={disabled}
-            onPress={() => {
-              onChange(chooseNewRoom(subject));
-              setOpen(false);
-            }}
-          />
-          <Action label={`Cancel room choice for ${title}`} disabled={disabled} onPress={() => setOpen(false)} />
-        </View>
-      ) : (
-        <Action
-          label={mapping.status === 'unset' ? `Choose a room for ${title}` : `Change room for ${title}`}
+      {ordered.map((room) => (
+        <Option
+          key={room.id}
+          label={room.name}
+          detail={matchIds.has(room.id) ? 'matches subject' : undefined}
+          selected={mapping.status === 'existing' && mapping.roomId === room.id}
           disabled={disabled}
-          onPress={() => setOpen(true)}
+          onPress={() => onChange(chooseExistingRoom(room.id))}
         />
-      )}
-      {mapping.status !== 'unset' && !open ? (
-        <Action label={`Clear room choice for ${title}`} disabled={disabled} onPress={() => onChange(cancelRoomMapping())} />
+      ))}
+      <Option
+        label="New room"
+        selected={mapping.status === 'new'}
+        disabled={disabled}
+        onPress={() => { if (mapping.status !== 'new') onChange(chooseNewRoom(subject)); }}
+      >
+        <TextInput
+          accessibilityLabel={`New room name for ${title}`}
+          placeholder="room name"
+          placeholderTextColor={theme.color.text.disabled}
+          value={mapping.status === 'new' ? mapping.name : ''}
+          onFocus={() => { if (mapping.status !== 'new') onChange(chooseNewRoom(subject)); }}
+          onChangeText={(name) => onChange(chooseNewRoom(name))}
+          editable={!disabled}
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={styles.input}
+        />
+      </Option>
+      {mapping.status === 'new' && destination && 'name' in destination ? (
+        <Text style={styles.hint}>New room “{destination.name}” is created when you confirm.</Text>
+      ) : null}
+      {mapping.status !== 'unset' ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Clear room choice for ${title}`}
+          disabled={disabled}
+          onPress={() => onChange(cancelRoomMapping())}
+          style={styles.clear}
+        >
+          <Text style={styles.clearText}>Clear choice</Text>
+        </Pressable>
       ) : null}
       {!destination ? <Text style={styles.hint}>Nothing is saved until you choose a room and confirm.</Text> : null}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  section: { gap: 12 },
-  text: { fontSize: 17, lineHeight: 25, color: '#3f4036' },
-  hint: { fontSize: 14, lineHeight: 21, color: '#626453' },
-  label: { fontSize: 15, color: '#3f4036', fontWeight: '600' },
-  field: { gap: 6 },
+const useStyles = createStyles((theme) => StyleSheet.create({
+  box: { gap: 10, padding: 14, borderRadius: 18, backgroundColor: theme.color.bg.canvas },
+  eyebrow: { ...theme.text('label'), letterSpacing: 0.8, color: theme.color.text.tertiary },
+  hint: { ...theme.text('bodySmall'), color: theme.color.text.secondary },
+  meta: { ...theme.text('bodySmall'), color: theme.color.text.tertiary },
+  opt: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 10, minHeight: 48,
+    paddingVertical: 10, paddingHorizontal: 12, borderRadius: 12,
+    borderWidth: 1, borderColor: theme.color.border.hairline, backgroundColor: theme.color.bg.surface,
+  },
+  optOn: { borderWidth: 2, borderColor: theme.color.text.primary, paddingVertical: 9, paddingHorizontal: 11 },
+  optBody: { flex: 1, gap: 6 },
+  optText: { ...theme.text('body'), color: theme.color.text.primary },
+  optStrong: { fontWeight: '600' },
+  radio: { width: 18, height: 18, borderRadius: 9, borderWidth: 1.5, borderColor: theme.color.border.strong, marginTop: 1 },
+  radioOn: { borderWidth: 5, borderColor: theme.color.accent.bg },
   input: {
-    minHeight: 48,
-    borderWidth: 1,
-    borderColor: '#777b67',
-    borderRadius: 10,
-    padding: 12,
-    fontSize: 17,
-    color: '#292820',
-    backgroundColor: '#fffdf8',
+    ...theme.text('bodySmall'), minHeight: 36, borderRadius: 10, borderWidth: 1,
+    borderColor: theme.color.border.hairline, backgroundColor: theme.color.bg.canvas,
+    paddingHorizontal: 10, color: theme.color.text.primary,
   },
-  button: {
-    minHeight: 48,
-    borderRadius: 12,
-    padding: 12,
-    backgroundColor: '#424e35',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  buttonText: { fontSize: 16, fontWeight: '600', color: '#ffffff' },
+  clear: { minHeight: 36, justifyContent: 'center', alignSelf: 'flex-start' },
+  clearText: { ...theme.text('buttonCompact'), color: theme.color.text.secondary },
   disabled: { opacity: 0.5 },
-});
+}));

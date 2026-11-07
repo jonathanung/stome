@@ -1,7 +1,6 @@
 import {
   HARNESS_DATABASE_NAME,
   HarnessError,
-  type FoundationAnnotationRequest,
   type PriorMessage,
   type SessionState,
   type StoredProposal,
@@ -21,10 +20,11 @@ export type SqlExecutor = {
   transaction<T>(fn: (tx: SqlExecutor) => Promise<T>): Promise<T>;
 };
 
-export const HARNESS_SCHEMA_VERSION = 2;
+export const HARNESS_SCHEMA_VERSION = 3;
 
 // Isolated from stome.db. These names are harness-owned and are not the
-// Foundation Room / chunk / annotation tables.
+// Foundation Room / chunk / annotation tables. A confirmed answer lives only
+// in stome.db `annotations`, written by createCommit (FND.2).
 export const HARNESS_MIGRATION_SQL = `
 CREATE TABLE harness_sessions (
   id TEXT PRIMARY KEY NOT NULL,
@@ -54,24 +54,6 @@ CREATE TABLE harness_operations (
   result_json TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
-
-CREATE TABLE harness_stub_annotations (
-  id TEXT PRIMARY KEY NOT NULL,
-  proposal_id TEXT NOT NULL UNIQUE,
-  operation_id TEXT NOT NULL UNIQUE,
-  room_id TEXT NOT NULL,
-  chunk_id TEXT NOT NULL,
-  note_id INTEGER NOT NULL,
-  type TEXT NOT NULL CHECK (type = 'ai_answer'),
-  body TEXT NOT NULL,
-  anchor_start INTEGER NOT NULL,
-  anchor_end INTEGER NOT NULL,
-  chunk_revision INTEGER NOT NULL,
-  created_at INTEGER NOT NULL,
-  CHECK (anchor_start >= 0 AND anchor_end > anchor_start)
-);
-
-CREATE INDEX harness_stub_annotations_note ON harness_stub_annotations(note_id);
 `;
 
 type SessionRow = {
@@ -104,44 +86,14 @@ export type HarnessSession = {
   updatedAt: number;
 };
 
-export type StubAnnotation = {
-  id: string;
-  proposalId: string;
+export type HarnessOperationResult = {
+  replayed: boolean;
+  annotationId: string;
   operationId: string;
-  roomId: string;
-  chunkId: string;
-  noteId: number;
-  type: 'ai_answer';
-  body: string;
-  anchorStart: number;
-  anchorEnd: number;
-  chunkRevision: number;
-  createdAt: number;
-};
-
-type AnnotationRow = {
-  id: string;
-  proposal_id: string;
-  operation_id: string;
-  room_id: string;
-  chunk_id: string;
-  note_id: number;
-  type: 'ai_answer';
-  body: string;
-  anchor_start: number;
-  anchor_end: number;
-  chunk_revision: number;
-  created_at: number;
 };
 
 type OperationRow = {
   result_json: string;
-};
-
-export type StubCommitResult = {
-  replayed: boolean;
-  annotationId: string;
-  operationId: string;
 };
 
 function mapSession(row: SessionRow): HarnessSession {
@@ -162,23 +114,6 @@ function mapSession(row: SessionRow): HarnessSession {
     pendingOperationId: row.pending_operation_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-  };
-}
-
-function mapAnnotation(row: AnnotationRow): StubAnnotation {
-  return {
-    id: row.id,
-    proposalId: row.proposal_id,
-    operationId: row.operation_id,
-    roomId: row.room_id,
-    chunkId: row.chunk_id,
-    noteId: row.note_id,
-    type: row.type,
-    body: row.body,
-    anchorStart: row.anchor_start,
-    anchorEnd: row.anchor_end,
-    chunkRevision: row.chunk_revision,
-    createdAt: row.created_at,
   };
 }
 
@@ -206,9 +141,27 @@ export async function migrateHarness(db: SqlExecutor): Promise<void> {
     });
     return;
   }
+  // v2 wrote confirmed answers to a harness-local mock table. That adapter is
+  // gone: the only confirmed answer now lives in stome.db `annotations` via
+  // createCommit. Drop the mock rows and forget their cached operation results
+  // so a replay cannot point at an annotation that does not exist.
+  const dropStubAnnotations = async (tx: SqlExecutor): Promise<void> => {
+    await tx.exec('DROP TABLE IF EXISTS harness_stub_annotations');
+    await tx.exec(
+      `DELETE FROM harness_operations WHERE instr(result_json, '"annotationId":"stub-') > 0`,
+    );
+  };
   if (version === 1) {
     await db.transaction(async (tx) => {
       await tx.exec('ALTER TABLE harness_sessions ADD COLUMN pending_operation_id TEXT');
+      await dropStubAnnotations(tx);
+      await tx.exec(`PRAGMA user_version = ${HARNESS_SCHEMA_VERSION}`);
+    });
+    return;
+  }
+  if (version === 2) {
+    await db.transaction(async (tx) => {
+      await dropStubAnnotations(tx);
       await tx.exec(`PRAGMA user_version = ${HARNESS_SCHEMA_VERSION}`);
     });
   }
@@ -273,7 +226,7 @@ export async function startRun(
     }
     // The confirmation flag belongs to the current proposal only. Clearing it
     // lets the next proposal be confirmed. The previous operation id still
-    // replays, and that proposal id still has its stub row.
+    // replays from the harness operation record.
     await tx.run(
       `UPDATE harness_sessions
        SET state = 'running', run_token = ?, error_code = NULL, error_message = NULL,
@@ -428,19 +381,19 @@ export async function failInterruptedSessions(db: SqlExecutor, now: number): Pro
   return pending.length;
 }
 
-export async function listStubAnnotations(db: SqlExecutor): Promise<StubAnnotation[]> {
-  const rows = await db.all<AnnotationRow>(
-    'SELECT * FROM harness_stub_annotations ORDER BY created_at ASC, id ASC',
-  );
-  return rows.map(mapAnnotation);
-}
-
-function resultFromOperation(row: OperationRow): StubCommitResult {
-  const parsed = JSON.parse(row.result_json) as StubCommitResult;
+function resultFromOperation(row: OperationRow): HarnessOperationResult {
+  const parsed = JSON.parse(row.result_json) as HarnessOperationResult;
   return { ...parsed, replayed: true };
 }
 
-export async function readStubResult(db: SqlExecutor, operationId: string): Promise<StubCommitResult | null> {
+/**
+ * Harness-side record of a commit that already landed in stome.db. This is
+ * session bookkeeping, never the annotation itself.
+ */
+export async function readHarnessOperation(
+  db: SqlExecutor,
+  operationId: string,
+): Promise<HarnessOperationResult | null> {
   const existing = await db.get<OperationRow>('SELECT result_json FROM harness_operations WHERE id = ?', [operationId]);
   return existing ? resultFromOperation(existing) : null;
 }
@@ -477,7 +430,7 @@ export async function recordFoundationPin(
       input.operationId,
     ]);
     if (!existing) {
-      const result: StubCommitResult = {
+      const result: HarnessOperationResult = {
         replayed: false,
         annotationId: input.annotationId,
         operationId: input.operationId,
@@ -530,102 +483,49 @@ export async function recordFoundationEdit(
 }
 
 /**
- * Temporary stand-in for the Foundation commit (#36).
- * Writes only harness_stub_annotations. Re-checks the assessed request.
- * A duplicate operation id returns the original result and does not write again.
+ * A confirmed answer is written by createCommit in stome.db. The harness only
+ * records that the operation landed so a replay can repair the session flag.
  */
-export async function commitStubAnnotation(
-  db: SqlExecutor,
-  request: FoundationAnnotationRequest,
-  sessionId: string,
-  now: number,
-): Promise<StubCommitResult> {
-  if (request.confirmed !== true || request.source !== 'ai' || request.kind !== 'annotation.create') {
-    throw new HarnessError('confirmation_required', 'The stub only accepts a confirmed AI annotation request');
-  }
-  const existing = await db.get<OperationRow>('SELECT result_json FROM harness_operations WHERE id = ?', [
-    request.opId,
-  ]);
-  if (existing) {
-    return resultFromOperation(existing);
-  }
-  const annotationId = `stub-${request.opId}`;
-  try {
-    return await db.transaction(async (tx) => {
-      const again = await tx.get<OperationRow>('SELECT result_json FROM harness_operations WHERE id = ?', [
-        request.opId,
-      ]);
-      if (again) {
-        return resultFromOperation(again);
-      }
-      const session = await requireSession(tx, sessionId);
-      if (session.confirmedOperationId) {
-        throw new HarnessError('already_confirmed', 'This proposal was already saved');
-      }
-      if (session.proposal?.id !== request.payload.proposalId) {
-        throw new HarnessError('proposal_mismatch', 'The saved proposal does not match this confirmation');
-      }
-      const consumed = await tx.get<{ id: string }>(
-        'SELECT id FROM harness_stub_annotations WHERE proposal_id = ?',
-        [request.payload.proposalId],
-      );
-      if (consumed) {
-        throw new HarnessError('already_confirmed', 'This proposal was already saved');
-      }
-      await tx.run(
-        `INSERT INTO harness_stub_annotations (
-          id, proposal_id, operation_id, room_id, chunk_id, note_id, type, body,
-          anchor_start, anchor_end, chunk_revision, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, 'ai_answer', ?, ?, ?, ?, ?)`,
-        [
-          annotationId,
-          request.payload.proposalId,
-          request.opId,
-          request.payload.roomId,
-          request.payload.chunkId,
-          request.payload.noteId,
-          request.payload.body,
-          request.payload.anchorStart,
-          request.payload.anchorEnd,
-          request.expectedRevision,
-          now,
-        ],
-      );
-      const result: StubCommitResult = {
-        replayed: false,
-        annotationId,
-        operationId: request.opId,
-      };
-      await tx.run('INSERT INTO harness_operations (id, result_json, created_at) VALUES (?, ?, ?)', [
-        request.opId,
-        JSON.stringify({ ...result }),
-        now,
-      ]);
-      await tx.run(
-        `UPDATE harness_sessions
-         SET confirmed_operation_id = ?, updated_at = ?
-         WHERE id = ? AND confirmed_operation_id IS NULL AND proposal_json IS NOT NULL`,
-        [request.opId, now, sessionId],
-      );
-      const saved = await tx.get<{ confirmed_operation_id: string | null }>(
-        'SELECT confirmed_operation_id FROM harness_sessions WHERE id = ?',
-        [sessionId],
-      );
-      if (saved?.confirmed_operation_id !== request.opId) {
-        throw new HarnessError('already_confirmed', 'This proposal was already saved');
-      }
-      return result;
-    });
-  } catch (error) {
-    if (error instanceof HarnessError) {
-      throw error;
-    }
-    const raced = await db.get<OperationRow>('SELECT result_json FROM harness_operations WHERE id = ?', [
-      request.opId,
-    ]);
-    if (raced) {
-      return resultFromOperation(raced);
-    }
-    throw error;
-  }
+
+export type HarnessSessionSummary = {
+  id: string;
+  roomId: string;
+  state: SessionState;
+  question: string;
+  chunkCount: number;
+  isEdit: boolean;
+  errorCode: string | null;
+  errorMessage: string | null;
+  hasPinnedAnswer: boolean;
+  updatedAt: number;
+};
+
+/** Newest-first list for the companion screen. Read-only. */
+export async function listSessionSummaries(db: SqlExecutor, limit = 50): Promise<HarnessSessionSummary[]> {
+  const rows = await db.all<
+    SessionRow & { question: string | null }
+  >(
+    `SELECT s.*, (
+       SELECT m.body FROM harness_messages m
+       WHERE m.session_id = s.id AND m.role = 'user'
+       ORDER BY m.created_at ASC, m.id ASC LIMIT 1
+     ) AS question
+     FROM harness_sessions s ORDER BY s.updated_at DESC, s.id DESC LIMIT ?`,
+    [limit],
+  );
+  return rows.map((row) => {
+    const session = mapSession(row);
+    return {
+      id: session.id,
+      roomId: session.roomId,
+      state: session.state,
+      question: row.question ?? '',
+      chunkCount: session.selectedChunkIds.length,
+      isEdit: session.proposal?.type === 'chunk_edit',
+      errorCode: session.errorCode,
+      errorMessage: session.errorMessage,
+      hasPinnedAnswer: session.confirmedOperationId !== null,
+      updatedAt: session.updatedAt,
+    };
+  });
 }

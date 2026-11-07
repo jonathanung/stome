@@ -1,9 +1,10 @@
 import { randomUUID } from 'expo-crypto';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, FlatList, ScrollView, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { Badge, createStyles } from '../../../design-theme/src/primitives';
 import { createCommit } from '../../data/commit';
 import type { Room } from '../../data/models';
 import { listChunks, listRooms } from '../../data/queries';
@@ -14,7 +15,9 @@ import { pdfPathSubjects, pdfSourceIdentity } from '../../import/pdf/parse';
 import { pickNotes, type PickedNote } from '../../import/pick-notes';
 import { destinationForMapping, unsetRoomMapping, type RoomMapping } from '../../import/room-map';
 import { changeSourcePath, changeSubjects, createSubjectReview, type SubjectReview } from '../../import/review-draft';
+import { ImportChooseFiles, ImportSteps } from './import-choose-files';
 import { RoomMappingControl } from './room-mapping';
+import { router } from 'expo-router';
 
 interface Draft extends SubjectReview {
   id: string;
@@ -31,14 +34,23 @@ function applyOnenoteFolders<T extends SubjectReview>(note: PickedNote, draft: T
 }
 
 function Action({ label, onPress, disabled = false }: { label: string; onPress(): void; disabled?: boolean }) {
+  const styles = useStyles();
   return <Pressable accessibilityRole="button" accessibilityState={{ disabled }} disabled={disabled} onPress={onPress} style={[styles.button, disabled && styles.disabled]}><Text style={styles.buttonText}>{label}</Text></Pressable>;
 }
 
 function Field({ label, value, onChangeText, disabled = false }: { label: string; value: string; onChangeText(value: string): void; disabled?: boolean }) {
+  const styles = useStyles();
   return <View style={styles.field}><Text style={styles.label}>{label}</Text><TextInput accessibilityLabel={label} value={value} onChangeText={onChangeText} editable={!disabled} autoCapitalize="none" autoCorrect={false} style={styles.input} /></View>;
 }
 
+function destinationLabel(mapping: RoomMapping, rooms: readonly Room[]): string {
+  const destination = destinationForMapping(mapping);
+  if (destination && 'roomId' in destination) return rooms.find((room) => room.id === destination.roomId)?.name ?? 'unavailable';
+  return destination?.name ?? '';
+}
+
 export default function NoteImportScreen() {
+  const styles = useStyles();
   const sqlite = useSQLiteContext();
   const db = useMemo(() => expoDriver(sqlite), [sqlite]);
   const commit = useMemo(() => createCommit(db, { now: Date.now, newId: randomUUID }), [db]);
@@ -48,8 +60,11 @@ export default function NoteImportScreen() {
   const [errors, setErrors] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
+  const [stage, setStage] = useState<'choose' | 'review'>('choose');
   const [preview, setPreview] = useState<{ title: string; bodies: string[] } | null>(null);
 
+  const mapped = drafts.filter((draft) => destinationForMapping(draft.mapping)).length;
+  const needRoom = drafts.length - mapped;
   const refresh = useCallback(async () => setRooms(await listRooms(db)), [db]);
   useEffect(() => {
     let active = true;
@@ -102,13 +117,37 @@ export default function NoteImportScreen() {
     } catch (error) { setErrors([String(error)]); }
   };
 
+  if (stage === 'choose') {
+    return (
+      <SafeAreaView edges={['bottom']} style={styles.root}>
+        <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.wide}>
+            <ImportChooseFiles
+              collection={collection} onCollection={setCollection} busy={busy}
+              rows={drafts.map((d) => ({ id: d.id, name: d.note.path, path: d.path, disabled: d.done }))}
+              onPath={(id, path) => changeReview(id, (draft) => applyOnenoteFolders(draft.note, changeSourcePath(draft, path)))}
+              onRemove={(id) => setDrafts((items) => items.filter((item) => item.id !== id))}
+              onChoose={choose}
+              onCancel={() => { setDrafts([]); setErrors([]); }}
+              onPreview={() => setStage('review')}
+              onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+            />
+            {errors.map((error, i) => <Text key={i} accessibilityRole="alert" style={styles.error}>{error}</Text>)}
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView edges={['bottom']} style={styles.root}>
       <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <FlatList
           data={drafts} keyExtractor={(item) => item.id} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.page}
           ListHeaderComponent={<View style={styles.section}>
-            <Text style={styles.title}>Bring your notes</Text>
+            <ImportSteps current={2} />
+            <Action label="Back to files" onPress={() => setStage('choose')} />
+            <Text style={styles.title}>Review and pick rooms</Text>
             <Text style={styles.text}>Import Markdown, an HTML, MHTML, or DOCX file exported from OneNote, or a PDF (for example a GoodNotes, OneNote or Freeform export). Choose up to 20 files: 1 MiB each, or 8 MiB for a PDF. From a PDF only selectable text is imported, one chunk per page; handwriting and images are not recognized. Native .one files and ink are not imported.</Text>
             <Field label="Source collection" value={collection} onChangeText={setCollection} disabled={busy} />
             <Text style={styles.hint}>Use the same collection and source paths when re-importing. Review each note before confirming.</Text>
@@ -118,6 +157,7 @@ export default function NoteImportScreen() {
           </View>}
           renderItem={({ item }) => <View style={styles.card}>
             <Text style={styles.heading}>{item.note.title}</Text>
+            {item.done ? <Badge tone="success" label="imported" /> : destinationForMapping(item.mapping) ? <Badge tone="success" label={`→ ${destinationLabel(item.mapping, rooms)}`} /> : <Badge tone="danger" label="needs a room" />}
             <Text style={styles.text}>{item.note.bodies.length} chunks · suggested subjects need review</Text>
             {item.note.warnings.map((warning) => <Text key={warning} style={styles.hint}>{warning}</Text>)}
             {item.folderWarning ? <Text style={styles.hint}>{item.folderWarning}</Text> : null}
@@ -130,6 +170,7 @@ export default function NoteImportScreen() {
             {item.result ? <Text accessibilityLiveRegion="polite" style={item.done ? styles.text : styles.error}>{item.result}</Text> : null}
           </View>}
           ListFooterComponent={<View style={styles.section}>
+            {drafts.length ? <Text style={styles.hint}>{`${mapped} of ${drafts.length} notes have a room${needRoom ? ` · ${needRoom} need a room before you can save` : ''}`}</Text> : null}
             <Text style={styles.heading}>Your rooms</Text>
             {rooms.length ? rooms.map((room) => <Action key={room.id} label={`View ${room.name}`} onPress={() => showRoom(room)} />) : <Text style={styles.hint}>Imported notes will appear here. Imports do not award study rewards.</Text>}
           </View>}
@@ -142,20 +183,21 @@ export default function NoteImportScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#f6f4ee' },
+const useStyles = createStyles((theme) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: theme.color.bg.canvas },
   page: { padding: 20, gap: 20, width: '100%', maxWidth: 720, alignSelf: 'center', paddingBottom: 48 },
   section: { gap: 12 },
-  card: { backgroundColor: '#fffdf8', padding: 20, gap: 12, borderRadius: 18, borderWidth: 1, borderColor: '#d8d3c8' },
-  title: { fontSize: 30, fontWeight: '700', color: '#292820' },
-  heading: { fontSize: 22, fontWeight: '600', color: '#292820' },
-  text: { fontSize: 17, lineHeight: 25, color: '#3f4036' },
-  hint: { fontSize: 14, lineHeight: 21, color: '#626453' },
-  label: { fontSize: 15, color: '#3f4036', fontWeight: '600' },
+  wide: { padding: 20, paddingBottom: 48, gap: 12 },
+  card: { backgroundColor: theme.color.bg.surface, padding: 20, gap: 12, borderRadius: 18, borderWidth: 1, borderColor: theme.color.border.hairline },
+  title: { ...theme.text('screenTitle'), color: theme.color.text.primary },
+  heading: { ...theme.text('title'), color: theme.color.text.primary },
+  text: { ...theme.text('body'), color: theme.color.text.secondary },
+  hint: { ...theme.text('bodySmall'), color: theme.color.text.tertiary },
+  label: { ...theme.text('buttonCompact'), color: theme.color.text.secondary, },
   field: { gap: 6 },
-  input: { minHeight: 48, borderWidth: 1, borderColor: '#777b67', borderRadius: 10, padding: 12, fontSize: 17, color: '#292820', backgroundColor: '#fffdf8' },
-  button: { minHeight: 48, borderRadius: 12, padding: 12, backgroundColor: '#424e35', justifyContent: 'center', alignItems: 'center' },
-  buttonText: { fontSize: 16, fontWeight: '600', color: '#ffffff' },
+  input: { ...theme.text('body'), minHeight: 48, borderWidth: 1, borderColor: theme.color.border.strong, borderRadius: 10, padding: 12, color: theme.color.text.primary, backgroundColor: theme.color.bg.surface },
+  button: { minHeight: 48, borderRadius: 12, padding: 12, backgroundColor: theme.color.accent.bg, justifyContent: 'center', alignItems: 'center' },
+  buttonText: { ...theme.text('buttonCompact'), color: theme.color.accent.fg },
   disabled: { opacity: 0.5 },
-  error: { fontSize: 15, lineHeight: 22, color: '#9b2929' },
-});
+  error: { ...theme.text('bodySmall'), color: theme.color.status.danger.text },
+}));

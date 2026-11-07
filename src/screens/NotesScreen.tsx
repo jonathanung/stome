@@ -13,6 +13,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { createStyles } from '../../design-theme/src/primitives';
 
 import { createNote, listNotes, type Note } from '../db/notes';
 
@@ -35,6 +36,7 @@ function NoteForm({
   onChangeBody,
   onSubmit,
 }: NoteFormProps) {
+  const styles = useStyles();
   const disabled = saving || title.trim().length === 0;
   return (
     <View>
@@ -85,6 +87,7 @@ function NoteForm({
 }
 
 function NoteCard({ note }: { note: Note }) {
+  const styles = useStyles();
   return (
     <View style={styles.note} testID={`note-${note.id}`}>
       <Text style={styles.noteTitle}>{note.title}</Text>
@@ -95,10 +98,12 @@ function NoteCard({ note }: { note: Note }) {
 }
 
 function EmptyNotes() {
+  const styles = useStyles();
   return <Text style={styles.empty}>No notes yet.</Text>;
 }
 
 export function NotesScreen() {
+  const styles = useStyles();
   const db = useSQLiteContext();
   const [notes, setNotes] = useState<Note[]>([]);
   const [title, setTitle] = useState('');
@@ -194,9 +199,9 @@ export function NotesScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = createStyles((theme) => StyleSheet.create({
   screen: {
-    backgroundColor: '#ffffff',
+    backgroundColor: theme.color.bg.surface,
     flex: 1,
     paddingTop: Platform.OS === 'android' ? (NativeStatusBar.currentHeight ?? 0) : 0,
   },
@@ -217,28 +222,23 @@ const styles = StyleSheet.create({
     gap: 8,
     justifyContent: 'center',
   },
-  title: {
-    color: '#111111',
-    fontSize: 32,
-    fontWeight: '700',
+  title: { ...theme.text('screenTitle'),
+    color: theme.color.text.primary,
   },
-  subtitle: {
-    color: '#555555',
-    fontSize: 15,
+  subtitle: { ...theme.text('bodySmall'),
+    color: theme.color.text.secondary,
     marginTop: 4,
   },
-  label: {
-    color: '#333333',
-    fontSize: 13,
+  label: { ...theme.text('label'),
+    color: theme.color.text.secondary,
     marginBottom: 6,
     marginTop: 16,
   },
-  input: {
-    borderColor: '#cccccc',
+  input: { ...theme.text('bodySmall'),
+    borderColor: theme.color.border.hairline,
     borderRadius: 8,
     borderWidth: 1,
-    color: '#111111',
-    fontSize: 16,
+    color: theme.color.text.primary,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
@@ -248,7 +248,7 @@ const styles = StyleSheet.create({
   },
   button: {
     alignItems: 'center',
-    backgroundColor: '#111111',
+    backgroundColor: theme.color.accent.bg,
     borderRadius: 8,
     marginTop: 12,
     paddingVertical: 12,
@@ -256,46 +256,37 @@ const styles = StyleSheet.create({
   buttonDisabled: {
     opacity: 0.45,
   },
-  buttonText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '600',
+  buttonText: { ...theme.text('buttonCompact'),
+    color: theme.color.accent.fg,
   },
   error: {
-    color: '#8a1f1f',
+    color: theme.color.status.danger.text,
     marginTop: 8,
   },
-  section: {
-    color: '#111111',
-    fontSize: 18,
-    fontWeight: '600',
+  section: { ...theme.text('cardTitle'),
+    color: theme.color.text.primary,
     marginTop: 24,
   },
-  empty: {
-    color: '#555555',
-    fontSize: 15,
+  empty: { ...theme.text('bodySmall'),
+    color: theme.color.text.secondary,
     marginTop: 8,
   },
   note: {
-    borderColor: '#e2e2e2',
+    borderColor: theme.color.border.hairline,
     borderRadius: 8,
     borderWidth: 1,
     marginTop: 12,
     padding: 12,
   },
-  noteTitle: {
-    color: '#111111',
-    fontSize: 17,
-    fontWeight: '600',
+  noteTitle: { ...theme.text('cardTitle'),
+    color: theme.color.text.primary,
   },
-  noteBody: {
-    color: '#333333',
-    fontSize: 15,
+  noteBody: { ...theme.text('bodySmall'),
+    color: theme.color.text.secondary,
     marginTop: 4,
   },
-  noteMeta: {
-    color: '#777777',
-    fontSize: 12,
+  noteMeta: { ...theme.text('label'),
+    color: theme.color.text.tertiary,
     marginTop: 6,
   },
   include: {
@@ -304,21 +295,17 @@ const styles = StyleSheet.create({
     minHeight: 44,
     justifyContent: 'center',
   },
-  includeText: {
-    color: '#111111',
-    fontSize: 13,
-    fontWeight: '600',
+  includeText: { ...theme.text('label'),
+    color: theme.color.text.primary,
   },
   answer: {
-    borderTopColor: '#e2e2e2',
+    borderTopColor: theme.color.border.hairline,
     borderTopWidth: 1,
     marginTop: 8,
     paddingTop: 8,
   },
-  answerLabel: {
-    color: '#333333',
-    fontSize: 12,
-    fontWeight: '600',
+  answerLabel: { ...theme.text('label'),
+    color: theme.color.text.secondary,
     marginBottom: 4,
   },
-});
+}));

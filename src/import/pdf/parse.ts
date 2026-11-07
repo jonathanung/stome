@@ -155,7 +155,8 @@ export async function parsePdf(input: { path: string; bytes: Uint8Array }): Prom
 
   const title = infoTitle(stringBytes(doc.resolve(doc.info()?.entries.get('Title'))))
     ?? (path.split('/').pop() ?? path).replace(PDF_EXTENSION, '');
-  return { path, title: title.slice(0, 200), bodies, subjects: [], warnings: [...warnings], exportFormat: 'pdf', pages: bodyPages };
+  return { path, title: title.slice(0, 200), bodies, subjects: [], warnings: [...warnings], exportFormat: 'pdf', pages: bodyPages,
+    metadata: { headings: [], properties: [], tags: [], wikilinks: [], skippedAttachments: [] } };
 }
 
 export { MAX_PAGES };

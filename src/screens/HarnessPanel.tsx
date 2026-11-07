@@ -1,9 +1,11 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { createStyles } from '../../design-theme/src/primitives';
 
 import { expoDriver } from '../db/expo-driver';
 import { companionProvider } from '../harness/companionClient';
+import { updateCompanionSettings, useCompanionSettings } from '../harness/companionSettings';
 import {
   MOCK_SCENARIOS,
   chunkViewFromFoundation,
@@ -12,8 +14,11 @@ import {
   type StoredProposal,
 } from '../harness/contract';
 import { harnessExecutor, openHarnessDatabase } from '../harness/expoDb';
-import { AnswerCitations } from '../features/ask/AnswerCitations';
-import { visiblePinError, type ChunkFocus } from '../features/ask/citations';
+import { AskProposalCard } from '../features/ask/AskProposalCard';
+import { AskSheetPhone } from '../features/ask/AskSheetPhone';
+import { EditProposalReview, StaleEditNotice } from '../features/ask/EditProposalReview';
+import { chunkLabel, citationsForProposal, visiblePinError, type ChunkFocus } from '../features/ask/citations';
+import { harnessColors } from '../features/ask/harnessColors';
 import {
   beginQuestion,
   confirmFoundationQuestion,
@@ -41,17 +46,22 @@ type HarnessPanelProps = {
 
 type Activity = 'idle' | 'asking' | 'confirming' | 'discarding';
 
-const DEFAULT_COMPANION_URL = 'http://127.0.0.1:8787';
+const PHONE_MAX_WIDTH = 600;
 
 export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }: HarnessPanelProps) {
+  const styles = useStyles();
+  const isPhone = useWindowDimensions().width < PHONE_MAX_WIDTH;
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [askedPrompt, setAskedPrompt] = useState<string | null>(null);
   const [database, setDatabase] = useState<SQLiteDatabase | null>(null);
   const [databaseError, setDatabaseError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [companionUrl, setCompanionUrl] = useState(DEFAULT_COMPANION_URL);
-  const [token, setToken] = useState('');
+  const { url: companionUrl, token, scenario } = useCompanionSettings();
+  const setCompanionUrl = (url: string) => updateCompanionSettings({ url });
+  const setToken = (next: string) => updateCompanionSettings({ token: next });
+  const setScenario = (next: MockScenario) => updateCompanionSettings({ scenario: next });
   const [prompt, setPrompt] = useState('');
   const [purpose, setPurpose] = useState<NotePurpose>('answer');
-  const [scenario, setScenario] = useState<MockScenario>('success');
   const [session, setSession] = useState<HarnessSession | null>(null);
   const [proposal, setProposal] = useState<StoredProposal | null>(null);
   const [status, setStatus] = useState('idle');
@@ -126,7 +136,7 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
     return chunks.filter((chunk) => wanted.has(chunk.id)).map(chunkViewFromFoundation);
   }
 
-  async function onAsk(continueSession: boolean) {
+  async function onAsk(continueSession: boolean, promptOverride?: string) {
     if (!database) {
       setError(databaseError ?? 'The harness database is not open');
       return;
@@ -142,6 +152,8 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
     setActivity('asking');
     setError(null);
     setProposal(null);
+    setAskedPrompt((promptOverride ?? prompt).trim());
+    if (isPhone) setSheetOpen(true);
     const controller = new AbortController();
     abortRef.current = controller;
     try {
@@ -149,7 +161,7 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
       const selected = continueSession ? pool : viewsFor(selectedIds);
       const prepared = await beginQuestion(harnessExecutor(database), {
         chunks: selected,
-        prompt,
+        prompt: promptOverride ?? prompt,
         continueSessionId: continueSession ? session?.id : null,
       });
       runRef.current = prepared;
@@ -252,9 +264,60 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
     busy || !database || !session || pending || (session.state !== 'failed' && session.state !== 'cancelled' && session.state !== 'completed');
   const confirmDisabled = busy || !session?.pendingOperationId;
 
+  const sheetCitations =
+    proposal && !isEditProposal(proposal)
+      ? citationsForProposal(session?.selectedChunkIds ?? [], chunks, proposal)
+      : null;
+  const includedLabels = (session?.selectedChunkIds?.length ? session.selectedChunkIds : selectedIds)
+    .map((id) => chunks.find((chunk) => chunk.id === id))
+    .filter((chunk): chunk is ChunkTarget => chunk !== undefined)
+    .map((chunk) => chunkLabel(chunk.body));
+
   return (
     <View style={styles.box} testID="harness-panel">
+      {isPhone ? (
+        <AskSheetPhone
+          busy={busy}
+          canConfirm={!confirmDisabled}
+          error={error}
+          included={includedLabels}
+          onAdd={() => setSheetOpen(false)}
+          onClose={() => setSheetOpen(false)}
+          onConfirm={() => {
+            void onConfirm();
+          }}
+          onDecline={() => {
+            void onDiscard();
+          }}
+          onFollowUp={(text) => {
+            void onAsk(true, text);
+          }}
+          onOpenSource={onOpenCitation}
+          problems={sheetCitations?.problems.map((problem) => problem.message) ?? []}
+          proposal={
+            proposal
+              ? isEditProposal(proposal)
+                ? { kind: 'edit', body: proposal.body, previousBody: proposal.previousBody }
+                : { kind: 'answer', body: proposal.body }
+              : null
+          }
+          question={askedPrompt}
+          sources={(sheetCitations?.citations ?? []).map((citation) => ({
+            chunkId: citation.chunkId,
+            label: citation.label,
+            quote: citation.anchored ? citation.quote : null,
+            anchorStart: citation.anchorStart,
+            anchorEnd: citation.anchorEnd,
+          }))}
+          visible={sheetOpen}
+        />
+      ) : null}
       <Text style={styles.heading}>Ask about selected chunks</Text>
+      {isPhone && (proposal || askedPrompt) && !sheetOpen ? (
+        <Pressable accessibilityRole="button" onPress={() => setSheetOpen(true)} style={styles.secondary} testID="open-ask-sheet">
+          <Text style={styles.secondaryText}>{proposal ? 'Review proposed answer' : 'Open ask'}</Text>
+        </Pressable>
+      ) : null}
       <Text style={styles.runtime} testID="harness-runtime">
         Mock companion. A confirmed answer is saved on the chunk. An edit replaces one whole note and stays marked AI. Older demo pins stay in the harness file and are not copied.
       </Text>
@@ -389,60 +452,36 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
           <Text style={styles.secondaryText}>Continue</Text>
         </Pressable>
       </View>
-      {proposal ? (
-        <View style={styles.proposal} testID="proposal-card">
-          {isEditProposal(proposal) ? (
-            <>
-              <Text style={styles.proposalTitle}>Proposed note edit</Text>
-              <Text style={styles.label}>Before</Text>
-              <Text testID="proposal-before">{proposal.previousBody}</Text>
-              <Text style={styles.label}>After</Text>
-              <Text testID="proposal-after">{proposal.body}</Text>
-              <Text style={styles.help}>{`Based on revision ${proposal.chunkRevision}. The saved note stays unchanged until you confirm.`}</Text>
-            </>
-          ) : (
-            <>
-              <Text style={styles.proposalTitle}>Proposed AI answer</Text>
-              <Text testID="proposal-body">{proposal.body}</Text>
-              <AnswerCitations
-                chunks={chunks}
-                onOpen={onOpenCitation}
-                proposal={proposal}
-                selectedChunkIds={session?.selectedChunkIds ?? []}
-              />
-              <Text style={styles.help}>Decline writes nothing. Confirm pins this answer on the cited passage.</Text>
-            </>
-          )}
-          <View style={styles.actions}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ disabled: confirmDisabled }}
-              disabled={confirmDisabled}
-              onPress={() => {
-                void onConfirm();
-              }}
-              style={[styles.button, confirmDisabled ? styles.buttonDisabled : null]}
-              testID="confirm-button"
-            >
-              <Text style={styles.buttonText}>{isEditProposal(proposal) ? 'Confirm and save' : 'Confirm and pin'}</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={isEditProposal(proposal) ? 'Discard the edit' : 'Decline without writing'}
-              accessibilityState={{ disabled: busy }}
-              disabled={busy}
-              onPress={() => {
-                void onDiscard();
-              }}
-              style={[styles.secondary, busy ? styles.buttonDisabled : null]}
-              testID="discard-button"
-            >
-              <Text style={styles.secondaryText}>{isEditProposal(proposal) ? 'Discard' : 'Decline'}</Text>
-            </Pressable>
-          </View>
-        </View>
+      {proposal && !isEditProposal(proposal) ? (
+        <AskProposalCard
+          body={proposal.body}
+          busy={busy}
+          chunks={chunks}
+          confirmDisabled={confirmDisabled}
+          onConfirm={() => {
+            void onConfirm();
+          }}
+          onDecline={() => {
+            void onDiscard();
+          }}
+          onOpen={onOpenCitation}
+          proposal={proposal}
+          selectedChunkIds={session?.selectedChunkIds ?? []}
+        />
       ) : null}
-      {error ? (
+      {proposal && isEditProposal(proposal) ? (
+        <EditProposalReview
+          proposal={proposal}
+          title={`${chunks.find((chunk) => chunk.id === proposal.chunkId)?.body.split('\n')[0]?.slice(0, 60) || 'Chunk'}`}
+          confirmDisabled={confirmDisabled}
+          busy={busy}
+          onConfirm={() => { void onConfirm(); }}
+          onDiscard={() => { void onDiscard(); }}
+        />
+      ) : null}
+      {error && proposal && isEditProposal(proposal) && error.startsWith('Stale revision') ? (
+        <StaleEditNotice disabled={busy} onAskAgain={() => { void onAsk(false); }} />
+      ) : error ? (
         <Text accessibilityRole="alert" style={styles.error} testID="harness-error">
           {error}
         </Text>
@@ -456,113 +495,105 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
   );
 }
 
-const styles = StyleSheet.create({
-  box: {
-    borderColor: '#cccccc',
-    borderRadius: 8,
-    borderWidth: 1,
-    marginTop: 16,
-    padding: 12,
-  },
-  heading: {
-    color: '#111111',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  runtime: {
-    color: '#555555',
-    fontSize: 12,
-    marginTop: 4,
-  },
-  help: {
-    color: '#555555',
-    fontSize: 13,
-    marginTop: 6,
-  },
-  label: {
-    color: '#333333',
-    fontSize: 13,
-    marginBottom: 6,
-    marginTop: 12,
-  },
-  input: {
-    borderColor: '#cccccc',
-    borderRadius: 8,
-    borderWidth: 1,
-    color: '#111111',
-    fontSize: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  scenarios: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 12,
-  },
-  scenario: {
-    borderColor: '#cccccc',
-    borderRadius: 8,
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  scenarioSelected: {
-    backgroundColor: '#111111',
-    borderColor: '#111111',
-  },
-  scenarioText: {
-    color: '#111111',
-    fontSize: 13,
-  },
-  scenarioTextSelected: {
-    color: '#ffffff',
-    fontSize: 13,
-  },
-  actions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 12,
-  },
-  button: {
-    backgroundColor: '#111111',
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  buttonDisabled: {
-    opacity: 0.45,
-  },
-  buttonText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  secondary: {
-    borderColor: '#111111',
-    borderRadius: 8,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  secondaryText: {
-    color: '#111111',
-    fontSize: 16,
-  },
-  proposal: {
-    backgroundColor: '#f6f6f6',
-    borderRadius: 8,
-    marginTop: 12,
-    padding: 12,
-  },
-  proposalTitle: {
-    color: '#111111',
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  error: {
-    color: '#8a1f1f',
-    marginTop: 8,
-  },
+const useStyles = createStyles((theme) => {
+  const colors = harnessColors(theme.color);
+  return StyleSheet.create({
+    box: {
+      borderColor: colors.border,
+      borderRadius: 8,
+      borderWidth: 1,
+      marginTop: 16,
+      padding: 12,
+    },
+    heading: { ...theme.text('cardTitle'),
+      color: colors.heading,
+    },
+    runtime: { ...theme.text('label'),
+      color: colors.help,
+      marginTop: 4,
+    },
+    help: { ...theme.text('label'),
+      color: colors.help,
+      marginTop: 6,
+    },
+    label: { ...theme.text('label'),
+      color: colors.label,
+      marginBottom: 6,
+      marginTop: 12,
+    },
+    input: { ...theme.text('bodySmall'),
+      borderColor: colors.border,
+      borderRadius: 8,
+      borderWidth: 1,
+      color: colors.input,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+    },
+    scenarios: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginTop: 12,
+    },
+    scenario: {
+      borderColor: colors.border,
+      borderRadius: 8,
+      borderWidth: 1,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+    },
+    scenarioSelected: {
+      backgroundColor: colors.selectedFill,
+      borderColor: colors.selectedText,
+    },
+    scenarioText: { ...theme.text('label'),
+      color: colors.heading,
+    },
+    scenarioTextSelected: { ...theme.text('label'),
+      color: colors.selectedText,
+    },
+    actions: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginTop: 12,
+    },
+    button: {
+      backgroundColor: colors.selectedFill,
+      borderRadius: 8,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+    },
+    buttonDisabled: {
+      opacity: 0.45,
+    },
+    buttonText: { ...theme.text('buttonCompact'),
+      color: colors.selectedText,
+    },
+    secondary: {
+      borderColor: colors.heading,
+      borderRadius: 8,
+      borderWidth: 1,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+    },
+    secondaryText: { ...theme.text('bodySmall'),
+      color: colors.heading,
+    },
+    proposal: {
+      backgroundColor: colors.proposalSurface,
+      borderRadius: 8,
+      marginTop: 12,
+      padding: 12,
+    },
+    proposalTitle: {
+      color: colors.proposalTitle,
+      fontWeight: '600',
+      marginBottom: 4,
+    },
+    error: {
+      color: colors.error,
+      marginTop: 8,
+    },
+  });
 });
