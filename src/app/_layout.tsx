@@ -83,6 +83,7 @@ function AppStack() {
       <Stack.Screen name="recent" options={{ headerShown: false }} />
       <Stack.Screen name="rooms/[id]/review" options={{ headerShown: false }} />
       <Stack.Screen name="stone" options={{ headerShown: false }} />
+      <Stack.Screen name="whiteboard" options={{ headerShown: false }} />
     </Stack>
   );
 }
