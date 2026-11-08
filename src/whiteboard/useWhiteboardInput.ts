@@ -97,7 +97,7 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
         const now = Date.now();
         const last = refs.lastTapRef.current;
 
-        // Double-tap on a text element → open it for editing
+        // Double-tap on a text element → edit it
         if (
           hit?.type === 'text' &&
           last?.id === hit.id &&
@@ -114,6 +114,41 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
             screenY: syEl,
             value: el.text,
             isEditing: true,
+          });
+          refs.dragRef.current = null;
+          return;
+        }
+
+        // Double-tap on a shape → open text label editor centered on the shape
+        if (
+          hit &&
+          hit.type !== 'text' &&
+          hit.type !== 'freedraw' &&
+          last?.id === hit.id &&
+          now - last.time < DOUBLE_TAP_MS
+        ) {
+          refs.lastTapRef.current = null;
+          // Find or create a text element that is "bound" to this shape by convention:
+          // it has id = `${shape.id}__label`
+          const labelId = `${hit.id}__label`;
+          const existing = refs.elementsRef.current!.find((e) => e.id === labelId) as TextElement | undefined;
+          // Center of the shape in board coords
+          let cx = hit.x, cy = hit.y;
+          if ('width' in hit && 'height' in hit) {
+            const w = hit.width as number;
+            const h = hit.height as number;
+            cx = (w < 0 ? hit.x + w : hit.x) + Math.abs(w) / 2;
+            cy = (h < 0 ? hit.y + h : hit.y) + Math.abs(h) / 2;
+          }
+          const [sxLabel, syLabel] = boardToScreen(cx, cy, t);
+          refs.setTextEditRef.current!({
+            id: labelId,
+            x: cx,
+            y: cy,
+            screenX: sxLabel,
+            screenY: syLabel,
+            value: existing?.text ?? '',
+            isEditing: Boolean(existing),
           });
           refs.dragRef.current = null;
           return;

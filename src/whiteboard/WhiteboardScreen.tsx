@@ -137,8 +137,10 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
   );
   /* eslint-enable react-hooks/refs */
 
-  // Web: scroll-wheel zoom + Delete key
+  // Web: scroll-wheel pan/zoom + spacebar hand mode + Delete key
   const svgContainerRef = useRef<React.ElementRef<typeof View>>(null);
+  const spaceHandRef = useRef(false); // true while spacebar is held
+
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     const node = (svgContainerRef.current as unknown as { _nativeTag?: HTMLElement } | null)
@@ -147,17 +149,27 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const factor = e.deltaY < 0 ? 1.1 : 0.9;
-      setTransform((t) => {
-        const newScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, t.scale * factor));
-        const mx = e.offsetX;
-        const my = e.offsetY;
-        return {
-          scale: newScale,
-          offsetX: mx - (mx - t.offsetX) * (newScale / t.scale),
-          offsetY: my - (my - t.offsetY) * (newScale / t.scale),
-        };
-      });
+      if (e.ctrlKey || e.metaKey) {
+        // Pinch-to-zoom on trackpad or ctrl+scroll
+        const factor = e.deltaY < 0 ? 1.1 : 0.9;
+        setTransform((t) => {
+          const newScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, t.scale * factor));
+          const mx = e.offsetX;
+          const my = e.offsetY;
+          return {
+            scale: newScale,
+            offsetX: mx - (mx - t.offsetX) * (newScale / t.scale),
+            offsetY: my - (my - t.offsetY) * (newScale / t.scale),
+          };
+        });
+      } else {
+        // Plain scroll = pan (matches Excalidraw default)
+        setTransform((t) => ({
+          ...t,
+          offsetX: t.offsetX - e.deltaX,
+          offsetY: t.offsetY - e.deltaY,
+        }));
+      }
     };
 
     node.addEventListener('wheel', onWheel, { passive: false });
@@ -173,27 +185,42 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
     return () => { document.head.removeChild(el); };
   }, []);
 
-  // Delete key on web
+  // Delete key + spacebar hand mode on web
   useEffect(() => {
     if (Platform.OS !== 'web') return;
-    const onKey = (e: KeyboardEvent) => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === ' ' && !spaceHandRef.current && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) {
+        e.preventDefault();
+        spaceHandRef.current = true;
+        toolRef.current = 'hand';
+      }
       if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
         const id = selectedIdRef.current;
         if (!id) return;
         pushHistoryRef.current(elementsRef.current.filter((el) => el.id !== id));
         setSelectedId(null);
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === ' ' && spaceHandRef.current) {
+        spaceHandRef.current = false;
+        toolRef.current = tool;
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+    };
+  }, [tool]);
 
   function commitText(value: string) {
     if (!textEdit) return;
     const trimmed = value.trim();
 
     if (textEdit.isEditing) {
-      // Update existing text element
       if (trimmed.length > 0) {
         pushHistory(
           elements.map((e) =>
@@ -203,15 +230,16 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
           ),
         );
       } else {
-        // Empty → delete the element
         pushHistory(elements.filter((e) => e.id !== textEdit.id));
       }
     } else if (trimmed.length > 0) {
+      const isLabel = textEdit.id.includes('__label');
       const el: TextElement = {
         id: textEdit.id,
         type: 'text',
-        x: textEdit.x,
-        y: textEdit.y,
+        // For labels, center the text on the shape; for free text, place at tap point
+        x: isLabel ? textEdit.x - (trimmed.length * 7) : textEdit.x,
+        y: isLabel ? textEdit.y - 10 : textEdit.y,
         angle: 0,
         text: trimmed,
         fontSize: 20,
@@ -276,22 +304,24 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
           </G>
         </Svg>
 
-        {textEdit ? (
-          <TextInput
-            autoFocus
-            multiline
-            style={[
-              styles.textInput,
-              { left: textEdit.screenX, top: textEdit.screenY, fontSize: 20 * transform.scale, color: currentStyle.strokeColor },
-            ]}
-            value={textEdit.value}
-            onChangeText={(v) => setTextEdit((prev) => (prev ? { ...prev, value: v } : null))}
-            onBlur={() => commitText(textEdit.value)}
-            onSubmitEditing={() => commitText(textEdit.value)}
-            blurOnSubmit
-          />
-        ) : null}
       </View>
+
+      {/* TextInput rendered outside the PanResponder View so it receives mouse events on web */}
+      {textEdit ? (
+        <TextInput
+          autoFocus
+          multiline
+          style={[
+            styles.textInput,
+            { left: textEdit.screenX, top: textEdit.screenY, fontSize: 20 * transform.scale, color: currentStyle.strokeColor },
+          ]}
+          value={textEdit.value}
+          onChangeText={(v) => setTextEdit((prev) => (prev ? { ...prev, value: v } : null))}
+          onBlur={() => commitText(textEdit.value)}
+          onSubmitEditing={() => commitText(textEdit.value)}
+          blurOnSubmit
+        />
+      ) : null}
 
       {/* Delete button — shown when an element is selected */}
       {selectedId ? (
