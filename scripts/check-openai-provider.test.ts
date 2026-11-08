@@ -208,7 +208,7 @@ test('STOME_PROVIDER=openai|xai reports the vendor in /v1/status and never retur
     assert.ok(live);
     assert.deepEqual(live.status, { provider: vendor, model, live: true, tools: [...ALLOWED_TOOL_NAMES] });
     assert.ok(!live.banner.includes(secret));
-    assert.match(live.banner, new RegExp(`${keyEnv} env var: set`));
+    assert.match(live.banner, new RegExp(`${keyEnv} set \\(API billing\\)`));
     const origin = 'http://127.0.0.1:8081';
     const handle = await startCompanion({ origin, token: 'pair-token', expiresAt: Date.now() + 60_000, provider: live.provider, status: live.status });
     try {

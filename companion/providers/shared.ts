@@ -53,7 +53,10 @@ export function abortHarnessError(signal: AbortSignal): HarnessError {
 }
 
 /** Parse a model's JSON text into an object, or throw a normalized error. */
-export function parseJsonObject(text: string): Record<string, unknown> {
+export function parseJsonObject(raw: string): Record<string, unknown> {
+  // A model without enforced structured output may still wrap the object in a code fence.
+  const fenced = /^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/i.exec(raw);
+  const text = fenced ? fenced[1]! : raw;
   if (text.trim().length === 0) {
     throw new HarnessError('invalid_output', 'The model returned no text');
   }

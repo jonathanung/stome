@@ -231,18 +231,31 @@ export type LiveConfig = { provider: Provider; status: CompanionStatus; banner: 
 export async function liveConfigFromEnv(env: Record<string, string | undefined>): Promise<LiveConfig | null> {
   if (env.STOME_PROVIDER === 'openai' || env.STOME_PROVIDER === 'xai') {
     const vendor = env.STOME_PROVIDER;
-    const { createCompatibleProvider, sdkResponsesClient, parseOpenAiEffort, VENDORS } = await import('./providers/openai.ts');
-    const info = VENDORS[vendor];
-    const model = env.STOME_MODEL?.trim() || info.defaultModel;
-    const effort = parseOpenAiEffort(env.STOME_EFFORT);
+    const openai = await import('./providers/openai.ts');
+    const { getCredential, authFilePath } = await import('./auth/store.ts');
+    const { credentialSource } = await import('./auth/oauth.ts');
+    const info = openai.VENDORS[vendor];
+    const effort = openai.parseOpenAiEffort(env.STOME_EFFORT);
     const key = env[info.keyEnv]?.trim() || undefined;
+    // An API key always wins (platform billing). Otherwise use a stored
+    // subscription sign-in from `npm run companion:login -- <vendor>`.
+    const path = authFilePath(env);
+    const subscription = !key && getCredential(vendor, path) !== null;
+    const model = env.STOME_MODEL?.trim() || (subscription ? openai.SUBSCRIPTION_DEFAULT_MODEL[vendor] : info.defaultModel);
+    const client = subscription
+      ? openai.subscriptionResponsesClient(vendor, credentialSource(vendor, { path }))
+      : openai.sdkResponsesClient(vendor, key);
     const shownEffort = effort ?? (info.sendsEffort ? 'medium' : 'provider default');
+    const plan = vendor === 'openai' ? 'ChatGPT' : 'Grok';
+    const auth = key
+      ? `${info.keyEnv} set (API billing)`
+      : subscription
+        ? `signed in with your ${plan} subscription (billed to the plan)`
+        : `no ${info.keyEnv} and no sign-in, so every question will fail: set ${info.keyEnv} or run npm run companion:login -- ${vendor}`;
     return {
-      provider: createCompatibleProvider({ vendor, client: sdkResponsesClient(vendor, key), model, effort }),
+      provider: openai.createCompatibleProvider({ vendor, client, model, effort, subscription }),
       status: { provider: vendor, model, live: true, tools: [...ALLOWED_TOOL_NAMES] },
-      banner: `Provider: ${info.label} ${model} (effort ${shownEffort}). Live model calls cost money. ${info.keyEnv} env var: ${
-        key ? 'set' : 'not set, so every question will fail until it is'
-      }.`,
+      banner: `Provider: ${info.label} ${model} (effort ${shownEffort}). Live model calls cost money. Credentials: ${auth}.`,
     };
   }
   if (env.STOME_PROVIDER !== 'anthropic' && env.STOME_PROVIDER !== 'api-key') {

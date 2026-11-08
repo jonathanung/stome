@@ -82,8 +82,26 @@ XAI_API_KEY=...       STOME_PROVIDER=xai       npm run companion   # Grok
 - Retries are capped at 1 so they cannot outlast the 30 s limit. Cancel and the limit abort the HTTP call.
 - Note, board, and import text is wrapped in `<content>` delimiters and the model is told it is data, not instructions. Output still goes through the same parsers and scope checks as the mock, and nothing is written without a human confirm.
 - `notes.proposeAnnotation` asks the model for a verbatim quote and computes `anchorStart`/`anchorEnd` with `indexOf`. If the quote is not found, the first sentence (or the whole chunk, if short) is anchored.
-- Subscription sign-in (ChatGPT/Codex or Grok plans through OAuth) is not supported; the companion uses API keys only. Codex models are reachable through `STOME_PROVIDER=openai` with `STOME_MODEL` set to a Codex model id.
 - `npm run check` and CI use the mock and fake clients in `scripts/check-live-provider.test.ts` and `scripts/check-openai-provider.test.ts`. No test calls the network.
+
+### Subscription sign-in (ChatGPT and Grok plans)
+
+Instead of an API key, the companion can use your ChatGPT Plus/Pro or Grok subscription:
+
+```bash
+npm run companion:login -- openai      # "Sign in with ChatGPT" in the browser
+npm run companion:login -- xai         # Grok sign-in in the browser
+npm run companion:login -- status      # who is signed in (never prints tokens)
+npm run companion:login -- logout openai
+STOME_PROVIDER=openai npm run companion   # or STOME_PROVIDER=xai
+```
+
+- An API key always wins: with `OPENAI_API_KEY` / `XAI_API_KEY` set, the companion uses the platform API and its billing. Unset it to use the subscription. The startup banner says which one is active.
+- Tokens are stored in `~/.stome/auth.json` (file 0600, directory 0700; override with `STOME_AUTH_FILE`), refresh automatically about 2 minutes before expiry, and rotated refresh tokens are saved. Only the companion reads the file; the app never sees a token, and `/v1/status` reports none.
+- **ChatGPT:** questions go to the ChatGPT backend (`chatgpt.com/backend-api/codex`, Responses API, streamed, `store: false`) with your access token and `ChatGPT-Account-Id`, billed to the plan. Only the Codex model set is served; the default is `gpt-5.5` (override with `STOME_MODEL`). That backend does not document Structured Outputs, so the JSON schema goes in the instructions and the shared parsers still reject anything malformed.
+- **Grok:** the OAuth token is used as the bearer for the same `api.x.ai` Responses API, with the same strict JSON schema output as key mode.
+- The sign-in reuses the vendors' public desktop CLI registrations (the Codex CLI's for OpenAI, the Grok CLI's for xAI), the same approach Strike and opencode take. Their loopback redirects are fixed: `localhost:1455` for ChatGPT and `127.0.0.1:56121` for Grok, so close the Codex or Grok CLI if one is holding that port. This is not an officially supported third-party integration: either vendor can change or block it, and using a subscription this way is subject to their terms.
+- Tests: `scripts/check-subscription-auth.test.ts` covers PKCE, authorize URLs, token exchange and refresh with a fake token server, the store's file modes, and the ChatGPT request shape. No test signs in or calls a vendor.
 
 ## Session states
 
