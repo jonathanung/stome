@@ -3,7 +3,7 @@ import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, Tex
 
 import Svg, { Path, Rect } from 'react-native-svg';
 
-import { createStyles, useStoneTheme } from '../../../design-theme/src/primitives';
+import { createStyles, useReduceMotion, useStoneTheme } from '../../../design-theme/src/primitives';
 import { Icon } from '../../ui/Icon';
 import type { ChunkFocus } from './citations';
 
@@ -51,6 +51,7 @@ const SHEET_TOP = 96;
 export function AskSheetPhone(props: AskSheetProps) {
   const styles = useStyles();
   const theme = useStoneTheme();
+  const reducedMotion = useReduceMotion();
   const [text, setText] = useState('');
   const { proposal } = props;
   const isEdit = proposal?.kind === 'edit';
@@ -64,7 +65,7 @@ export function AskSheetPhone(props: AskSheetProps) {
   }
 
   return (
-    <Modal animationType="slide" onRequestClose={props.onClose} transparent visible={props.visible}>
+    <Modal animationType={reducedMotion ? 'none' : 'slide'} onRequestClose={props.onClose} transparent visible={props.visible}>
       <View style={styles.scrim}>
         <Pressable accessibilityLabel="Close ask" onPress={props.onClose} style={{ height: SHEET_TOP }} />
         <KeyboardAvoidingView

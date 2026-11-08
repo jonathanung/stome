@@ -1,8 +1,9 @@
+import { MotionPressable as Pressable, MotionView } from '../../../design-theme/src/motion';
 import { randomUUID } from 'expo-crypto';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button, Screen, useStoneTheme } from '../../../design-theme/src/primitives';
@@ -504,7 +505,7 @@ export function ReviewScreen() {
                 {saved ? <Notice tone="success" testID="review-saved">{saved}</Notice> : null}
                 {card && asked && !showDone ? (
                   <>
-                    <View accessibilityLabel="Question" style={[cardStyle, theme.shadow.card]}>
+                    <MotionView key={`question-${cardKey}`} accessibilityLabel="Question" style={[cardStyle, theme.shadow.card]}>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: theme.space.md }}>
                         <Text testID="review-stage" numberOfLines={1} style={[theme.text('eyebrow'), { flex: 1, color: tertiary }]}>
                           {stageSummary(room.name, card, lastState)}
@@ -537,11 +538,11 @@ export function ReviewScreen() {
                           </Pressable>
                         )
                       ) : null}
-                    </View>
+                    </MotionView>
                     {card.kind === 'answer'
                       ? <AnswerCardBody card={card} roomId={roomId} />
                       : (
-                        <View accessibilityLabel="Your note" style={[cardStyle, { gap: 10, paddingVertical: 18 }]}>
+                        <MotionView key={`note-${cardKey}`} delay={65} accessibilityLabel="Your note" style={[cardStyle, { gap: 10, paddingVertical: 18 }]}>
                           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                             <Text style={[theme.text('eyebrow'), { color: tertiary }]}>Your note</Text>
                             <Pressable accessibilityRole="link" testID="review-open-room" onPress={() => void reviewMarkController.requestLeave(() => router.replace(`/rooms/${roomId}`))} style={{ minHeight: 44, justifyContent: 'center' }}>
@@ -549,7 +550,7 @@ export function ReviewScreen() {
                             </Pressable>
                           </View>
                           <Text testID="review-chunk" style={[theme.text('reading'), { color: ink, fontSize: 16, lineHeight: 26 }]}>{card.chunk.body}</Text>
-                        </View>
+                        </MotionView>
                       )}
                     <Text style={[theme.text('caption'), { color: tertiary, textAlign: 'center' }]}>How well did you know it?</Text>
                     <View style={{ flexDirection: 'row', gap: theme.space.md, marginTop: 'auto' }}>

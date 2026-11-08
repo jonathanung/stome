@@ -1,3 +1,4 @@
+import { MotionView } from '../../design-theme/src/motion';
 import { Text, View } from 'react-native';
 
 import { useStoneTheme } from '../../design-theme/src/primitives';
@@ -22,7 +23,7 @@ export function TodaySummary({ items }: { items: readonly DueItem[] }) {
   const counts = ORDER.map((state) => ({ state, n: items.filter((item) => stateOf(item) === state).length })).filter((c) => c.n > 0);
   const fresh = items.filter((item) => isDueAnswer(item) && item.mark === null).length;
   return (
-    <View
+    <MotionView
       testID="today-summary"
       style={{
         backgroundColor: theme.color.bg.surface,
@@ -54,6 +55,6 @@ export function TodaySummary({ items }: { items: readonly DueItem[] }) {
           <Text key={c.state} style={[theme.text('bodySmall'), { color: theme.color.text.tertiary }]}>{c.n} {COUNT_LABEL[c.state]}</Text>
         ))}
       </View>
-    </View>
+    </MotionView>
   );
 }

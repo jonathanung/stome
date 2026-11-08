@@ -11,7 +11,7 @@ import {
 import { Button, Screen, useStoneTheme } from '../../design-theme/src/primitives';
 import { createCommit } from '../data/commit';
 import type { Annotation, Chunk, Room } from '../data/models';
-import type { CommitError, CommitResult, OpKind } from '../data/operations';
+import { LIMITS, type CommitError, type CommitResult, type OpKind } from '../data/operations';
 import { getChunk, getRoom, listChunks, listDueChunks, listRoomAnnotations, listRoomDueAnswers } from '../data/queries';
 import { planDueItems } from '../data/today';
 import { expoDriver } from '../db/expo-driver';
@@ -25,6 +25,8 @@ import { ChunkEditor, type EditResult } from '../features/chunks/ChunkEditor';
 import { readDraft } from '../features/chunks/draft-store';
 import { pastedParagraphs } from '../features/chunks/paste';
 import { isSubmitShortcut, matchesQuery, mergeNotes } from '../features/notes/note-ops';
+import { formatNote, type NoteFormat, type NoteSelection } from '../features/notes/formatting';
+import { MarkdownToolbar } from '../features/notes/MarkdownToolbar';
 import { PendingDeletes, type PendingDelete } from '../features/notes/pending-delete';
 import { InkLassoActions } from '../features/ask/InkLassoActions';
 import { PencilToolbar, type PencilTool } from '../features/ask/PencilToolbar';
@@ -37,7 +39,6 @@ import { PhoneRoomActions, PhoneRoomHeader, RoomTabs, SubjectChips, roomSubjects
 import { Icon } from '../ui/Icon';
 import { stageName } from '../ui/StageGlyph';
 import { EmptyState, Field, Notice, SectionTitle, useColumn } from '../ui/kit';
-import { HarnessPanel } from './HarnessPanel';
 import { RoomHeader } from './RoomHeader';
 
 function leaveRoom() {
@@ -119,6 +120,8 @@ export function RoomScreen() {
   const listRef = useRef<FlatList<ChunkWithAnnotations>>(null);
   const scrollY = useRef(0);
   const composerRef = useRef<ComponentRef<typeof TextInput>>(null);
+  const composerSelectionRef = useRef<NoteSelection>({ start: 0, end: 0 });
+  const [composerSelection, setComposerSelection] = useState<NoteSelection | undefined>();
   const [focus, setFocus] = useState<ChunkFocus | null>(null);
   const [room, setRoom] = useState<Room | null>(null);
   const [chunks, setChunks] = useState<ChunkWithAnnotations[]>([]);
@@ -135,6 +138,9 @@ export function RoomScreen() {
   const [query, setQuery] = useState('');
   const [belowId, setBelowId] = useState<string | null>(null);
   const [belowText, setBelowText] = useState('');
+  const belowRef = useRef<ComponentRef<typeof TextInput>>(null);
+  const belowSelectionRef = useRef<NoteSelection>({ start: 0, end: 0 });
+  const [belowSelection, setBelowSelection] = useState<NoteSelection | undefined>();
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
   const [addedId, setAddedId] = useState<string | null>(null);
   const { width } = useWindowDimensions();
@@ -285,6 +291,24 @@ export function RoomScreen() {
       setContent('');
       setPasteNotice(`Added ${paragraphs.length} chunks from the pasted paragraphs.`);
     });
+  }
+
+  function formatComposer(format: NoteFormat) {
+    const next = formatNote(content, composerSelectionRef.current, format);
+    if (next.text.length > LIMITS.body) { setActionError('This note is too long to add formatting. Split it first.'); return; }
+    setContent(next.text);
+    composerSelectionRef.current = next.selection;
+    setComposerSelection(next.selection);
+    composerRef.current?.focus();
+  }
+
+  function formatBelow(format: NoteFormat) {
+    const next = formatNote(belowText, belowSelectionRef.current, format);
+    if (next.text.length > LIMITS.body) { setActionError('This note is too long to add formatting. Split it first.'); return; }
+    setBelowText(next.text);
+    belowSelectionRef.current = next.selection;
+    setBelowSelection(next.selection);
+    belowRef.current?.focus();
   }
 
   useEffect(() => {
@@ -438,14 +462,18 @@ export function RoomScreen() {
           </View> : <>
             <RoomHeader room={room} chunkCount={chunks.length}
               onBack={leaveRoom}
-              onAsk={() => listRef.current?.scrollToEnd({ animated: true })}
               onImport={() => router.push({ pathname: '/import', params: { roomId: room.id } })}
               onNewNote={() => { listRef.current?.scrollToOffset({ offset: 0, animated: true }); composerRef.current?.focus(); }} />
           </>}
           {phone && tab !== 'notes' ? null : <View style={{ gap: theme.space.xl, backgroundColor: theme.color.bg.surface, borderRadius: theme.radius.float, borderWidth: 1, borderColor: theme.color.border.hairline, padding: theme.space.base, ...theme.shadow.card }}>
             <SectionTitle>New note</SectionTitle>
+            <MarkdownToolbar context="new note" onFormat={formatComposer} />
             <Field ref={composerRef} accessibilityLabel="Note content" placeholder="Write a note chunk. Ctrl+Enter (or ⌘+Enter) adds it."
-              multiline value={content} onChangeText={onContentChange} style={{ minHeight: 112 }}
+              multiline value={content} selection={composerSelection} onChangeText={onContentChange} style={{ minHeight: 112 }}
+              onSelectionChange={(event) => {
+                composerSelectionRef.current = event.nativeEvent.selection;
+                setComposerSelection(undefined);
+              }}
               onKeyPress={(event) => {
                 if (!isSubmitShortcut(event as unknown as Parameters<typeof isSubmitShortcut>[0])) return;
                 (event as unknown as { preventDefault?: () => void }).preventDefault?.();
@@ -490,7 +518,6 @@ export function RoomScreen() {
           : searching ? <EmptyState title="No notes match" body="Try fewer or different words, or clear the search." />
           : chunks.length ? <EmptyState title="No notes with this subject" body="Pick another subject, or choose all." />
           : <EmptyState title="No notes in this room yet" body="Write your first chunk above, or paste a few paragraphs at once." />}
-        ListFooterComponent={phone && tab !== 'notes' ? undefined : <HarnessPanel roomId={room.id} chunks={chunks} appDb={sqlite} onOpenCitation={openCitation} onSaved={() => { void refresh(); }} />}
         renderItem={({ item }) => {
           // Positions are in the full list: moves, "add below" and labels must not depend on filters.
           const index = chunks.indexOf(item);
@@ -503,8 +530,13 @@ export function RoomScreen() {
             onMergeNext={!searching && next && !deletes.isHidden(next.id) ? (rev) => mergeNext(item, rev) : undefined}
             onEmptied={(previousBody) => removeLater({ chunkId: item.id, label: 'Empty note removed', restoreBody: previousBody })}
             after={belowId === item.id ? <View style={{ gap: theme.space.md, paddingTop: theme.space.md, borderTopWidth: 1, borderTopColor: theme.color.border.hairline }}>
-              <Field accessibilityLabel={`New note below chunk ${index + 1}`} placeholder="New note below this one. Ctrl+Enter adds, Esc cancels."
-                multiline autoFocus value={belowText} onChangeText={setBelowText} style={{ minHeight: 72 }}
+              <MarkdownToolbar context={`new note below note ${index + 1}`} onFormat={formatBelow} />
+              <Field ref={belowRef} accessibilityLabel={`New note below chunk ${index + 1}`} placeholder="New note below this one. Ctrl+Enter adds, Esc cancels."
+                multiline autoFocus value={belowText} selection={belowSelection} onChangeText={setBelowText} style={{ minHeight: 72 }}
+                onSelectionChange={(event) => {
+                  belowSelectionRef.current = event.nativeEvent.selection;
+                  setBelowSelection(undefined);
+                }}
                 onKeyPress={(event) => {
                   const key = event as unknown as { key?: string; nativeEvent?: { key?: string } };
                   if ((key.key ?? key.nativeEvent?.key) === 'Escape') { setBelowId(null); return; }
@@ -575,7 +607,6 @@ export function RoomScreen() {
         </View>
       ) : null}
       {phone ? <PhoneRoomActions
-        onAsk={() => { setTab('notes'); setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 0); }}
         onAddNote={() => { setTab('notes'); setTimeout(() => listRef.current?.scrollToOffset({ offset: 0, animated: true }), 0); }} /> : null}
     </KeyboardAvoidingView>
   </SafeAreaView></Screen>;

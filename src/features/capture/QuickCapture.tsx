@@ -4,6 +4,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
 import { Platform, Pressable, Text, TextInput, View, useWindowDimensions } from 'react-native';
 
+import { MotionView } from '../../../design-theme/src/motion';
 import { useStoneTheme } from '../../../design-theme/src/primitives';
 import { createCommit } from '../../data/commit';
 import { Field, Notice } from '../../ui/kit';
@@ -193,7 +194,7 @@ export function QuickCapture() {
     ) : null}
     <View pointerEvents="box-none" style={layer} testID="quick-capture">
       {open && !phone ? (
-        <View
+        <MotionView distance={28}
           style={{
             backgroundColor: theme.color.bg.surface,
             borderColor: theme.color.border.hairline,
@@ -255,7 +256,7 @@ export function QuickCapture() {
               </Text>
             </Pressable>
           </View>
-        </View>
+        </MotionView>
       ) : null}
       {warning && !open ? <Notice tone="warning" testID="quick-capture-warning">{warning}</Notice> : null}
       {/* No floating trigger: the shell opens capture (sidebar "Quick capture" at >= 760px, the tab bar's

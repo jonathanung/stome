@@ -1,4 +1,5 @@
-import { Pressable, Text, View } from 'react-native';
+import { MotionPressable as Pressable } from '../../../design-theme/src/motion';
+import { Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Rect } from 'react-native-svg';
 

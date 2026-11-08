@@ -1,5 +1,6 @@
+import { MotionPressable as Pressable, MotionView } from '../../../design-theme/src/motion';
 import type { ComponentRef, Ref } from 'react';
-import { Platform, Pressable, Text, TextInput, View } from 'react-native';
+import { Platform, Text, TextInput, View } from 'react-native';
 
 import { useStoneTheme } from '../../../design-theme/src/primitives';
 import { Icon } from '../../ui/Icon';
@@ -44,14 +45,16 @@ export function QuickCaptureSheet(props: QuickCaptureSheetProps) {
   const fixed = (Platform.OS === 'web' ? 'fixed' : 'absolute') as 'absolute';
   return (
     <View pointerEvents="box-none" style={{ position: fixed, top: 0, left: 0, right: 0, bottom: 0, zIndex: 40, justifyContent: 'flex-end' }} testID="quick-capture-sheet-layer">
-      <Pressable
-        accessibilityLabel="Close quick capture"
-        accessibilityRole="button"
-        onPress={onClose}
-        style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(36, 34, 30, 0.4)' }}
-        testID="quick-capture-scrim"
-      />
-      <View
+      <MotionView distance={0} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
+        <Pressable
+          accessibilityLabel="Close quick capture"
+          accessibilityRole="button"
+          onPress={onClose}
+          style={{ flex: 1, backgroundColor: 'rgba(36, 34, 30, 0.4)' }}
+          testID="quick-capture-scrim"
+        />
+      </MotionView>
+      <MotionView distance={48}
         accessibilityViewIsModal
         style={{
           backgroundColor: theme.color.bg.surface,
@@ -189,7 +192,7 @@ export function QuickCaptureSheet(props: QuickCaptureSheetProps) {
         {createRoomLink}
         {error ? <Notice tone="danger" testID="quick-capture-error">{error}</Notice> : null}
         {warning ? <Notice tone="warning" testID="quick-capture-warning">{warning}</Notice> : null}
-      </View>
+      </MotionView>
     </View>
   );
 }

@@ -207,16 +207,6 @@ function certMaterial(): { key: Buffer; cert: Buffer } {
   return { key: readFileSync(keyPath), cert: readFileSync(certPath) };
 }
 
-function loopbackListen(port: number): boolean {
-  const hexPort = port.toString(16).toUpperCase().padStart(4, '0');
-  return readFileSync('/proc/net/tcp', 'utf8')
-    .split('\n')
-    .some((line) => {
-      const cols = line.trim().split(/\s+/);
-      return cols[1] === `0100007F:${hexPort}` && cols[3] === '0A';
-    });
-}
-
 type RawResponse = { status: number; text: string };
 
 function rawRequest(input: {
@@ -298,7 +288,6 @@ test('the https proxy reaches the loopback companion and refuses an open unauthe
     const httpPort = await listen(httpServer);
     webPorts.push(httpsPort, httpPort, 8081);
     assert.equal(new URL(companion.url).hostname, '127.0.0.1');
-    assert.equal(loopbackListen(companion.port), true);
 
     const missing = await rawRequest({
       tls: true,

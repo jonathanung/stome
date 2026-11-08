@@ -1,6 +1,7 @@
+import { MotionPressable as Pressable, MotionView } from '../../design-theme/src/motion';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ActivityIndicator, Animated, FlatList, KeyboardAvoidingView, PanResponder, Platform, Pressable, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Animated, FlatList, KeyboardAvoidingView, PanResponder, Platform, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button, Screen, useStoneTheme } from '../../design-theme/src/primitives';
@@ -157,7 +158,7 @@ export function RoomsPhone({ rooms, stats, loading, error, busy, onCreate, onRen
             const s = stats[item.id] ?? { chunks: 0, due: 0 };
             const sub = [stageName(item.stage).toLowerCase(), plural(s.chunks, 'chunk'), s.due ? `${s.due} due` : null].filter(Boolean).join(' · ');
             return (
-              <View style={{
+              <MotionView delay={Math.min(index, 6) * 35} style={{
                 marginTop: first ? theme.space.xxl : 0,
                 backgroundColor: theme.color.bg.surface,
                 borderColor: theme.color.border.hairline,
@@ -211,7 +212,7 @@ export function RoomsPhone({ rooms, stats, loading, error, busy, onCreate, onRen
                     <Button label="Delete" size="compact" variant="ghost" onPress={() => setDeletingId(item.id)} />
                   </View>}
                 </View> : null}
-              </View>
+              </MotionView>
             );
           }}
         />
