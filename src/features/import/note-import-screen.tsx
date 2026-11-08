@@ -14,7 +14,7 @@ import { freeformPathSubjects, freeformSourceIdentity } from '../../import/freef
 import { sourceIdentity } from '../../import/markdown';
 import { onenotePathSubjects, onenoteSourceIdentity } from '../../import/onenote/parse';
 import { pdfPathSubjects, pdfSourceIdentity } from '../../import/pdf/parse';
-import { assignRoomToUnmapped, batchLimitMessage, mergeBatch, remainingCapacity } from '../../import/batch';
+import { assignRoomToUnmapped, batchLimitMessage, mergeBatch, remainingCapacity, shareCreatedRoom } from '../../import/batch';
 import { pickNotes, type PickedNote } from '../../import/pick-notes';
 import { chooseExistingRoom, destinationForMapping, unsetRoomMapping, type RoomMapping } from '../../import/room-map';
 import { changeSourcePath, changeSubjects, createSubjectReview, type SubjectReview } from '../../import/review-draft';
@@ -189,9 +189,9 @@ export default function NoteImportScreen() {
     finally { busyRef.current = false; setBusy(false); }
   };
 
-  const save = async (draft: Draft): Promise<boolean> => {
+  const save = async (draft: Draft): Promise<string | null> => {
     const destination = destinationForMapping(draft.mapping);
-    if (draft.done || !destination) return false;
+    if (draft.done || !destination) return null;
     try {
       const sourceId = sourceIdFor(collection, draft);
       const result = await commit({
@@ -199,23 +199,28 @@ export default function NoteImportScreen() {
         payload: { sourceId, fingerprint: draft.note.fingerprint, bodies: draft.note.bodies, subjects: draft.subjects.split(','), destination },
       });
       if (result.ok) {
-        update(draft.id, { done: true, result: result.value.skipped ? 'Already imported. Your existing notes were kept.' : `Saved ${result.value.chunkIds.length} chunks.` });
+        update(draft.id, { done: true, mapping: chooseExistingRoom(result.value.roomId), result: result.value.skipped ? 'Already imported. Your existing notes were kept.' : `Saved ${result.value.chunkIds.length} chunks.` });
         await refresh();
-        return true;
+        return result.value.roomId;
       }
       update(draft.id, { result: result.error.message });
     } catch (error) { update(draft.id, { result: String(error) }); }
-    return false;
+    return null;
   };
 
-  /** Saves every note with a room, in order. Stops at the first failure so the user can fix it. */
+  /** Saves every note with a room, in order. Notes that name the same new room share the room the first one created. */
   const saveAll = async () => {
     if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
+    const created = new Map<string, string>();
     try {
-      for (const draft of drafts.filter((d) => groupOf({ ...d, title: d.note.title, bodies: d.note.bodies, warnings: d.note.warnings, skipped: d.skipped === true, done: d.done === true }) === 'ready')) {
-        if (!await save(draft)) break;
+      for (const draft of drafts.filter((d) => groupOf({ done: d.done === true, skipped: d.skipped === true, duplicate: d.duplicate, mapping: d.mapping }) === 'ready')) {
+        const destination = destinationForMapping(draft.mapping);
+        const mapping = shareCreatedRoom(draft.mapping, created);
+        const roomId = await save({ ...draft, mapping });
+        if (!roomId) break;
+        if (destination && 'name' in destination) created.set(destination.name.toLowerCase(), roomId);
       }
     } finally { busyRef.current = false; setBusy(false); }
   };

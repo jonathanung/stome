@@ -1,5 +1,5 @@
 import { MAX_VAULT_PATHS } from './markdown.ts';
-import { destinationForMapping, type RoomMapping } from './room-map.ts';
+import { chooseExistingRoom, destinationForMapping, type RoomMapping } from './room-map.ts';
 
 /**
  * Most notes one import batch holds, across every pick. Each file is already
@@ -47,6 +47,17 @@ interface AssignableItem {
   mapping: RoomMapping;
   done?: boolean;
   skipped?: boolean;
+}
+
+/**
+ * Notes saved together with the same new room name share the room created by
+ * the first of them. Later notes keep their own choice.
+ */
+export function shareCreatedRoom(mapping: RoomMapping, created: ReadonlyMap<string, string>): RoomMapping {
+  const destination = destinationForMapping(mapping);
+  if (!destination || !('name' in destination)) return mapping;
+  const roomId = created.get(destination.name.toLowerCase());
+  return roomId ? chooseExistingRoom(roomId) : mapping;
 }
 
 /** Gives every open note that has no usable room the same mapping. Notes with a room keep it. */

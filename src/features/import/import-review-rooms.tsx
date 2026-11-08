@@ -5,7 +5,10 @@ import { Badge, createStyles } from '../../../design-theme/src/primitives';
 import type { Room } from '../../data/models';
 import { chooseExistingRoom, destinationForMapping, matchingRooms, type RoomMapping } from '../../import/room-map';
 import { ImportSteps } from './import-choose-files';
+import { groupOf, isSettled, selectedReviewNote } from '../../import/review-selection';
 import { RoomMappingControl } from './room-mapping';
+
+export { groupOf, isSettled };
 
 /** `same`: identical to what is stored. `changed`: same source path, different content. */
 export type DuplicateState = 'same' | 'changed';
@@ -24,25 +27,12 @@ export interface ReviewNote {
   result?: string;
 }
 
-type Group = 'imported' | 'needs' | 'ready' | 'skipped';
-
-const GROUP_ORDER: readonly { key: Group; label: string }[] = [
+const GROUP_ORDER: readonly { key: 'imported' | 'needs' | 'ready' | 'skipped'; label: string }[] = [
   { key: 'needs', label: 'needs a room' },
   { key: 'ready', label: 'ready' },
   { key: 'imported', label: 'already imported' },
   { key: 'skipped', label: 'skipped' },
 ];
-
-export function groupOf(note: ReviewNote): Group {
-  if (note.done || (note.duplicate === 'same' && !note.skipped)) return 'imported';
-  if (note.skipped) return 'skipped';
-  return destinationForMapping(note.mapping) ? 'ready' : 'needs';
-}
-
-/** A note is settled when it has a room, is skipped, or is already stored unchanged. */
-export function isSettled(note: ReviewNote): boolean {
-  return groupOf(note) !== 'needs';
-}
 
 export function ImportReviewRooms({
   notes, rooms, busy, errors, onChangeMapping, onAssignAll, onSkip, onKeepBoth, onBack, onSave,
@@ -64,7 +54,8 @@ export function ImportReviewRooms({
   const wide = width >= 900;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [declined, setDeclined] = useState<ReadonlySet<string>>(new Set());
-  const selected = notes.find((n) => n.id === selectedId) ?? notes.find((n) => groupOf(n) === 'needs') ?? notes[0];
+  const selected = selectedReviewNote(notes, selectedId);
+  if (selected && selected.id !== selectedId) setSelectedId(selected.id);
 
   const writable = notes.filter((n) => groupOf(n) === 'ready');
   const needs = notes.filter((n) => groupOf(n) === 'needs').length;
@@ -74,6 +65,8 @@ export function ImportReviewRooms({
     return d && 'roomId' in d ? d.roomId : `new:${d && 'name' in d ? d.name.toLowerCase() : ''}`;
   })).size;
   const canSave = !busy && needs === 0 && writable.length > 0;
+  const namedDestination = selected ? destinationForMapping(selected.mapping) : null;
+  const sharedName = selected?.mapping.status === 'new' && namedDestination && 'name' in namedDestination ? namedDestination.name : '';
   const summary = `${writable.length} note${writable.length === 1 ? '' : 's'} into ${roomCount} room${roomCount === 1 ? '' : 's'}`
     + `${skipped ? ` · ${skipped} skipped` : ''}${needs ? ` · ${needs} needs a room before you can save` : ''}`;
 
@@ -203,6 +196,17 @@ export function ImportReviewRooms({
                   title={selected.title} subjects={selected.subjects} rooms={rooms} mapping={selected.mapping}
                   disabled={busy} onChange={(m) => onChangeMapping(selected.id, m)}
                 />
+              ) : null}
+              {sharedName && needs > 0 ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Use ${sharedName} for every note that needs a room`}
+                  disabled={busy}
+                  onPress={() => onAssignAll(selected.mapping)}
+                  style={styles.secondary}
+                >
+                  <Text style={styles.secondaryText}>{`use "${sharedName}" for every note that needs a room`}</Text>
+                </Pressable>
               ) : null}
 
               {!selected.duplicate && !selected.done ? (

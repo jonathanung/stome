@@ -4,6 +4,8 @@ import { test } from 'node:test';
 import { createCommit } from '../src/data/commit.ts';
 import type { Operation } from '../src/data/operations.ts';
 import { getRoom, listChunks, listRooms } from '../src/data/queries.ts';
+import { shareCreatedRoom } from '../src/import/batch.ts';
+import { chooseNewRoom, destinationForMapping } from '../src/import/room-map.ts';
 import { migrateDb } from '../src/db/migrate.ts';
 import { failOnWrite, nodeDb } from './support/node-db.ts';
 
@@ -80,6 +82,32 @@ test('failure after chunk writes rolls back new room, provenance, chunks and op 
     assert.equal((await s.db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM ${table}`))?.n, 0);
   }
   assert.ok((await s.commit(note())).ok);
+});
+
+test('notes that name one new room are stored in that single room', async (t) => {
+  const s = await setup();
+  t.after(() => s.db.close());
+  const created = new Map<string, string>();
+  const saveNamed = async (opId: string, sourceId: string, fingerprint: string) => {
+    const mapping = shareCreatedRoom(chooseNewRoom('Biology Lab'), created);
+    const destination = destinationForMapping(mapping);
+    assert.ok(destination);
+    const op = note(opId);
+    op.payload.sourceId = sourceId;
+    op.payload.fingerprint = fingerprint;
+    op.payload.destination = destination;
+    const saved = await s.commit(op);
+    assert.ok(saved.ok);
+    if ('name' in destination) created.set(destination.name.toLowerCase(), saved.value.roomId);
+    return saved.value.roomId;
+  };
+  const first = await saveNamed('op-1', 'markdown:vault/Biology/Cells.md', 'a'.repeat(64));
+  const second = await saveNamed('op-2', 'markdown:vault/Biology/Mitosis.md', 'b'.repeat(64));
+  assert.equal(second, first);
+  const rooms = await listRooms(s.db);
+  assert.equal(rooms.length, 1);
+  assert.equal(rooms[0]?.name, 'Biology Lab');
+  assert.equal((await listChunks(s.db, first)).length, 4);
 });
 
 test('imports append to existing rooms and deleting a room releases source identity', async (t) => {
