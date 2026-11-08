@@ -110,7 +110,7 @@ export function answersReadyToReview<T extends { id: string; type: string }>(
 
 /**
  * Deterministic stand-in for the answer question, mirroring
- * `mockReviewQuestion`. The same answer text always yields the same prompt.
+ * `localReviewQuestion`. The same answer text always yields the same prompt.
  * An empty answer errors.
  */
 export function mockAnswerQuestion(answer: { id: string; answer: string }):
@@ -172,11 +172,10 @@ export function reviewQueueForRoom(input: {
 }
 
 /**
- * Partial stand-in for the review question. HAR.3's mock provider has no
- * review-question tool, and this screen does not invent that contract.
+ * Local fallback question, used when the companion is not paired or fails.
  * The same note text always yields the same local prompt. An empty note errors.
  */
-export function mockReviewQuestion(chunk: { id: string; body: string }):
+export function localReviewQuestion(chunk: { id: string; body: string }):
   | { ok: true; question: string }
   | { ok: false; message: string } {
   const text = chunk.body.trim();

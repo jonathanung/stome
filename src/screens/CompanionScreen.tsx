@@ -7,8 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Badge, Button, Card, Screen, useStoneTheme } from '../../design-theme/src/primitives';
 import { listRooms } from '../data/queries';
 import { expoDriver } from '../db/expo-driver';
-import { assertCompanionUrl } from '../harness/companionClient';
-import { DEFAULT_COMPANION_URL, updateCompanionSettings, useCompanionSettings } from '../harness/companionSettings';
+import { DEFAULT_COMPANION_URL, PROVIDER_NAMES, companionLabel, isLiveCompanion, refreshCompanionStatus, updateCompanionSettings, useCompanionSettings } from '../harness/companionSettings';
 import { MOCK_SCENARIOS, PROVIDER_LIMITS, type SessionState } from '../harness/contract';
 import { harnessExecutor, openHarnessDatabase } from '../harness/expoDb';
 import { listSessionSummaries, type HarnessSessionSummary } from '../harness/store';
@@ -60,25 +59,12 @@ export function CompanionScreen() {
     }
     setConnection('testing');
     setMessage(null);
-    try {
-      const origin = assertCompanionUrl(settings.url.trim());
-      // The companion has one route. An empty body passes auth and then fails
-      // validation, so 401 means a bad token and anything else means paired.
-      const response = await fetch(`${origin}/v1/tool`, {
-        method: 'POST',
-        credentials: 'omit',
-        headers: { 'content-type': 'application/json', 'x-stome-token': settings.token.trim() },
-        body: '{}',
-      });
-      if (response.status === 401 || response.status === 403) {
-        setConnection('rejected');
-        setMessage(response.status === 401 ? 'The companion rejected that token. It may have expired.' : 'The companion refused this app origin.');
-      } else {
-        setConnection('paired');
-      }
-    } catch (reason: unknown) {
+    const failure = await refreshCompanionStatus();
+    if (failure) {
       setConnection('rejected');
-      setMessage(reason instanceof Error ? reason.message : 'The companion could not be reached');
+      setMessage(failure);
+    } else {
+      setConnection('paired');
     }
   }
 
@@ -100,6 +86,9 @@ export function CompanionScreen() {
     color: theme.color.text.primary,
     paddingHorizontal: 12,
   };
+
+  const live = isLiveCompanion(settings);
+  const statusLabel = companionLabel(settings.status);
 
   const pairing = (
     <Card>
@@ -143,27 +132,35 @@ export function CompanionScreen() {
           style={{ flexDirection: 'row', gap: 10, padding: 11, borderRadius: theme.radius.control, borderWidth: 2, borderColor: theme.color.text.primary, backgroundColor: theme.color.bg.canvas }}>
           <Radio on />
           <View style={{ flex: 1, gap: 6 }}>
-            <Text style={[theme.text('bodySmall'), { color: theme.color.text.primary, fontWeight: '600' }]}>Mock answers</Text>
-            <Text style={meta}>Deterministic, for building and demos. Pick what it does:</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-              {MOCK_SCENARIOS.map((name) => {
-                const on = name === settings.scenario;
-                return (
-                  <Text key={name} accessibilityRole="button" accessibilityState={{ selected: on }} testID={`companion-scenario-${name}`}
-                    onPress={() => updateCompanionSettings({ scenario: name })}
-                    style={[theme.text('label'), {
-                      paddingVertical: 2, paddingHorizontal: 10, borderRadius: theme.radius.pill, overflow: 'hidden',
-                      backgroundColor: on ? theme.color.accent.bg : theme.color.bg.inset,
-                      color: on ? theme.color.accent.fg : theme.color.text.secondary,
-                    }]}>
-                    {name}
-                  </Text>
-                );
-              })}
-            </View>
+            <Text testID="companion-model-label" style={[theme.text('bodySmall'), { color: theme.color.text.primary, fontWeight: '600' }]}>
+              {statusLabel ?? 'Not checked yet'}
+            </Text>
+            {live ? (
+              <Text style={meta}>{`Live questions go to ${settings.status ? PROVIDER_NAMES[settings.status.provider] : 'the provider'} from the companion and cost money.`} The API key never leaves the companion.</Text>
+            ) : (
+              <>
+                <Text style={meta}>{statusLabel ? 'Deterministic, for building and demos. Pick what it does:' : 'Test the connection to see which model answers. Until then the mock scenarios apply:'}</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                  {MOCK_SCENARIOS.map((name) => {
+                    const on = name === settings.scenario;
+                    return (
+                      <Text key={name} accessibilityRole="button" accessibilityState={{ selected: on }} testID={`companion-scenario-${name}`}
+                        onPress={() => updateCompanionSettings({ scenario: name })}
+                        style={[theme.text('label'), {
+                          paddingVertical: 2, paddingHorizontal: 10, borderRadius: theme.radius.pill, overflow: 'hidden',
+                          backgroundColor: on ? theme.color.accent.bg : theme.color.bg.inset,
+                          color: on ? theme.color.accent.fg : theme.color.text.secondary,
+                        }]}>
+                        {name}
+                      </Text>
+                    );
+                  })}
+                </View>
+              </>
+            )}
           </View>
         </View>
-        <Option title="API key" body="Set the key in the companion's environment. It is never stored in the app. Not live yet." />
+        <Option title="API key" body="Set the key in the companion's environment. It is never stored in the app." />
         <Option title="Sign in with a subscription" body="Codex or Grok sign-in, still being researched" />
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: 16, rowGap: 8 }}>
           <LimitField label="timeout" unit="s" testID="companion-limit-timeout" value={settings.limits.timeoutSec}

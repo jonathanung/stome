@@ -6,7 +6,7 @@ import { getChunk, getRoom, latestReviewMark } from '../src/data/queries.ts';
 import { migrateDb } from '../src/db/migrate.ts';
 import {
   chunksReadyToReview,
-  mockReviewQuestion,
+  localReviewQuestion,
   orderReviewQueue,
   reviewHref,
   reviewMarkOperation,
@@ -19,18 +19,18 @@ test('the review route is the room id plus an optional chunk', () => {
 });
 
 test('the same note always gets the same question and an empty note errors', () => {
-  const first = mockReviewQuestion({ id: 'c1', body: '  photosynthesis makes sugar  ' });
-  const again = mockReviewQuestion({ id: 'c1', body: 'photosynthesis makes sugar' });
+  const first = localReviewQuestion({ id: 'c1', body: '  photosynthesis makes sugar  ' });
+  const again = localReviewQuestion({ id: 'c1', body: 'photosynthesis makes sugar' });
   assert.equal(first.ok, true);
   assert.equal(again.ok, true);
   if (!first.ok || !again.ok) return;
   assert.equal(first.question, again.question);
   assert.match(first.question, /photosynthesis makes sugar/);
-  const other = mockReviewQuestion({ id: 'c2', body: 'mitochondria' });
+  const other = localReviewQuestion({ id: 'c2', body: 'mitochondria' });
   assert.equal(other.ok, true);
   if (!other.ok) return;
   assert.notEqual(other.question, first.question);
-  const empty = mockReviewQuestion({ id: 'c3', body: '   ' });
+  const empty = localReviewQuestion({ id: 'c3', body: '   ' });
   assert.equal(empty.ok, false);
   if (empty.ok) return;
   assert.match(empty.message, /empty note/);

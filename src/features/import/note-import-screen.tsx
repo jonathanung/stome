@@ -19,6 +19,14 @@ import { changeSourcePath, changeSubjects, createSubjectReview, type SubjectRevi
 import { ImportChooseFiles } from './import-choose-files';
 import { ImportReviewRooms, groupOf, type DuplicateState } from './import-review-rooms';
 import { RoomMappingControl } from './room-mapping';
+import { router } from 'expo-router';
+import { HarnessError } from '../../harness/contract';
+import { companionProvider } from '../../harness/companionClient';
+import { getCompanionSettings, useCompanionSettings } from '../../harness/companionSettings';
+import { completeReadTool } from '../../harness/provider';
+import { IMPORT_TOOL_NAME, type ImportSuggestOutput, type ImportSuggestion } from '../../harness/tools';
+import { applySuggestion, buildSuggestBatches } from '../../import/suggest';
+import { SuggestControls, SuggestionRow } from './suggest-ui';
 
 interface Draft extends SubjectReview {
   id: string;
@@ -73,6 +81,57 @@ export default function NoteImportScreen() {
   const busyRef = useRef(false);
   const [stage, setStage] = useState<'choose' | 'review'>('choose');
   const [preview, setPreview] = useState<{ title: string; bodies: string[] } | null>(null);
+  const paired = useCompanionSettings().token.trim() !== '';
+  const [suggestions, setSuggestions] = useState<Record<string, ImportSuggestion>>({});
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
+  const suggestAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => suggestAbort.current?.abort(), []);
+
+  const suggestRooms = async () => {
+    if (suggestAbort.current) return;
+    const open = drafts.filter((draft) => !draft.done);
+    if (!open.length) return;
+    const controller = new AbortController();
+    suggestAbort.current = controller;
+    setSuggesting(true);
+    setSuggestError(null);
+    try {
+      const settings = getCompanionSettings();
+      const provider = companionProvider({ baseUrl: settings.url, token: settings.token });
+      const batches = buildSuggestBatches(open.map((draft) => ({ id: draft.id, title: draft.note.title, bodies: draft.note.bodies })), rooms);
+      const found: Record<string, ImportSuggestion> = {};
+      for (const batch of batches) {
+        const out = await completeReadTool<ImportSuggestOutput>(
+          provider, { tool: IMPORT_TOOL_NAME, input: batch, scenario: settings.scenario }, controller.signal,
+        );
+        for (const suggestion of out.suggestions) found[suggestion.noteId] = suggestion;
+      }
+      if (!controller.signal.aborted) setSuggestions((current) => ({ ...current, ...found }));
+    } catch (error) {
+      if (controller.signal.aborted && error instanceof HarnessError && error.code === 'cancelled') setSuggestError(null);
+      else if (!controller.signal.aborted) setSuggestError(error instanceof Error ? error.message : 'Suggestions failed');
+    } finally {
+      if (suggestAbort.current === controller) suggestAbort.current = null;
+      if (!controller.signal.aborted || suggestAbort.current === null) setSuggesting(false);
+    }
+  };
+  const cancelSuggest = () => suggestAbort.current?.abort();
+  const dropSuggestion = (id: string) => setSuggestions((current) => { const { [id]: _removed, ...rest } = current; return rest; });
+  const applyOne = (id: string) => {
+    const suggestion = suggestions[id];
+    if (!suggestion) return;
+    setDrafts((items) => items.map((item) => {
+      if (item.id !== id || item.done) return item;
+      const applied = applySuggestion(suggestion, item.subjects);
+      return { ...changeSubjects(item, applied.subjects), mapping: applied.mapping, result: undefined };
+    }));
+    dropSuggestion(id);
+  };
+  const applyAll = () => {
+    const ids = Object.keys(suggestions).filter((id) => drafts.some((draft) => draft.id === id && !draft.done));
+    ids.forEach(applyOne);
+  };
 
   const mapped = drafts.filter((draft) => destinationForMapping(draft.mapping)).length;
   const needRoom = drafts.length - mapped;
@@ -177,6 +236,12 @@ export default function NoteImportScreen() {
   return (
     <SafeAreaView edges={['bottom']} style={styles.root}>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.wide}>
+        {drafts.length ? <View style={styles.section}>
+          <SuggestControls paired={paired} running={suggesting} error={suggestError} pending={Object.keys(suggestions).length} onSuggest={suggestRooms} onCancel={cancelSuggest} onApplyAll={applyAll} />
+          {drafts.filter((d) => suggestions[d.id] && !d.done).map((d) => (
+            <SuggestionRow key={d.id} title={d.note.title} suggestion={suggestions[d.id]} rooms={rooms} disabled={busy} onApply={() => applyOne(d.id)} onIgnore={() => dropSuggestion(d.id)} />
+          ))}
+        </View> : null}
         <ImportReviewRooms
           notes={drafts.map((d) => ({ id: d.id, title: d.note.title, path: d.path, bodies: d.note.bodies, warnings: [...d.note.warnings, ...(d.folderWarning ? [d.folderWarning] : [])], subjects: d.subjects, mapping: d.mapping, skipped: d.skipped === true, done: d.done === true, duplicate: d.duplicate, result: d.result }))}
           rooms={rooms} busy={busy} errors={errors}

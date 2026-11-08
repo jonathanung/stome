@@ -1,7 +1,7 @@
 import { randomUUID } from 'expo-crypto';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -15,15 +15,23 @@ import { getAnnotation, getChunk, getRoom, latestAnswerMark, latestReviewMark, l
 import type { ReviewState } from '../../db/schema';
 import { expoDriver } from '../../db/expo-driver';
 import { citationFromAnnotation } from '../ask/citations';
+import { companionProvider } from '../../harness/companionClient';
+import { getCompanionSettings, useCompanionSettings } from '../../harness/companionSettings';
 import { EMPTY_TALLY, ReviewDone, nextUpSummary, type ReviewTally } from './ReviewDone';
+import {
+  chooseReviewQuestion,
+  questionCacheKey,
+  requestReviewQuestion,
+  type QuestionChoice,
+} from './question';
 import { reviewMarkController } from './mark-attempt';
 import { acknowledgeDisplayedCards } from './mark-progress';
 import {
   REVIEW_LABEL,
   deviceTimeZone,
   formatDueAt,
+  localReviewQuestion,
   mockAnswerQuestion,
-  mockReviewQuestion,
   orderReviewQueue,
   reviewCardId,
   reviewQueueForRoom,
@@ -249,11 +257,52 @@ export function ReviewScreen() {
   }
 
   const card = cards[0];
-  const asked = card
-    ? card.kind === 'answer'
-      ? mockAnswerQuestion(card.answer)
-      : mockReviewQuestion(card.chunk)
-    : null;
+  const chunk = card?.kind === 'chunk' ? card.chunk : null;
+  const settings = useCompanionSettings();
+  const paired = settings.token.trim().length > 0;
+  const [questionCache, setQuestionCache] = useState<Record<string, QuestionChoice>>({});
+  const [shownAnswerKey, setShownAnswerKey] = useState<string | null>(null);
+  const cardKey = chunk ? questionCacheKey(chunk) : null;
+  const cardId = chunk?.id;
+  const cardBody = chunk?.body;
+  const cachedChoice = cardKey ? questionCache[cardKey] : undefined;
+  const hasCached = cachedChoice !== undefined;
+
+  useEffect(() => {
+    if (!cardKey || cardId === undefined || cardBody === undefined || !roomId || hasCached) return;
+    const current = getCompanionSettings();
+    if (!current.token.trim() || !cardBody.trim()) return;
+    const controller = new AbortController();
+    requestReviewQuestion({
+      roomId,
+      chunk: { id: cardId, roomId, body: cardBody },
+      provider: companionProvider({ baseUrl: current.url, token: current.token }),
+      scenario: current.scenario,
+      signal: controller.signal,
+    })
+      .then((result) => chooseReviewQuestion({ token: current.token, result }))
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return null;
+        return chooseReviewQuestion({ token: current.token, result: { error } });
+      })
+      .then((choice) => {
+        if (!choice || controller.signal.aborted) return;
+        setQuestionCache((cache) => ({ ...cache, [cardKey]: choice }));
+      });
+    return () => controller.abort();
+  }, [cardKey, cardId, cardBody, roomId, hasCached, paired]);
+
+  const local = chunk ? localReviewQuestion(chunk) : null;
+  const choice = cachedChoice ?? (paired ? null : chooseReviewQuestion({ token: '', result: null }));
+  const waiting = Boolean(chunk && local?.ok && paired && !choice);
+  const chunkAsked: typeof local = !chunk || !local
+    ? null
+    : choice?.source === 'companion'
+      ? { ok: true, question: choice.question }
+      : local;
+  const asked = !card ? null : card.kind === 'answer' ? mockAnswerQuestion(card.answer) : chunkAsked;
+  const questionNotice = chunk && local?.ok && choice?.source === 'local' ? choice.notice : null;
+  const answer = chunk && choice?.source === 'companion' ? choice.answer : null;
   const pending = !busy && card ? reviewMarkController.retained(reviewCardId(card)) : null;
   const shownError = error ?? (pending
     ? `The previous ${REVIEW_LABEL[pending.payload.state]} mark did not finish. Retry that choice. It will not be counted twice.`
@@ -463,7 +512,9 @@ export function ReviewScreen() {
                         </Text>
                       </View>
                       <Text style={[theme.text('caption'), { color: tertiary }]}>Practice question</Text>
-                      {asked.ok ? (
+                      {waiting ? (
+                        <Text testID="review-question-loading" accessibilityRole="progressbar" style={[theme.text('bodySmall'), { color: muted }]}>Writing a question…</Text>
+                      ) : asked.ok ? (
                         <Text testID="review-question" accessibilityRole="header" style={[theme.text('actionTitle'), { color: ink, fontSize: 22, lineHeight: 28, letterSpacing: -0.4 }]}>
                           {asked.question.split('\n')[0]}
                         </Text>
@@ -472,6 +523,18 @@ export function ReviewScreen() {
                           <Text accessibilityRole="alert" testID="review-question-error" style={[theme.text('bodySmall'), { color: theme.color.status.danger.text }]}>{asked.message}</Text>
                         </View>
                       )}
+                      {questionNotice ? (
+                        <Text testID="review-question-notice" style={[theme.text('caption'), { color: tertiary }]}>{questionNotice}</Text>
+                      ) : null}
+                      {answer ? (
+                        shownAnswerKey === cardKey ? (
+                          <Text testID="review-answer" style={[theme.text('bodySmall'), { color: ink }]}>{answer}</Text>
+                        ) : (
+                          <Pressable accessibilityRole="button" accessibilityLabel="Show answer" testID="review-show-answer" onPress={() => setShownAnswerKey(cardKey)} style={{ minHeight: 44, justifyContent: 'center' }}>
+                            <Text style={[theme.text('nav'), { color: muted }]}>Show answer</Text>
+                          </Pressable>
+                        )
+                      ) : null}
                     </View>
                     {card.kind === 'answer'
                       ? <AnswerCardBody card={card} roomId={roomId} />
@@ -561,15 +624,15 @@ function AnswerCardBody({ card, roomId }: { card: Extract<ReviewCard, { kind: 'a
           <Text style={[theme.text('caption'), { color: theme.color.text.secondary }]}>Open in room</Text>
         </Pressable>
       </View>
-      <Text testID="review-answer" style={[theme.text('reading'), { color: theme.color.text.primary, fontSize: 16, lineHeight: 26 }]}>
+      <Text testID="review-saved-answer" style={[theme.text('reading'), { color: theme.color.text.primary, fontSize: 16, lineHeight: 26 }]}>
         {card.answer.answer || 'AI answer'}
       </Text>
       {cited.ok ? (
-        <Text testID="review-answer-quote" style={[theme.text('bodySmall'), { color: theme.color.text.secondary }]}>
+        <Text testID="review-saved-quote" style={[theme.text('bodySmall'), { color: theme.color.text.secondary }]}>
           {`Cited passage: ${cited.quote}`}
         </Text>
       ) : (
-        <Text accessibilityRole="alert" testID="review-answer-error" style={[theme.text('bodySmall'), { color: theme.color.status.danger.text }]}>
+        <Text accessibilityRole="alert" testID="review-saved-error" style={[theme.text('bodySmall'), { color: theme.color.status.danger.text }]}>
           {cited.message}
         </Text>
       )}
