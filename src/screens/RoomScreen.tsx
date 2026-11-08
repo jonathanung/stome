@@ -26,7 +26,7 @@ import { InkLassoActions } from '../features/ask/InkLassoActions';
 import { PencilToolbar, type PencilTool } from '../features/ask/PencilToolbar';
 import { RoomAskPanel, type AskMessage } from '../features/ask/RoomAskPanel';
 import { RoomSidePanel } from '../features/room/RoomSidePanel';
-import { createRoomLoadCoordinator } from '../features/room/roomLoadCoordinator';
+import { createRoomLoadCoordinator, settleLatest } from '../features/room/roomLoadCoordinator';
 import { PhoneRoomActions, PhoneRoomHeader, RoomTabs, SubjectChips, roomSubjects, type RoomTab } from '../features/room/PhoneRoomChrome';
 import { Icon } from '../ui/Icon';
 import { stageName } from '../ui/StageGlyph';
@@ -169,42 +169,52 @@ export function RoomScreen() {
   // Focus loads, saves and quick-capture refreshes all read the same room.
   // Only the newest started read may apply, so an older one cannot restore stale chunks.
   const loads = useRef(createRoomLoadCoordinator()).current;
-  const applyRefresh = useCallback(async (token: { id: number }) => {
-    try {
-      const next = await load();
-      if (!loads.isLatest(token)) return;
-      setRoom(next.room);
-      setChunks(next.chunks);
-      setDueToday(next.due);
-      setLoading(false);
-    } catch (reason) {
-      if (!loads.isLatest(token)) return;
-      setError(reason instanceof Error ? reason.message : 'Could not load room');
-      setLoading(false);
-    }
-  }, [load, loads]);
+  // A load failure is cleared by the next successful load, but an action error is not.
+  const loadError = useRef<string | null>(null);
+  const reportLoadError = useCallback((message: string) => {
+    loadError.current = message;
+    setError(message);
+  }, []);
+  const clearLoadError = useCallback(() => {
+    const message = loadError.current;
+    if (message === null) return;
+    loadError.current = null;
+    setError((current) => current === message ? null : current);
+  }, []);
+  const applyRoom = useCallback((next: Awaited<ReturnType<typeof load>>) => {
+    setRoom(next.room);
+    setChunks(next.chunks);
+    setDueToday(next.due);
+    setLoading(false);
+    clearLoadError();
+  }, [clearLoadError]);
   const refresh = useCallback(async () => {
     const plan = loads.startRefresh();
     if (!plan.run) return;
-    await applyRefresh(plan.token);
-  }, [applyRefresh, loads]);
+    await settleLatest(loads, plan.token, load, applyRoom, (message) => {
+      reportLoadError(message);
+      setLoading(false);
+    });
+  }, [applyRoom, load, loads, reportLoadError]);
   useFocusEffect(useCallback(() => {
     let active = true;
-    const token = loads.startInitial();
-    load().then((next) => {
-      if (!active || !loads.isLatest(token)) return;
-      setRoom(next.room);
-      setChunks(next.chunks);
-      setDueToday(next.due);
-      setLoading(false);
-      // A capture landed while this first load was running; refresh now that
-      // the room has rendered, instead of invalidating the only successful read.
-      if (loads.initialSucceeded()) void refresh();
-    }).catch((reason: unknown) => {
-      if (!active || !loads.isLatest(token)) return;
-      loads.initialFailed();
-      setError(reason instanceof Error ? reason.message : 'Could not load room');
-      setLoading(false);
+    const token = loads.startFocus();
+    void settleLatest(
+      loads,
+      token,
+      load,
+      (next) => { if (active) applyRoom(next); },
+      (message) => {
+        if (!active) return;
+        loads.focusFailed();
+        reportLoadError(message);
+        setLoading(false);
+      },
+    ).then((outcome) => {
+      if (!active || outcome !== 'applied') return;
+      // A capture landed while this focus load was running; refresh now that
+      // the room has rendered, instead of invalidating a successful read.
+      if (loads.focusSucceeded()) void refresh();
     });
     // A capture from the global panel commits outside this screen; reload so the
     // note list and the Ask chunk selection see it without a reload. It is scoped
@@ -216,7 +226,7 @@ export function RoomScreen() {
       // Blur invalidates reads still in flight so they cannot apply after leaving.
       loads.invalidate();
     };
-  }, [id, loads, load, refresh]));
+  }, [applyRoom, id, loads, load, refresh, reportLoadError]));
   const openCitation = useCallback((next: ChunkFocus) => {
     setFocus(next);
   }, []);
