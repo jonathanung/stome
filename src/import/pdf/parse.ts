@@ -95,8 +95,19 @@ function splitPage(heading: string, lines: string[]): string[] {
   const bodies: string[] = [];
   let current: string[] = [];
   let size = 0;
-  for (const raw of lines) {
-    const line = raw.length > max ? raw.slice(0, max) : raw;
+  for (let line of lines) {
+    while (line.length > max) {
+      if (current.length) {
+        bodies.push(`${heading}\n${current.join('\n')}`);
+        current = [];
+        size = 0;
+      }
+      let end = max;
+      const code = line.charCodeAt(end - 1);
+      if (code >= 0xd800 && code <= 0xdbff) end--;
+      bodies.push(`${heading}\n${line.slice(0, end)}`);
+      line = line.slice(end);
+    }
     if (size + line.length + 1 > max && current.length) {
       bodies.push(`${heading}\n${current.join('\n')}`);
       current = [];
