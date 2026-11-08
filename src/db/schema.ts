@@ -2,9 +2,18 @@ import { REVIEW_STATES } from './models.ts';
 
 export const DATABASE_NAME = 'stome.db';
 
-export const SUPPORTED_VERSION = 5;
+export const SUPPORTED_VERSION = 6;
 
-export { ROOM_STAGES, ANNOTATION_TYPES, REVIEW_STATES, type RoomStage, type AnnotationType, type ReviewState } from './models.ts';
+export {
+  ROOM_STAGES,
+  ANNOTATION_TYPES,
+  REVIEW_STATES,
+  STUDY_QUESTION_KINDS,
+  type RoomStage,
+  type AnnotationType,
+  type ReviewState,
+  type StudyQuestionKind,
+} from './models.ts';
 
 export const CONNECTION_PRAGMAS = 'PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;';
 
@@ -146,6 +155,93 @@ export const MIGRATIONS: readonly Migration[] = [
         time_zone TEXT NOT NULL CHECK (length(time_zone) BETWEEN 1 AND 64),
         PRIMARY KEY (chunk_id, local_day)
       );
+    `,
+  },
+  {
+    version: 6,
+    name: 'study materials grounded in room notes',
+    sql: `
+      CREATE TABLE study_decks (
+        id TEXT PRIMARY KEY NOT NULL,
+        room_id TEXT NOT NULL REFERENCES rooms (id) ON DELETE CASCADE,
+        title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 120),
+        source_chunk_ids TEXT NOT NULL CHECK (json_valid(source_chunk_ids)),
+        source_revision INTEGER NOT NULL CHECK (source_revision >= 1),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS study_decks_room ON study_decks (room_id);
+
+      CREATE TABLE study_cards (
+        id TEXT PRIMARY KEY NOT NULL,
+        deck_id TEXT NOT NULL REFERENCES study_decks (id) ON DELETE CASCADE,
+        room_id TEXT NOT NULL REFERENCES rooms (id) ON DELETE CASCADE,
+        position INTEGER NOT NULL CHECK (position >= 0),
+        front TEXT NOT NULL CHECK (length(front) BETWEEN 1 AND 10000),
+        back TEXT NOT NULL CHECK (length(back) BETWEEN 1 AND 10000),
+        source_chunk_ids TEXT NOT NULL CHECK (json_valid(source_chunk_ids)),
+        source_revision INTEGER NOT NULL CHECK (source_revision >= 1),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS study_cards_deck ON study_cards (deck_id, position);
+      CREATE INDEX IF NOT EXISTS study_cards_room ON study_cards (room_id);
+
+      CREATE TABLE study_quizzes (
+        id TEXT PRIMARY KEY NOT NULL,
+        room_id TEXT NOT NULL REFERENCES rooms (id) ON DELETE CASCADE,
+        title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 120),
+        source_chunk_ids TEXT NOT NULL CHECK (json_valid(source_chunk_ids)),
+        source_revision INTEGER NOT NULL CHECK (source_revision >= 1),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS study_quizzes_room ON study_quizzes (room_id);
+
+      CREATE TABLE study_questions (
+        id TEXT PRIMARY KEY NOT NULL,
+        quiz_id TEXT NOT NULL REFERENCES study_quizzes (id) ON DELETE CASCADE,
+        room_id TEXT NOT NULL REFERENCES rooms (id) ON DELETE CASCADE,
+        position INTEGER NOT NULL CHECK (position >= 0),
+        kind TEXT NOT NULL CHECK (kind IN ('mcq', 'true_false', 'fill')),
+        stem TEXT NOT NULL CHECK (length(stem) BETWEEN 1 AND 10000),
+        choices TEXT NOT NULL CHECK (json_valid(choices)),
+        answer TEXT NOT NULL CHECK (length(answer) BETWEEN 1 AND 500),
+        explanation TEXT NOT NULL DEFAULT '' CHECK (length(explanation) <= 10000),
+        source_chunk_ids TEXT NOT NULL CHECK (json_valid(source_chunk_ids)),
+        source_revision INTEGER NOT NULL CHECK (source_revision >= 1),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS study_questions_quiz ON study_questions (quiz_id, position);
+      CREATE INDEX IF NOT EXISTS study_questions_room ON study_questions (room_id);
+
+      CREATE TABLE study_attempts (
+        id TEXT PRIMARY KEY NOT NULL,
+        quiz_id TEXT NOT NULL REFERENCES study_quizzes (id) ON DELETE CASCADE,
+        room_id TEXT NOT NULL REFERENCES rooms (id) ON DELETE CASCADE,
+        score_pct REAL NOT NULL CHECK (score_pct BETWEEN 0 AND 100),
+        correct INTEGER NOT NULL CHECK (correct >= 0),
+        total INTEGER NOT NULL CHECK (total >= 1),
+        results TEXT NOT NULL CHECK (json_valid(results)),
+        duration_ms INTEGER NOT NULL CHECK (duration_ms >= 0),
+        created_at INTEGER NOT NULL,
+        CHECK (correct <= total)
+      );
+      CREATE INDEX IF NOT EXISTS study_attempts_quiz ON study_attempts (quiz_id, created_at);
+      CREATE INDEX IF NOT EXISTS study_attempts_room ON study_attempts (room_id);
+
+      CREATE TABLE slide_outlines (
+        id TEXT PRIMARY KEY NOT NULL,
+        room_id TEXT NOT NULL REFERENCES rooms (id) ON DELETE CASCADE,
+        title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 120),
+        slides TEXT NOT NULL CHECK (json_valid(slides)),
+        source_chunk_ids TEXT NOT NULL CHECK (json_valid(source_chunk_ids)),
+        source_revision INTEGER NOT NULL CHECK (source_revision >= 1),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS slide_outlines_room ON slide_outlines (room_id);
     `,
   },
 ];

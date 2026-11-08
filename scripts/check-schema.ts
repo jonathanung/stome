@@ -42,7 +42,7 @@ function expectConstraintFailure(run: () => void, message: string): void {
   throw new Error(`${message} (the write was accepted)`);
 }
 
-function countRows(db: DatabaseSync, table: 'rooms' | 'chunks' | 'annotations'): number {
+function countRows(db: DatabaseSync, table: string): number {
   const row = db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as
     | { count: number }
     | undefined;
@@ -300,6 +300,76 @@ try {
     'every annotation type should be storable',
   );
   guards.close();
+
+  const study = new DatabaseSync(':memory:');
+  applySchema(study);
+  assert(readVersion(study) === SUPPORTED_VERSION, 'a fresh database should reach the study schema version');
+  for (const table of ['study_decks', 'study_cards', 'study_quizzes', 'study_questions', 'study_attempts', 'slide_outlines']) {
+    assert(
+      study.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").all(table).length === 1,
+      `a fresh database should have ${table}`,
+    );
+  }
+  study.prepare(
+    "INSERT INTO rooms (id, name, stage, created_at, updated_at) VALUES (?, ?, 'stonehenge', ?, ?)",
+  ).run(ROOM_ID, 'Biology', 10, 10);
+  study.prepare(
+    'INSERT INTO chunks (id, room_id, position, content, created_at, updated_at) VALUES (?, ?, 0, ?, ?, ?)',
+  ).run(CHUNK_ID, ROOM_ID, 'cells make energy', 10, 10);
+  const sources: [string, number] = [JSON.stringify([CHUNK_ID]), 1];
+  study.prepare(
+    'INSERT INTO study_decks (id, room_id, title, source_chunk_ids, source_revision, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+  ).run('deck-1', ROOM_ID, 'Cell basics', ...sources, 10, 10);
+  study.prepare(
+    'INSERT INTO study_cards (id, deck_id, room_id, position, front, back, source_chunk_ids, source_revision, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  ).run('card-1', 'deck-1', ROOM_ID, 0, 'Powerhouse?', 'Mitochondrion', ...sources, 10, 10);
+  study.prepare(
+    'INSERT INTO study_quizzes (id, room_id, title, source_chunk_ids, source_revision, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+  ).run('quiz-1', ROOM_ID, 'Cell quiz', ...sources, 10, 10);
+  study.prepare(
+    "INSERT INTO study_questions (id, quiz_id, room_id, position, kind, stem, choices, answer, explanation, source_chunk_ids, source_revision, created_at, updated_at) VALUES (?, ?, ?, 0, 'mcq', ?, ?, ?, '', ?, ?, ?, ?)",
+  ).run('question-1', 'quiz-1', ROOM_ID, 'Where is ATP made?', '["Nucleus","Mitochondrion"]', 'Mitochondrion', ...sources, 10, 10);
+  study.prepare(
+    'INSERT INTO study_attempts (id, quiz_id, room_id, score_pct, correct, total, results, duration_ms, created_at) VALUES (?, ?, ?, 100, 1, 1, ?, 5, 10)',
+  ).run('attempt-1', 'quiz-1', ROOM_ID, '[{"questionId":"question-1","correct":true}]');
+  study.prepare(
+    'INSERT INTO slide_outlines (id, room_id, title, slides, source_chunk_ids, source_revision, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+  ).run('outline-1', ROOM_ID, 'Cells', `[{"title":"Energy","bullets":["ATP"],"notes":"","sourceChunkIds":${sources[0]},"sourceRevision":1}]`, ...sources, 10, 10);
+
+  expectConstraintFailure(
+    () =>
+      study.prepare(
+        "INSERT INTO study_questions (id, quiz_id, room_id, position, kind, stem, choices, answer, source_chunk_ids, source_revision, created_at, updated_at) VALUES ('bad-kind', 'quiz-1', ?, 1, 'essay', 's', '[]', 'a', ?, 1, 10, 10)",
+      ).run(ROOM_ID, sources[0]),
+    'a question with an invalid kind should be rejected',
+  );
+  expectConstraintFailure(
+    () =>
+      study.prepare(
+        "INSERT INTO study_cards (id, deck_id, room_id, position, front, back, source_chunk_ids, source_revision, created_at, updated_at) VALUES ('bad-json', 'deck-1', ?, 1, 'f', 'b', 'not-json', 1, 10, 10)",
+      ).run(ROOM_ID),
+    'study provenance that is not JSON should be rejected',
+  );
+  expectConstraintFailure(
+    () =>
+      study.prepare(
+        "INSERT INTO study_decks (id, room_id, title, source_chunk_ids, source_revision, created_at, updated_at) VALUES ('bad-room', 'missing', 't', ?, 1, 10, 10)",
+      ).run(sources[0]),
+    'a deck pointing at a missing room should be rejected',
+  );
+  expectConstraintFailure(
+    () =>
+      study.prepare(
+        "INSERT INTO study_cards (id, deck_id, room_id, position, front, back, source_chunk_ids, source_revision, created_at, updated_at) VALUES ('bad-deck', 'missing', ?, 1, 'f', 'b', ?, 1, 10, 10)",
+      ).run(ROOM_ID, sources[0]),
+    'a card pointing at a missing deck should be rejected',
+  );
+  study.prepare('DELETE FROM rooms WHERE id = ?').run(ROOM_ID);
+  for (const table of ['study_decks', 'study_cards', 'study_quizzes', 'study_questions', 'study_attempts', 'slide_outlines']) {
+    assert(countRows(study, table) === 0, `deleting a room should cascade to ${table}`);
+  }
+  assert(countRows(study, 'rooms') === 0, 'deleting a room should remove the room');
+  study.close();
 
   console.log('schema checks passed (node:sqlite, not the Expo native driver)');
 } finally {
