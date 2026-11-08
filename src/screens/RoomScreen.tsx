@@ -12,8 +12,11 @@ import { Button, Screen, useStoneTheme } from '../../design-theme/src/primitives
 import { createCommit } from '../data/commit';
 import type { Annotation, Chunk, Room } from '../data/models';
 import type { CommitError, CommitResult, OpKind } from '../data/operations';
-import { getChunk, getRoom, listChunks, listDueChunks, listRoomAnnotations } from '../data/queries';
+import { getChunk, getRoom, listChunks, listDueChunks, listRoomAnnotations, listRoomDueAnswers } from '../data/queries';
+import { planDueItems } from '../data/today';
 import { expoDriver } from '../db/expo-driver';
+import { MarkButtons } from '../features/review/MarkButtons';
+import { reviewMarkController } from '../features/review/mark-attempt';
 import { AnchoredChunkText, PinnedAnswer } from '../features/ask/AnchoredChunkText';
 import type { ChunkFocus } from '../features/ask/citations';
 import { ChunkEditor, type EditResult } from '../features/chunks/ChunkEditor';
@@ -151,8 +154,9 @@ export function RoomScreen() {
 
   const load = useCallback(async () => {
     if (!id) return { room: null, chunks: [] as ChunkWithAnnotations[], due: 0 };
-    const [nextRoom, notes, annotations, due] = await Promise.all([
-      getRoom(db, id), listChunks(db, id), listRoomAnnotations(db, id), listDueChunks(db, Date.now()),
+    const now = Date.now();
+    const [nextRoom, notes, annotations, chunksDue, answersDue] = await Promise.all([
+      getRoom(db, id), listChunks(db, id), listRoomAnnotations(db, id), listDueChunks(db, now), listRoomDueAnswers(db, id, now),
     ]);
     const byChunk = new Map<string, Annotation[]>();
     for (const annotation of annotations) {
@@ -160,7 +164,9 @@ export function RoomScreen() {
       group.push(annotation);
       byChunk.set(annotation.chunkId, group);
     }
-    return { room: nextRoom, due: due.filter((d) => d.chunk.roomId === id).length, chunks: notes.map((chunk) => ({
+    const roomChunksDue = chunksDue.filter((d) => d.chunk.roomId === id);
+    const due = planDueItems([...roomChunksDue, ...answersDue]).length;
+    return { room: nextRoom, due, chunks: notes.map((chunk) => ({
       ...chunk, annotations: byChunk.get(chunk.id) ?? [],
     })) };
   }, [db, id]);
@@ -177,7 +183,12 @@ export function RoomScreen() {
     }).catch((reason: unknown) => {
       if (active) { setError(reason instanceof Error ? reason.message : 'Could not load room'); setLoading(false); }
     });
-    return () => { active = false; };
+    const unsubscribe = reviewMarkController.subscribe(() => {
+      load().then((next) => {
+        if (active) { setRoom(next.room); setChunks(next.chunks); setDueToday(next.due); }
+      }).catch(() => undefined);
+    });
+    return () => { active = false; unsubscribe(); };
   }, [load]));
   const openCitation = useCallback((next: ChunkFocus) => {
     setFocus(next);
@@ -508,6 +519,12 @@ export function RoomScreen() {
               <Button label="Cancel" size="compact" variant="ghost" onPress={() => setAnnotating(null)} />
             </View>
           </View> : <View style={{ alignSelf: 'flex-start' }}><Button label="Annotate" size="compact" variant="outline" onPress={() => setAnnotating(item.id)} /></View>}
+          <MarkButtons
+            chunkId={item.id}
+            expectedRevision={item.revision}
+            commit={commit}
+            testID={`room-mark-${item.id}`}
+          />
         </ChunkEditor>;
         }}
       />
