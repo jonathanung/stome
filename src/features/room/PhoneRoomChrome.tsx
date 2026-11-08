@@ -15,8 +15,8 @@ export function roomSubjects(chunks: { subjects: string[] }[]): string[] {
 }
 
 /** Back, room name with stage line, and the review shortcut (phone design, 390 wide). */
-export function PhoneRoomHeader({ name, status, onBack, onReview }: {
-  name: string; status: string; onBack: () => void; onReview: () => void;
+export function PhoneRoomHeader({ name, status, onBack, onReview, onOptions }: {
+  name: string; status: string; onBack: () => void; onReview: () => void; onOptions?: () => void;
 }) {
   const theme = useStoneTheme();
   const hit = { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' } as const;
@@ -35,6 +35,9 @@ export function PhoneRoomHeader({ name, status, onBack, onReview }: {
       <Pressable accessibilityRole="link" accessibilityLabel="Review this room" onPress={onReview} style={hit} testID="open-review">
         <Icon name="review" size={20} color={theme.color.text.primary} />
       </Pressable>
+      {onOptions ? <Pressable accessibilityRole="button" accessibilityLabel="Room options" onPress={onOptions} style={hit} testID="room-options">
+        <Icon name="more" size={20} color={theme.color.text.primary} />
+      </Pressable> : null}
     </View>
   );
 }

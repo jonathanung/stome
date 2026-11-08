@@ -4,7 +4,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
 import {
-  ActivityIndicator, FlatList, KeyboardAvoidingView, Platform,
+  ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Platform,
   Text, TextInput, View, useWindowDimensions,
 } from 'react-native';
 
@@ -12,14 +12,16 @@ import { Button, Screen, useStoneTheme } from '../../design-theme/src/primitives
 import { createCommit } from '../data/commit';
 import type { Annotation, Chunk, Room } from '../data/models';
 import type { CommitError, CommitResult, OpKind } from '../data/operations';
-import { getRoom, listChunks, listRoomAnnotations } from '../data/queries';
+import { getRoom, listChunks, listDueChunks, listRoomAnnotations } from '../data/queries';
 import { expoDriver } from '../db/expo-driver';
 import { AnchoredChunkText, PinnedAnswer } from '../features/ask/AnchoredChunkText';
 import type { ChunkFocus } from '../features/ask/citations';
 import { ChunkEditor, type EditResult } from '../features/chunks/ChunkEditor';
 import { pastedParagraphs } from '../features/chunks/paste';
-import { PencilToolbar } from '../features/ask/PencilToolbar';
+import { InkLassoActions } from '../features/ask/InkLassoActions';
+import { PencilToolbar, type PencilTool } from '../features/ask/PencilToolbar';
 import { RoomAskPanel, type AskMessage } from '../features/ask/RoomAskPanel';
+import { RoomSidePanel } from '../features/room/RoomSidePanel';
 import { PhoneRoomActions, PhoneRoomHeader, RoomTabs, SubjectChips, roomSubjects, type RoomTab } from '../features/room/PhoneRoomChrome';
 import { Icon } from '../ui/Icon';
 import { stageName } from '../ui/StageGlyph';
@@ -117,8 +119,12 @@ export function RoomScreen() {
   const { width } = useWindowDimensions();
   const phone = width < 600;
   const splitView = width >= 900 && width < 1300;
+  const wide = width >= 1300;
+  const [dueToday, setDueToday] = useState(0);
   const [askOpen, setAskOpen] = useState(true);
   const [askMessages, setAskMessages] = useState<AskMessage[]>([]);
+  const [penTool, setPenTool] = useState<PencilTool>('pen');
+  const [inkSelected, setInkSelected] = useState(true);
   const [tab, setTab] = useState<RoomTab>('notes');
   const [subject, setSubject] = useState<string | null>(null);
   const subjects = useMemo(() => roomSubjects(chunks), [chunks]);
@@ -126,9 +132,9 @@ export function RoomScreen() {
   const visible = useMemo(() => tab !== 'notes' ? [] : activeSubject ? chunks.filter((chunk) => chunk.subjects.includes(activeSubject)) : chunks, [tab, chunks, activeSubject]);
 
   const load = useCallback(async () => {
-    if (!id) return { room: null, chunks: [] as ChunkWithAnnotations[] };
-    const [nextRoom, notes, annotations] = await Promise.all([
-      getRoom(db, id), listChunks(db, id), listRoomAnnotations(db, id),
+    if (!id) return { room: null, chunks: [] as ChunkWithAnnotations[], due: 0 };
+    const [nextRoom, notes, annotations, due] = await Promise.all([
+      getRoom(db, id), listChunks(db, id), listRoomAnnotations(db, id), listDueChunks(db, Date.now()),
     ]);
     const byChunk = new Map<string, Annotation[]>();
     for (const annotation of annotations) {
@@ -136,7 +142,7 @@ export function RoomScreen() {
       group.push(annotation);
       byChunk.set(annotation.chunkId, group);
     }
-    return { room: nextRoom, chunks: notes.map((chunk) => ({
+    return { room: nextRoom, due: due.filter((d) => d.chunk.roomId === id).length, chunks: notes.map((chunk) => ({
       ...chunk, annotations: byChunk.get(chunk.id) ?? [],
     })) };
   }, [db, id]);
@@ -144,11 +150,12 @@ export function RoomScreen() {
     const next = await load();
     setRoom(next.room);
     setChunks(next.chunks);
+    setDueToday(next.due);
   }, [load]);
   useFocusEffect(useCallback(() => {
     let active = true;
     load().then((next) => {
-      if (active) { setRoom(next.room); setChunks(next.chunks); setLoading(false); }
+      if (active) { setRoom(next.room); setChunks(next.chunks); setDueToday(next.due); setLoading(false); }
     }).catch((reason: unknown) => {
       if (active) { setError(reason instanceof Error ? reason.message : 'Could not load room'); setLoading(false); }
     });
@@ -159,7 +166,7 @@ export function RoomScreen() {
   }, []);
   useEffect(() => {
     if (!focus || focus.end <= focus.start) return;
-    const index = (phone ? visible : chunks).findIndex((chunk) => chunk.id === focus.chunkId);
+    const index = visible.findIndex((chunk) => chunk.id === focus.chunkId);
     let cancelled = false;
     let attempt = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -230,7 +237,7 @@ export function RoomScreen() {
 
   const roomList = <Screen><SafeAreaView style={{ flex: 1 }}>
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-      <FlatList ref={listRef} data={phone ? visible : chunks} extraData={focus} keyExtractor={(chunk) => chunk.id} keyboardShouldPersistTaps="handled" testID="chunk-list"
+      <FlatList ref={listRef} data={visible} extraData={focus} keyExtractor={(chunk) => chunk.id} keyboardShouldPersistTaps="handled" testID="chunk-list"
         initialNumToRender={1} maxToRenderPerBatch={1} windowSize={1}
         onScroll={(event) => { scrollY.current = event.nativeEvent.contentOffset.y; }}
         scrollEventThrottle={16}
@@ -243,8 +250,14 @@ export function RoomScreen() {
         contentContainerStyle={[column, { paddingTop: theme.space.md, paddingBottom: 120, gap: theme.space.xl }]}
         ListHeaderComponent={<View style={{ gap: theme.space.section, marginBottom: theme.space.base }}>
           {phone ? <View style={{ gap: theme.space.lg }}>
-            <PhoneRoomHeader name={room.name} status={`${stageName(room.stage)} · ${chunks.length} ${chunks.length === 1 ? 'chunk' : 'chunks'}`}
-              onBack={() => router.replace('/')} onReview={() => router.push(`/rooms/${room.id}/review`)} />
+            <PhoneRoomHeader name={room.name} status={`${stageName(room.stage)} · saved`}
+              onBack={() => router.replace('/')} onReview={() => router.push(`/rooms/${room.id}/review`)}
+              onOptions={() => Alert.alert(room.name, undefined, [
+                { text: 'Review this room', onPress: () => router.push(`/rooms/${room.id}/review`) },
+                { text: 'Slides', onPress: () => router.push(`/rooms/${room.id}/slides`) },
+                { text: 'Whiteboard', onPress: () => router.push(`/rooms/${room.id}/whiteboard`) },
+                { text: 'Cancel', style: 'cancel' },
+              ])} />
             <RoomTabs value={tab} onChange={setTab} />
             {tab === 'notes' ? <SubjectChips subjects={subjects} value={activeSubject} onChange={setSubject} /> : null}
           </View> : <>
@@ -277,7 +290,7 @@ export function RoomScreen() {
             })} /></View>
           </View>}
           {error ? <Notice tone="danger">{error}</Notice> : null}
-          {chunks.length && !phone ? <SectionTitle>Notes</SectionTitle> : null}
+          {chunks.length && !phone ? <SectionTitle>{activeSubject ? `Notes · ${activeSubject}` : 'Notes'}</SectionTitle> : null}
         </View>}
         ListEmptyComponent={phone && tab !== 'notes'
           ? <EmptyState title={`No ${tab} in this room yet`} body={`${tab === 'slides' ? 'Slides' : 'Boards'} will show up here once they are added.`} />
@@ -286,7 +299,7 @@ export function RoomScreen() {
         ListFooterComponent={phone && tab !== 'notes' ? undefined : <HarnessPanel roomId={room.id} chunks={chunks} appDb={sqlite} onOpenCitation={openCitation} onSaved={() => { void refresh(); }} />}
         renderItem={({ item, index }) => {
           const cited = focus?.chunkId === item.id ? focus : null;
-          return <ChunkEditor chunk={item} index={index} count={chunks.length} onError={setError}
+          return <ChunkEditor chunk={item} index={chunks.indexOf(item)} count={chunks.length} onError={setError}
             nativeID={`chunk-${item.id}`} testID={`chunk-${item.id}`} highlighted={Boolean(cited)}
             // While a citation points into this chunk, show the highlighted passage; "Edit text" closes it.
             readView={cited ? <AnchoredChunkText body={item.body} focus={cited} /> : undefined}
@@ -338,11 +351,21 @@ export function RoomScreen() {
 
   // iPad: the room beside an ask column, with a floating pencil tool bar.
   // The ask backend is not wired to this panel yet; questions stay local.
+  if (wide) return <View style={{ flex: 1, flexDirection: 'row' }} testID="room-wide-view">
+    <View style={{ flex: 1, minWidth: 0 }}>{roomList}</View>
+    <View style={{ paddingTop: theme.space.page, paddingRight: theme.space.page }}>
+      <RoomSidePanel roomId={room.id} subjects={subjects} chunks={chunks} dueToday={dueToday}
+        activeSubject={activeSubject} onSubject={setSubject} />
+    </View>
+  </View>;
   if (!splitView) return roomList;
   return <View style={{ flex: 1, flexDirection: 'row' }} testID="room-split-view">
     <View style={{ flex: 1, minWidth: 0 }}>
       {roomList}
-      <PencilToolbar />
+      {penTool === 'lasso' && inkSelected ? <InkLassoActions
+        onAsk={() => { setAskOpen(true); setAskMessages((prev) => [...prev, { id: randomUUID(), text: 'ask about this ink', note: 'from your ink' }]); setInkSelected(false); }}
+        onConvert={() => setInkSelected(false)} /> : null}
+      <PencilToolbar onChange={(tool) => { setPenTool(tool); if (tool === 'lasso') setInkSelected(true); }} />
     </View>
     {askOpen ? <RoomAskPanel
       subtitle={`your ink + ${chunks.length} ${chunks.length === 1 ? 'chunk' : 'chunks'}`}

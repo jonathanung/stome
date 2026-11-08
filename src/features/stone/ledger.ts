@@ -42,3 +42,22 @@ export async function listRoomLedger(db: Db, roomId: string): Promise<LedgerEntr
     markedAt: r.marked_at,
   }));
 }
+
+export interface ImportActivity {
+  sourceId: string;
+  noteCount: number;
+  importedAt: number;
+}
+
+/** Imports into one room. They appear in the ledger as "no credit" so the rule is visible. */
+export async function listRoomImports(db: Db, roomId: string): Promise<ImportActivity[]> {
+  const rows = await db.all<{ source_id: string; chunk_ids: string; imported_at: number }>(
+    'SELECT source_id, chunk_ids, imported_at FROM import_sources WHERE room_id = ? ORDER BY imported_at DESC, source_id',
+    [roomId],
+  );
+  return rows.map((r) => {
+    let count = 0;
+    try { const ids: unknown = JSON.parse(r.chunk_ids); count = Array.isArray(ids) ? ids.length : 0; } catch { count = 0; }
+    return { sourceId: r.source_id, noteCount: count, importedAt: r.imported_at };
+  });
+}
