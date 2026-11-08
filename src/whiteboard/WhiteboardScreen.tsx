@@ -23,11 +23,24 @@ import {
   type Tool,
   type WhiteboardElement,
 } from './types';
+import { pointerOnCanvas, zoomTransform } from './geometry';
+import { appendBoardHistory } from './history';
 import { createWhiteboardPanResponder, type TextEditState } from './useWhiteboardInput';
 
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 20;
 const HISTORY_LIMIT = 50;
+
+/** React Native Web may hand back the DOM node or a host wrapper. */
+function hostElement(node: unknown): HTMLElement | null {
+  if (typeof HTMLElement !== 'undefined' && node instanceof HTMLElement) return node;
+  if (node && typeof node === 'object' && 'getBoundingClientRect' in node) return node as HTMLElement;
+  if (node && typeof node === 'object' && '_nativeTag' in node) {
+    const tag = (node as { _nativeTag?: unknown })._nativeTag;
+    if (typeof HTMLElement !== 'undefined' && tag instanceof HTMLElement) return tag;
+  }
+  return null;
+}
 
 export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
   const [elements, setElements] = useState<WhiteboardElement[]>([]);
@@ -60,6 +73,7 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
   const pinchRef = useRef<{ dist: number; scale: number; ox: number; oy: number } | null>(null);
   const transformRef = useRef(transform);
   const elementsRef = useRef(elements);
+  const historyRef = useRef(history);
   const historyIndexRef = useRef(historyIndex);
   const selectedIdRef = useRef(selectedId);
   const pushHistoryRef = useRef<(els: WhiteboardElement[]) => void>(() => {});
@@ -70,20 +84,20 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
 
   useEffect(() => { transformRef.current = transform; }, [transform]);
   useEffect(() => { elementsRef.current = elements; }, [elements]);
+  useEffect(() => { historyRef.current = history; }, [history]);
   useEffect(() => { historyIndexRef.current = historyIndex; }, [historyIndex]);
   useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
   useEffect(() => { toolRef.current = tool; }, [tool]);
   useEffect(() => { currentStyleRef.current = currentStyle; }, [currentStyle]);
 
   function pushHistory(newElements: WhiteboardElement[]) {
-    const idx = historyIndexRef.current;
-    setHistory((prev) => {
-      const base = prev.slice(0, idx + 1);
-      return [...base, newElements].slice(-HISTORY_LIMIT);
-    });
-    setHistoryIndex((i) => Math.min(i + 1, HISTORY_LIMIT - 1));
-    setElements(newElements);
+    const applied = appendBoardHistory(historyRef.current, historyIndexRef.current, newElements, HISTORY_LIMIT);
+    historyRef.current = applied.history;
+    historyIndexRef.current = applied.index;
     elementsRef.current = newElements;
+    setHistory(applied.history);
+    setHistoryIndex(applied.index);
+    setElements(newElements);
   }
 
   useEffect(() => {
@@ -92,17 +106,23 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
   });
 
   function undo() {
-    if (historyIndex === 0) return;
-    const idx = historyIndex - 1;
+    if (historyIndexRef.current === 0) return;
+    const idx = historyIndexRef.current - 1;
+    const next = historyRef.current[idx] ?? [];
+    historyIndexRef.current = idx;
+    elementsRef.current = next;
     setHistoryIndex(idx);
-    setElements(history[idx] ?? []);
+    setElements(next);
   }
 
   function redo() {
-    if (historyIndex >= history.length - 1) return;
-    const idx = historyIndex + 1;
+    if (historyIndexRef.current >= historyRef.current.length - 1) return;
+    const idx = historyIndexRef.current + 1;
+    const next = historyRef.current[idx] ?? [];
+    historyIndexRef.current = idx;
+    elementsRef.current = next;
     setHistoryIndex(idx);
-    setElements(history[idx] ?? []);
+    setElements(next);
   }
 
   function clear() {
@@ -148,8 +168,7 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     const update = () => {
-      const node = (svgContainerRef.current as unknown as { _nativeTag?: HTMLElement } | null)
-        ?._nativeTag as HTMLElement | undefined;
+      const node = hostElement(svgContainerRef.current);
       if (node) {
         const rect = node.getBoundingClientRect();
         canvasOriginRef.current = { x: rect.left, y: rect.top };
@@ -168,25 +187,18 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;
-    const node = (svgContainerRef.current as unknown as { _nativeTag?: HTMLElement } | null)
-      ?._nativeTag as HTMLElement | undefined;
+    const node = hostElement(svgContainerRef.current);
     if (!node) return;
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       if (e.ctrlKey || e.metaKey) {
-        // Pinch-to-zoom on trackpad or ctrl+scroll
+        // Pinch-to-zoom on trackpad or ctrl+scroll. client coordinates stay on the
+        // canvas even when the event target is a shape inside it.
         const factor = e.deltaY < 0 ? 1.1 : 0.9;
-        setTransform((t) => {
-          const newScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, t.scale * factor));
-          const mx = e.offsetX;
-          const my = e.offsetY;
-          return {
-            scale: newScale,
-            offsetX: mx - (mx - t.offsetX) * (newScale / t.scale),
-            offsetY: my - (my - t.offsetY) * (newScale / t.scale),
-          };
-        });
+        const rect = node.getBoundingClientRect();
+        const pointer = pointerOnCanvas(e.clientX, e.clientY, rect);
+        setTransform((t) => zoomTransform(t, pointer.x, pointer.y, factor, MIN_SCALE, MAX_SCALE));
       } else {
         // Plain scroll = pan (matches Excalidraw default)
         setTransform((t) => ({
@@ -288,8 +300,7 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
     setCanvasSize({ width, height });
     // On web, also capture the canvas's screen-space origin so PanResponder coords can be corrected
     if (Platform.OS === 'web') {
-      const node = (svgContainerRef.current as unknown as { _nativeTag?: HTMLElement } | null)
-        ?._nativeTag as HTMLElement | undefined;
+      const node = hostElement(svgContainerRef.current);
       if (node) {
         const rect = node.getBoundingClientRect();
         canvasOriginRef.current = { x: rect.left, y: rect.top };
