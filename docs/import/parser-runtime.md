@@ -15,8 +15,9 @@ and parse compressed PDF and DOCX fixtures through their normal parser routes.
 That verifies the JavaScript dependency boundary. On 2026-11-08 the same
 adapter was executed by Hermes in a debug build on an Android API 35 x86_64
 emulator. `DecompressionStream` was undefined. A 100,000-byte zlib stream
-matched, an over-limit stream was rejected, a compressed PDF read back with
-`File.bytes()` kept its page text, and a deflated DOCX passed its ZIP checksum.
+matched, an over-limit stream was rejected, a compressed PDF read back through
+the capped `File` handle (`readBytes`) kept its page text, and a deflated DOCX
+passed its ZIP checksum.
 That run did not use the system file picker, a release APK, a physical device,
 or iOS.
 
