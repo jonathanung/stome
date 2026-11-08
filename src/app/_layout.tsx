@@ -20,9 +20,9 @@ import { DATABASE_NAME } from '../db/schema';
 import { classifyStorageFailure, createStorageRetryGate, finishStartup } from '../db/storage-startup';
 import { QuickCapture } from '../features/capture/QuickCapture';
 import { installHarnessRandomBytes } from '../harness/ids';
+import { AppShell } from '../ui/shell/AppShell';
 import { StorageOpening, StorageStartupScreen } from '../screens/StorageStartup';
 import { stackHeaderOptions } from '../theme/stack-header';
-import { AppShell } from '../ui/shell/AppShell';
 
 installHarnessRandomBytes((size) => getRandomBytes(size));
 
@@ -78,10 +78,8 @@ function AppStack() {
   return (
     <Stack screenOptions={stackHeaderOptions(theme)}>
       <Stack.Screen name="index" options={{ headerShown: false }} />
-      <Stack.Screen name="whiteboard" options={{ headerShown: false }} />
       <Stack.Screen name="today" options={{ headerShown: false }} />
       <Stack.Screen name="rooms/[id]" options={{ headerShown: false }} />
-      <Stack.Screen name="rooms/[id]/board" options={{ headerShown: false }} />
       <Stack.Screen name="recent" options={{ headerShown: false }} />
       <Stack.Screen name="rooms/[id]/review" options={{ headerShown: false }} />
       <Stack.Screen name="stone" options={{ headerShown: false }} />

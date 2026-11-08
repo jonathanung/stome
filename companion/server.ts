@@ -5,8 +5,6 @@ import { pathToFileURL } from 'node:url';
 import { ALLOWED_TOOL_NAMES, PAIRING_TTL_MS, PROVIDER_LIMITS, HarnessError, type HarnessErrorCode } from '../src/harness/contract.ts';
 import { createProvider, type Provider, type ProviderRequest } from '../src/harness/provider.ts';
 import type { CompanionStatus } from '../src/harness/tools.ts';
-import { parseBoardReply, parseBoardRequest } from '../src/whiteboard/assistant.ts';
-import { mockBoardProvider, openAiBoardProvider, type BoardProvider } from './board-provider.ts';
 
 const LOOPBACK_HOST = '127.0.0.1';
 const RAW_BODY_LIMIT = PROVIDER_LIMITS.maxRequestChars + 2_000;
@@ -23,7 +21,6 @@ type CompanionOptions = {
   token: string;
   expiresAt: number;
   provider: Provider;
-  boardProvider?: BoardProvider;
   /** What GET /v1/status reports. Defaults to the mock. Never holds a key. */
   status?: CompanionStatus;
 };
@@ -70,7 +67,7 @@ function sendJson(
   response: ServerResponse,
   status: number,
   body:
-    | { ok: true; provider: CompanionStatus['provider'] | BoardProvider['name']; output: unknown }
+    | { ok: true; provider: CompanionStatus['provider']; output: unknown }
     | { ok: true; status: CompanionStatus }
     | { ok: false; error: { code: string; message: string } },
   extraHeaders: Record<string, string>,
@@ -172,9 +169,8 @@ async function handle(request: IncomingMessage, response: ServerResponse, option
     return;
   }
   const isTool = request.method === 'POST' && request.url === '/v1/tool';
-  const isBoard = request.method === 'POST' && request.url === '/v1/board';
   const isStatus = request.method === 'GET' && request.url === '/v1/status';
-  if (!isTool && !isBoard && !isStatus) {
+  if (!isTool && !isStatus) {
     sendJson(response, 404, { ok: false, error: { code: 'not_found', message: 'Unknown companion route' } }, cors);
     return;
   }
@@ -203,13 +199,6 @@ async function handle(request: IncomingMessage, response: ServerResponse, option
   response.on('close', stop);
   try {
     const raw = await readBody(request);
-    if (request.url === '/v1/board') {
-      const input = parseBoardRequest(JSON.parse(raw));
-      const boardProvider = options.boardProvider ?? mockBoardProvider;
-      const output = parseBoardReply(await boardProvider.respond(input, controller.signal), input);
-      if (!response.writableEnded) sendJson(response, 200, { ok: true, provider: boardProvider.name, output }, cors);
-      return;
-    }
     const parsed = JSON.parse(raw) as ProviderRequest;
     const output = await options.provider.complete(parsed, controller.signal);
     if (response.writableEnded) {
@@ -224,8 +213,8 @@ async function handle(request: IncomingMessage, response: ServerResponse, option
       sendJson(response, statusFor(error.code), { ok: false, error: { code: error.code, message: error.message } }, cors);
       return;
     }
-    if (error instanceof SyntaxError || (error instanceof Error && error.message.startsWith('Board '))) {
-      sendJson(response, 400, { ok: false, error: { code: 'invalid_shape', message: error instanceof SyntaxError ? 'The request body is not JSON' : error.message } }, cors);
+    if (error instanceof SyntaxError) {
+      sendJson(response, 400, { ok: false, error: { code: 'invalid_shape', message: 'The request body is not JSON' } }, cors);
       return;
     }
     sendJson(response, 422, { ok: false, error: { code: 'provider_error', message: 'The companion failed before answering' } }, cors);
@@ -299,17 +288,12 @@ async function main(): Promise<void> {
   const expiresAt = Date.now() + ttl;
   const live = await liveConfigFromEnv(process.env);
   const provider = live ? live.provider : createProvider('mock');
-  const boardMode = process.env.STOME_BOARD_PROVIDER === 'openai' ? 'openai' : 'mock';
-  const boardKey = process.env.STOME_BOARD_API_KEY ?? process.env.OPENAI_API_KEY;
-  if (boardMode === 'openai' && !boardKey) throw new Error('STOME_BOARD_PROVIDER=openai needs STOME_BOARD_API_KEY or OPENAI_API_KEY');
-  const boardProvider = boardMode === 'openai' ? openAiBoardProvider({ apiKey: boardKey!, model: process.env.STOME_BOARD_MODEL ?? 'gpt-4o-mini' }) : mockBoardProvider;
   const server = createServer((request, response) => {
     void handle(request, response, {
       origin,
       token,
       expiresAt,
       provider,
-      boardProvider,
       ...(live ? { status: live.status } : {}),
     });
   });
@@ -327,7 +311,7 @@ async function main(): Promise<void> {
         `App origin: ${origin}`,
         `Pairing token (expires in ${lifetime}, keep it out of browser storage): ${token}`,
         `Pairing deadline: ${expiresAt}`,
-        live ? `${live.banner} Board provider: ${boardProvider.name}.` : `Notes provider: deterministic mock. Board provider: ${boardProvider.name}.`,
+        live ? live.banner : 'Provider: deterministic mock. No live model call.',
         '',
       ].join('\n'),
     );

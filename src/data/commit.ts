@@ -11,7 +11,6 @@
 
 import type { Db, SqlValue } from '../db/driver.ts';
 import { ANNOTATION_TYPES, REVIEW_STATES, STUDY_QUESTION_KINDS, type ReviewState } from '../db/schema.ts';
-import { validBoardItems } from '../whiteboard/model.ts';
 import {
   LIMITS,
   NEEDS_CONFIRMATION,
@@ -216,11 +215,6 @@ function normalize(op: Operation): Normalized {
   const p: Record<string, unknown> = isObject(op.payload) ? op.payload : reject('invalid', 'payload must be an object');
 
   switch (op.kind) {
-    case 'board.save': {
-      const roomId = requireId(p.roomId, 'roomId');
-      if (!validBoardItems(p.items) || JSON.stringify(p.items).length > 300_000) reject('invalid', 'invalid whiteboard items');
-      return { kind: op.kind, payload: { roomId, items: p.items as Payloads['board.save']['items'] } };
-    }
     case 'import.note': {
       if (typeof p.sourceId !== 'string' || !p.sourceId.startsWith('markdown:') || p.sourceId.length > 2048 || p.sourceId.length <= 9) {
         reject('invalid', 'import needs a stable Markdown collection/path identity');
@@ -759,16 +753,6 @@ async function apply(db: Db, op: Operation, n: Normalized, deps: CommitDeps): Pr
       );
       const stage = await creditRoom(db, run, chunk!.room_id, now);
       return { chunkId, annotationId: null, state, localDay: day, markedAt: now, dueAt, timeZone: zone, stage };
-    }
-    case 'board.save': {
-      const { roomId, items } = n.payload;
-      if (!await db.get('SELECT 1 FROM rooms WHERE id = ?', [roomId])) reject('not_found', 'room does not exist');
-      const board = await db.get<RevisionRow>('SELECT revision FROM whiteboards WHERE room_id = ?', [roomId]);
-      const revision = board?.revision ?? 0;
-      if (op.expectedRevision !== revision) reject('stale_revision', `whiteboard changed elsewhere (now revision ${revision})`);
-      if (board) await run('UPDATE whiteboards SET items = ?, revision = revision + 1, updated_at = ? WHERE room_id = ?', [JSON.stringify(items), now, roomId]);
-      else await run('INSERT INTO whiteboards (room_id, items, updated_at) VALUES (?, ?, ?)', [roomId, JSON.stringify(items), now]);
-      return { roomId, revision: revision + 1 };
     }
     case 'study.deck.create': {
       const { roomId, title, sourceChunkIds, sourceRevision } = n.payload;

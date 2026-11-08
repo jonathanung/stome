@@ -5,14 +5,12 @@
  */
 
 import type { AnnotationType, ReviewState, RoomStage, StudyQuestionKind } from '../db/schema.ts';
-import type { BoardItem } from '../whiteboard/model.ts';
 import type { AnnotationAnchors, SlideItem } from './models.ts';
 
 export const SOURCES = ['human', 'import', 'ai'] as const;
 export type Source = (typeof SOURCES)[number];
 
 export interface Payloads {
-  'board.save': { roomId: string; items: BoardItem[] };
   /** One reviewed source note, saved atomically with its provenance. */
   'import.note': {
     sourceId: string;
@@ -131,7 +129,6 @@ export interface Payloads {
 }
 
 export interface Results {
-  'board.save': { roomId: string; revision: number };
   'import.note': { roomId: string; chunkIds: string[]; skipped: boolean };
   'room.create': { roomId: string; revision: number };
   'room.rename': { roomId: string; revision: number };
@@ -164,7 +161,6 @@ export interface Results {
 export type OpKind = keyof Payloads;
 
 export const OP_KINDS = [
-  'board.save',
   'import.note',
   'room.create',
   'room.rename',
@@ -215,7 +211,6 @@ export const PERMISSIONS: Record<Source, ReadonlySet<OpKind>> = {
   ai: new Set<OpKind>([
     'annotation.create',
     'chunk.update',
-    'board.save',
     'study.deck.create',
     'study.card.create',
     'study.quiz.create',

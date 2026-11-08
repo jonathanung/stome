@@ -2,7 +2,7 @@ import { REVIEW_STATES } from './models.ts';
 
 export const DATABASE_NAME = 'stome.db';
 
-export const SUPPORTED_VERSION = 8;
+export const SUPPORTED_VERSION = 7;
 
 export {
   ROOM_STAGES,
@@ -256,33 +256,6 @@ export const MIGRATIONS: readonly Migration[] = [
         due_at INTEGER NOT NULL,
         time_zone TEXT NOT NULL CHECK (length(time_zone) BETWEEN 1 AND 64),
         PRIMARY KEY (annotation_id, local_day)
-      );
-    `,
-  },
-  {
-    version: 8,
-    name: 'review marks and whiteboards both exist',
-    // #79 published user_version 5 as review_marks. #123 replaced that same
-    // version with whiteboards, and #145 reverted the merge. A database that
-    // already applied the replaced SQL stays at 5 (or 6, once study ran) and
-    // will not run version 5 again. Versions 6 and 7 are the study and answer
-    // mark migrations shipped on main and are not renumbered. This step creates
-    // whichever of the two tables is missing and does not rewrite rows.
-    sql: `
-      CREATE TABLE IF NOT EXISTS review_marks (
-        chunk_id TEXT NOT NULL REFERENCES chunks (id) ON DELETE CASCADE,
-        local_day TEXT NOT NULL CHECK (local_day GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
-        state TEXT NOT NULL CHECK (state IN (${REVIEW_STATES.map((state) => `'${state}'`).join(', ')})),
-        marked_at INTEGER NOT NULL,
-        due_at INTEGER NOT NULL,
-        time_zone TEXT NOT NULL CHECK (length(time_zone) BETWEEN 1 AND 64),
-        PRIMARY KEY (chunk_id, local_day)
-      );
-      CREATE TABLE IF NOT EXISTS whiteboards (
-        room_id TEXT PRIMARY KEY NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
-        revision INTEGER NOT NULL DEFAULT 1,
-        items TEXT NOT NULL CHECK (json_valid(items)),
-        updated_at INTEGER NOT NULL
       );
     `,
   },

@@ -3,7 +3,6 @@
 import type { Db } from '../db/driver.ts';
 import type { ReviewState } from '../db/schema.ts';
 import { isStudyStale } from '../features/study/scheduling.ts';
-import type { Board } from '../whiteboard/model.ts';
 import type {
   Annotation,
   AnswerMark,
@@ -21,13 +20,6 @@ import type {
   StudyQuestion,
   StudyQuiz,
 } from './models.ts';
-
-export async function getBoard(db: Db, roomId: string): Promise<Board> {
-  const row = await db.get<{ room_id: string; revision: number; items: string; updated_at: number }>(
-    'SELECT room_id, revision, items, updated_at FROM whiteboards WHERE room_id = ?', [roomId]);
-  return row ? { roomId: row.room_id, revision: row.revision, items: JSON.parse(row.items) as Board['items'], updatedAt: row.updated_at }
-    : { roomId, revision: 0, items: [], updatedAt: 0 };
-}
 
 interface RoomRow {
   id: string;
@@ -128,6 +120,11 @@ const toAnnotation = (row: AnnotationRow): Annotation => ({
   updatedAt: row.updated_at,
 });
 
+export async function listAnnotations(db: Db, chunkId: string): Promise<Annotation[]> {
+  const rows = await db.all<AnnotationRow>('SELECT * FROM annotations WHERE chunk_id = ? ORDER BY created_at, id', [chunkId]);
+  return rows.map(toAnnotation);
+}
+
 export async function getAnnotation(db: Db, annotationId: string): Promise<Annotation | null> {
   const row = await db.get<AnnotationRow>('SELECT * FROM annotations WHERE id = ?', [annotationId]);
   return row ? toAnnotation(row) : null;
@@ -185,11 +182,6 @@ export async function listDueChunks(db: Db, now: number): Promise<DueChunk[]> {
     [now],
   );
   return rows.map((row) => ({ chunk: toChunk(row), mark: toReview(row) }));
-}
-
-export async function listAnnotations(db: Db, chunkId: string): Promise<Annotation[]> {
-  const rows = await db.all<AnnotationRow>('SELECT * FROM annotations WHERE chunk_id = ? ORDER BY created_at, id', [chunkId]);
-  return rows.map(toAnnotation);
 }
 
 /** Loads annotations for all chunks in one room without one query per chunk. */

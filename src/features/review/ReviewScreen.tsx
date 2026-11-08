@@ -647,7 +647,6 @@ function AnswerCardBody({ card, roomId }: { card: Extract<ReviewCard, { kind: 'a
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={label}
       accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}

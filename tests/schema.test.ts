@@ -24,15 +24,7 @@ test('a fresh database migrates to the latest version, and running again does no
   await migrateDb(db);
   assert.equal(await version(db), SUPPORTED_VERSION);
   const before = await tables(db);
-  assert.deepEqual(before, ['annotations', 'answer_marks', 'applied_ops', 'chunk_subjects', 'chunks', 'import_sources', 'notes', 'review_marks', 'rooms', 'slide_outlines', 'study_attempts', 'study_cards', 'study_decks', 'study_questions', 'study_quizzes', 'whiteboards']);
-  assert.equal(MIGRATIONS[4]?.name, 'human review marks');
-  assert.equal(MIGRATIONS[5]?.name, 'study materials grounded in room notes');
-  assert.equal(MIGRATIONS[6]?.name, 'pinned answer review marks (REV.3 #127, annotation-keyed)');
-  assert.equal(MIGRATIONS[6]?.version, 7);
-  assert.match(MIGRATIONS[6]?.sql ?? '', /CREATE TABLE answer_marks/);
-  assert.equal(MIGRATIONS[7]?.version, 8);
-  assert.match(MIGRATIONS[7]?.sql ?? '', /CREATE TABLE IF NOT EXISTS whiteboards/);
-  assert.match(MIGRATIONS[7]?.sql ?? '', /CREATE TABLE IF NOT EXISTS review_marks/);
+  assert.deepEqual(before, ['annotations', 'answer_marks', 'applied_ops', 'chunk_subjects', 'chunks', 'import_sources', 'notes', 'review_marks', 'rooms', 'slide_outlines', 'study_attempts', 'study_cards', 'study_decks', 'study_questions', 'study_quizzes']);
 
   await migrateDb(db);
   assert.equal(await version(db), SUPPORTED_VERSION);
