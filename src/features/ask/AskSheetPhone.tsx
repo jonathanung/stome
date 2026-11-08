@@ -22,10 +22,15 @@ export type AskSheetProps = {
   /** The question that produced the proposal. */
   question: string | null;
   /** Null while nothing is waiting for a decision. */
-  proposal: { kind: 'answer' | 'edit'; body: string; previousBody?: string } | null;
+  proposal:
+    | { kind: 'answer' | 'edit'; body: string; previousBody?: string }
+    | { kind: 'stroke'; pointCount: number; chunkLabel: string; revision: number }
+    | null;
   sources: readonly AskSheetSource[];
   problems: readonly string[];
   busy: boolean;
+  /** e.g. "Anthropic · claude-opus-5-5 · live". Null while the companion is unknown. */
+  providerLabel?: string | null;
   error: string | null;
   canConfirm: boolean;
   onClose: () => void;
@@ -49,6 +54,7 @@ export function AskSheetPhone(props: AskSheetProps) {
   const [text, setText] = useState('');
   const { proposal } = props;
   const isEdit = proposal?.kind === 'edit';
+  const isStroke = proposal?.kind === 'stroke';
   const canSend = text.trim().length > 0 && !props.busy;
 
   function send() {
@@ -69,7 +75,10 @@ export function AskSheetPhone(props: AskSheetProps) {
           <View accessibilityElementsHidden importantForAccessibility="no" style={styles.grabber} />
           <View style={styles.header}>
             <View style={styles.titleRow}>
-              <Text accessibilityRole="header" style={styles.title}>ask</Text>
+              <View>
+                <Text accessibilityRole="header" style={styles.title}>ask</Text>
+                {props.providerLabel ? <Text style={styles.providerLabel} testID="ask-sheet-provider">{props.providerLabel}</Text> : null}
+              </View>
               <Pressable accessibilityRole="button" onPress={props.onClose} style={styles.done} testID="ask-sheet-done">
                 <Text style={styles.doneText}>done</Text>
               </Pressable>
@@ -101,15 +110,19 @@ export function AskSheetPhone(props: AskSheetProps) {
             ) : null}
             {proposal ? (
               <>
-                <View accessibilityLabel={isEdit ? 'proposed ai edit' : 'proposed ai answer'} style={styles.card} testID="ask-sheet-proposal">
+                <View accessibilityLabel={isEdit ? 'proposed ai edit' : isStroke ? 'proposed ai stroke' : 'proposed ai answer'} style={styles.card} testID="ask-sheet-proposal">
                   <View style={styles.cardHead}>
-                    <Text style={styles.eyebrow}>{isEdit ? 'PROPOSED AI EDIT' : 'PROPOSED AI ANSWER'}</Text>
+                    <Text style={styles.eyebrow}>{isEdit ? 'PROPOSED AI EDIT' : isStroke ? 'PROPOSED AI STROKE' : 'PROPOSED AI ANSWER'}</Text>
                     <View style={styles.badge}><Text style={styles.badgeText}>not saved</Text></View>
                   </View>
-                  {isEdit && proposal.previousBody !== undefined ? (
+                  {proposal.kind === 'edit' && proposal.previousBody !== undefined ? (
                     <Text style={[styles.answer, { color: theme.color.text.tertiary }]}>{proposal.previousBody}</Text>
                   ) : null}
-                  <Text style={styles.answer}>{proposal.body}</Text>
+                  <Text style={styles.answer}>
+                    {proposal.kind === 'stroke'
+                      ? `${proposal.pointCount} points on "${proposal.chunkLabel}" · based on revision ${proposal.revision}`
+                      : proposal.body}
+                  </Text>
                   {props.sources.map((source, index) => (
                     <Pressable
                       accessibilityLabel={source.quote ? `Show cited passage in ${source.label}` : `Show source chunk ${source.label}`}
@@ -141,7 +154,7 @@ export function AskSheetPhone(props: AskSheetProps) {
                     style={[styles.confirm, !props.canConfirm || props.busy ? styles.disabled : null]}
                     testID="ask-sheet-confirm"
                   >
-                    <Text style={styles.confirmText}>{isEdit ? 'confirm and save' : 'confirm and pin'}</Text>
+                    <Text style={styles.confirmText}>{isEdit || isStroke ? 'confirm and save' : 'confirm and pin'}</Text>
                   </Pressable>
                   <Pressable
                     accessibilityRole="button"
@@ -150,13 +163,15 @@ export function AskSheetPhone(props: AskSheetProps) {
                     style={[styles.decline, props.busy ? styles.disabled : null]}
                     testID="ask-sheet-decline"
                   >
-                    <Text style={styles.declineText}>{isEdit ? 'discard' : 'decline'}</Text>
+                    <Text style={styles.declineText}>{isEdit || isStroke ? 'discard' : 'decline'}</Text>
                   </Pressable>
                 </View>
                 <Text style={styles.sub}>
                   {isEdit
                     ? 'discard leaves your chunks unchanged. confirm replaces the whole note.'
-                    : 'decline writes nothing. pinned answers come back in review.'}
+                    : isStroke
+                      ? 'decline writes nothing. a confirmed stroke is saved as a chunk annotation.'
+                      : 'decline writes nothing. pinned answers come back in review.'}
                 </Text>
               </>
             ) : props.busy ? (
@@ -229,6 +244,7 @@ const useStyles = createStyles((theme) => ({
   },
   titleRow: { flexDirection: 'row' as const, justifyContent: 'space-between' as const, alignItems: 'center' as const },
   title: { ...theme.text('title'), color: theme.color.text.primary },
+  providerLabel: { ...theme.text('meta'), color: theme.color.text.tertiary },
   done: { minHeight: theme.layout.control, paddingHorizontal: 8, justifyContent: 'center' as const },
   doneText: { ...theme.text('buttonCompact'), color: theme.color.text.primary },
   chips: { gap: 6 },

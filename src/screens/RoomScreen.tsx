@@ -12,10 +12,15 @@ import { Button, Screen, useStoneTheme } from '../../design-theme/src/primitives
 import { createCommit } from '../data/commit';
 import type { Annotation, Chunk, Room } from '../data/models';
 import type { CommitError, CommitResult, OpKind } from '../data/operations';
-import { getChunk, getRoom, listChunks, listDueChunks, listRoomAnnotations } from '../data/queries';
+import { getChunk, getRoom, listChunks, listDueChunks, listRoomAnnotations, listRoomDueAnswers } from '../data/queries';
+import { planDueItems } from '../data/today';
 import { expoDriver } from '../db/expo-driver';
+import { followRoomBack, roomBackStep } from '../navigation/room-back';
+import { MarkButtons } from '../features/review/MarkButtons';
+import { reviewMarkController } from '../features/review/mark-attempt';
 import { AnchoredChunkText, PinnedAnswer } from '../features/ask/AnchoredChunkText';
 import type { ChunkFocus } from '../features/ask/citations';
+import { watchRoomCaptureRefresh } from '../features/capture/commitSignal';
 import { ChunkEditor, type EditResult } from '../features/chunks/ChunkEditor';
 import { readDraft } from '../features/chunks/draft-store';
 import { pastedParagraphs } from '../features/chunks/paste';
@@ -25,12 +30,18 @@ import { InkLassoActions } from '../features/ask/InkLassoActions';
 import { PencilToolbar, type PencilTool } from '../features/ask/PencilToolbar';
 import { RoomAskPanel, type AskMessage } from '../features/ask/RoomAskPanel';
 import { RoomSidePanel } from '../features/room/RoomSidePanel';
+import { actionError, clearLoadError as dismissLoadError, loadError, type ShownError } from '../features/room/errorOrigin';
+import { createRoomReader } from '../features/room/roomLoadCoordinator';
 import { PhoneRoomActions, PhoneRoomHeader, RoomTabs, SubjectChips, roomSubjects, type RoomTab } from '../features/room/PhoneRoomChrome';
 import { Icon } from '../ui/Icon';
 import { stageName } from '../ui/StageGlyph';
 import { EmptyState, Field, Notice, SectionTitle, useColumn } from '../ui/kit';
 import { HarnessPanel } from './HarnessPanel';
 import { RoomHeader } from './RoomHeader';
+
+function leaveRoom() {
+  followRoomBack(roomBackStep(router.canGoBack()), router);
+}
 
 function readable(error: CommitError): string {
   if (error.code === 'stale_revision') return 'This chunk was changed somewhere else. Reload to see the latest.';
@@ -117,7 +128,8 @@ export function RoomScreen() {
   const [annotationText, setAnnotationText] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [shownError, setShownError] = useState<ShownError>(null);
+  const error = shownError?.message ?? null;
   const [pasteNotice, setPasteNotice] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [belowId, setBelowId] = useState<string | null>(null);
@@ -140,10 +152,14 @@ export function RoomScreen() {
   // Deletes wait out an undo window; the commit runs after this render, so
   // the effect below keeps handing it the latest list and functions.
   const chunksRef = useRef<ChunkWithAnnotations[]>([]);
+  // A load failure is cleared by the next successful load, but an action error is not.
+  const setActionError = useCallback((value: string | null) => {
+    setShownError(actionError(value));
+  }, []);
   const [deletes] = useState(() => new PendingDeletes({
     commit: async () => ({ ok: true }),
     onChange: setPendingDelete,
-    onError: setError,
+    onError: setActionError,
   }));
   // Leaving the room commits a pending delete rather than dropping it.
   useEffect(() => () => { void deletes.flush(); }, [deletes]);
@@ -151,8 +167,9 @@ export function RoomScreen() {
 
   const load = useCallback(async () => {
     if (!id) return { room: null, chunks: [] as ChunkWithAnnotations[], due: 0 };
-    const [nextRoom, notes, annotations, due] = await Promise.all([
-      getRoom(db, id), listChunks(db, id), listRoomAnnotations(db, id), listDueChunks(db, Date.now()),
+    const now = Date.now();
+    const [nextRoom, notes, annotations, chunksDue, answersDue] = await Promise.all([
+      getRoom(db, id), listChunks(db, id), listRoomAnnotations(db, id), listDueChunks(db, now), listRoomDueAnswers(db, id, now),
     ]);
     const byChunk = new Map<string, Annotation[]>();
     for (const annotation of annotations) {
@@ -160,25 +177,48 @@ export function RoomScreen() {
       group.push(annotation);
       byChunk.set(annotation.chunkId, group);
     }
-    return { room: nextRoom, due: due.filter((d) => d.chunk.roomId === id).length, chunks: notes.map((chunk) => ({
+    const roomChunksDue = chunksDue.filter((d) => d.chunk.roomId === id);
+    const due = planDueItems([...roomChunksDue, ...answersDue]).length;
+    return { room: nextRoom, due, chunks: notes.map((chunk) => ({
       ...chunk, annotations: byChunk.get(chunk.id) ?? [],
     })) };
   }, [db, id]);
-  const refresh = useCallback(async () => {
-    const next = await load();
+  const reportLoadError = useCallback((message: string) => {
+    setShownError(loadError(message));
+  }, []);
+  const clearLoadError = useCallback(() => {
+    setShownError(dismissLoadError);
+  }, []);
+  const applyRoom = useCallback((next: Awaited<ReturnType<typeof load>>) => {
     setRoom(next.room);
     setChunks(next.chunks);
     setDueToday(next.due);
-  }, [load]);
+    setLoading(false);
+    clearLoadError();
+  }, [clearLoadError]);
+  // Focus loads, saves and quick-capture refreshes all read the same room.
+  // The reader serialises refreshes and applies only the newest read, so a
+  // later failure cannot discard an earlier successful capture refresh.
+  const reader = useMemo(() => createRoomReader({
+    read: load,
+    apply: applyRoom,
+    onError: (message) => { reportLoadError(message); setLoading(false); },
+  }), [applyRoom, load, reportLoadError]);
+  const refresh = reader.refresh;
   useFocusEffect(useCallback(() => {
-    let active = true;
-    load().then((next) => {
-      if (active) { setRoom(next.room); setChunks(next.chunks); setDueToday(next.due); setLoading(false); }
-    }).catch((reason: unknown) => {
-      if (active) { setError(reason instanceof Error ? reason.message : 'Could not load room'); setLoading(false); }
-    });
-    return () => { active = false; };
-  }, [load]));
+    void reader.focus();
+    // A capture from the global panel commits outside this screen; reload so the
+    // note list and the Ask chunk selection see it without a reload. It is scoped
+    // to focus so a retained, unfocused room does not keep reading the database.
+    const stop = watchRoomCaptureRefresh(id ?? null, reader.refresh);
+    const unsubscribe = reviewMarkController.subscribe(() => { void reader.refresh(); });
+    return () => {
+      stop();
+      unsubscribe();
+      // Blur drops reads and queued refreshes so they cannot apply after leaving.
+      reader.blur();
+    };
+  }, [id, reader]));
   const openCitation = useCallback((next: ChunkFocus) => {
     setFocus(next);
   }, []);
@@ -212,10 +252,10 @@ export function RoomScreen() {
   async function action(run: () => Promise<void>) {
     if (busy) return;
     setBusy(true);
-    setError(null);
+    setActionError(null);
     try { await run(); await refresh(); }
     catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Could not save');
+      setActionError(reason instanceof Error ? reason.message : 'Could not save');
       await refresh().catch(() => undefined);
     } finally { setBusy(false); }
   }
@@ -334,7 +374,7 @@ export function RoomScreen() {
     if (!updated.ok) return updated;
     const removed = await commit({ opId: randomUUID(), kind: 'chunk.delete', ...human, expectedRevision: following.revision, payload: { chunkId: following.id } });
     await refresh().catch(() => undefined);
-    if (!removed.ok) setError(`The notes were joined, but the next note could not be removed: ${readable(removed.error)}`);
+    if (!removed.ok) setActionError(`The notes were joined, but the next note could not be removed: ${readable(removed.error)}`);
     return updated;
   }
 
@@ -351,7 +391,7 @@ export function RoomScreen() {
     if (!latest) return;
     const result = await commit({ opId: randomUUID(), kind: 'chunk.update', ...human, expectedRevision: latest.revision,
       payload: { chunkId: latest.id, body: entry.restoreBody } });
-    if (!result.ok) setError(readable(result.error));
+    if (!result.ok) setActionError(readable(result.error));
     await refresh().catch(() => undefined);
   }
 
@@ -362,7 +402,7 @@ export function RoomScreen() {
   if (loading) return <Screen><SafeAreaView style={{ flex: 1 }}><ActivityIndicator color={theme.color.accent.bg} style={{ marginTop: 40 }} /></SafeAreaView></Screen>;
   if (!room) return <Screen><SafeAreaView style={{ flex: 1 }}><View style={[column, { paddingTop: theme.space.page }]}>
     <EmptyState title="This room was not found." body="It may have been deleted on this device.">
-      <Button label="Back to rooms" size="compact" onPress={() => router.replace('/')} />
+      <Button label="Back to rooms" size="compact" onPress={leaveRoom} />
     </EmptyState>
   </View></SafeAreaView></Screen>;
 
@@ -382,20 +422,23 @@ export function RoomScreen() {
         ListHeaderComponent={<View style={{ gap: theme.space.section, marginBottom: theme.space.base }}>
           {phone ? <View style={{ gap: theme.space.lg }}>
             <PhoneRoomHeader name={room.name} status={`${stageName(room.stage)} · saved`}
-              onBack={() => router.replace('/')} onReview={() => router.push(`/rooms/${room.id}/review`)}
+              onBack={leaveRoom} onReview={() => router.push(`/rooms/${room.id}/review`)}
               onOptions={() => Alert.alert(room.name, undefined, [
                 { text: 'Review this room', onPress: () => router.push(`/rooms/${room.id}/review`) },
                 { text: 'Study session', onPress: () => router.push(`/rooms/${room.id}/study`) },
+                { text: 'Study materials', onPress: () => router.push(`/study/pick?roomId=${room.id}`) },
                 { text: 'Slides', onPress: () => router.push(`/rooms/${room.id}/slides`) },
                 { text: 'Whiteboard', onPress: () => router.push(`/rooms/${room.id}/whiteboard`) },
+                { text: 'Import notes', onPress: () => router.push({ pathname: '/import', params: { roomId: room.id } }) },
                 { text: 'Cancel', style: 'cancel' },
               ])} />
             <RoomTabs value={tab} onChange={setTab} />
             {tab === 'notes' ? <SubjectChips subjects={subjects} value={activeSubject} onChange={setSubject} /> : null}
           </View> : <>
             <RoomHeader room={room} chunkCount={chunks.length}
-              onBack={() => router.replace('/')}
+              onBack={leaveRoom}
               onAsk={() => listRef.current?.scrollToEnd({ animated: true })}
+              onImport={() => router.push({ pathname: '/import', params: { roomId: room.id } })}
               onNewNote={() => { listRef.current?.scrollToOffset({ offset: 0, animated: true }); composerRef.current?.focus(); }} />
           </>}
           {phone && tab !== 'notes' ? null : <View style={{ gap: theme.space.xl, backgroundColor: theme.color.bg.surface, borderRadius: theme.radius.float, borderWidth: 1, borderColor: theme.color.border.hairline, padding: theme.space.base, ...theme.shadow.card }}>
@@ -448,7 +491,7 @@ export function RoomScreen() {
           const index = chunks.indexOf(item);
           const cited = focus?.chunkId === item.id ? focus : null;
           const next = chunks[index + 1];
-          return <ChunkEditor chunk={item} index={index} count={chunks.length} onError={setError}
+          return <ChunkEditor chunk={item} index={index} count={chunks.length} onError={setActionError}
             reorderDisabled={searching || Boolean(activeSubject && phone)}
             onAddBelow={() => { setBelowId(item.id); setBelowText(''); }}
             onSplit={(head, tail, rev) => splitNote(item, head, tail, rev)}
@@ -509,6 +552,12 @@ export function RoomScreen() {
               <Button label="Cancel" size="compact" variant="ghost" onPress={() => setAnnotating(null)} />
             </View>
           </View> : <View style={{ alignSelf: 'flex-start' }}><Button label="Annotate" size="compact" variant="outline" onPress={() => setAnnotating(item.id)} /></View>}
+          <MarkButtons
+            chunkId={item.id}
+            expectedRevision={item.revision}
+            commit={commit}
+            testID={`room-mark-${item.id}`}
+          />
         </ChunkEditor>;
         }}
       />
@@ -528,7 +577,7 @@ export function RoomScreen() {
 
   // iPad: the room beside an ask column, with a floating pencil tool bar.
   // The ask backend is not wired to this panel yet; questions stay local.
-  if (wide) return <View style={{ flex: 1, flexDirection: 'row' }} testID="room-wide-view">
+  if (wide) return <View style={{ flex: 1, flexDirection: 'row', backgroundColor: theme.color.bg.canvas }} testID="room-wide-view">
     <View style={{ flex: 1, minWidth: 0 }}>{roomList}</View>
     <View style={{ paddingTop: theme.space.page, paddingRight: theme.space.page }}>
       <RoomSidePanel roomId={room.id} subjects={subjects} chunks={chunks} dueToday={dueToday}
@@ -536,7 +585,7 @@ export function RoomScreen() {
     </View>
   </View>;
   if (!splitView) return roomList;
-  return <View style={{ flex: 1, flexDirection: 'row' }} testID="room-split-view">
+  return <View style={{ flex: 1, flexDirection: 'row', backgroundColor: theme.color.bg.canvas }} testID="room-split-view">
     <View style={{ flex: 1, minWidth: 0 }}>
       {roomList}
       {penTool === 'lasso' && inkSelected ? <InkLassoActions

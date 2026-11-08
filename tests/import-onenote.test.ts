@@ -7,6 +7,7 @@ import { createCommit } from '../src/data/commit.ts';
 import { getRoom, listChunks } from '../src/data/queries.ts';
 import { migrateDb } from '../src/db/migrate.ts';
 import { MAX_IMPORT_BYTES } from '../src/import/markdown.ts';
+import { crc32 } from '../src/import/inflate.ts';
 import { parseOneNoteBytes, parseOneNoteText, onenotePathSubjects, onenoteSourceIdentity, UNSUPPORTED_WARNING } from '../src/import/onenote/parse.ts';
 import { nodeDb } from './support/node-db.ts';
 
@@ -33,7 +34,7 @@ function zip(entries: { name: string; data: Buffer; method?: number; flags?: num
     const compressed = method === 8 ? deflateRawSync(entry.data) : entry.data;
     const name = Buffer.from(entry.name);
     chunks.push(Buffer.concat([
-      u32(0x04034b50), u16(20), u16(entry.flags ?? 0), u16(method), u16(0), u16(0), u32(0),
+      u32(0x04034b50), u16(20), u16(entry.flags ?? 0), u16(method), u16(0), u16(0), u32(crc32(entry.data)),
       u32(compressed.length), u32(entry.data.length), u16(name.length), u16(0), name, compressed,
     ]));
   }
@@ -50,6 +51,30 @@ const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
     <w:p><w:r><w:instrText>DO_NOT_KEEP</w:instrText></w:r><w:r><w:t>Visible</w:t></w:r></w:p>
   </w:body>
 </w:document>`;
+
+test('deflated DOCX exports do not require browser compression or Blob APIs', async () => {
+  const previousStream = Object.getOwnPropertyDescriptor(globalThis, 'DecompressionStream');
+  const previousBlob = Object.getOwnPropertyDescriptor(globalThis, 'Blob');
+  Reflect.deleteProperty(globalThis, 'DecompressionStream');
+  Reflect.deleteProperty(globalThis, 'Blob');
+  try {
+    const bytes = zip([{ name: 'word/document.xml', data: Buffer.from(documentXml), method: 8 }]);
+    const note = await parseOneNoteBytes({ path: 'Biology/Cells.docx', bytes });
+    assert.match(note.bodies.join('\n'), /Mitochondria/);
+    assert.match(note.bodies.join('\n'), /powerhouse & more/);
+  } finally {
+    if (previousStream) Object.defineProperty(globalThis, 'DecompressionStream', previousStream);
+    if (previousBlob) Object.defineProperty(globalThis, 'Blob', previousBlob);
+  }
+});
+
+test('DOCX stored and deflated content must match the ZIP checksum', async () => {
+  for (const method of [0, 8]) {
+    const bytes = zip([{ name: 'word/document.xml', data: Buffer.from(documentXml), method }]);
+    bytes[14] ^= 1;
+    await assert.rejects(parseOneNoteBytes({ path: 'Corrupt.docx', bytes }), /ZIP checksum/);
+  }
+});
 
 test('synthetic HTML keeps headings and drops active content without fetching', () => {
   const previous = globalThis.fetch;

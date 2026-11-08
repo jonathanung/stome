@@ -6,11 +6,11 @@ import { Platform, Pressable, Text, TextInput, View, useWindowDimensions } from 
 
 import { useStoneTheme } from '../../../design-theme/src/primitives';
 import { createCommit } from '../../data/commit';
-import { Icon } from '../../ui/Icon';
 import { Field, Notice } from '../../ui/kit';
 import { getRoom, listChunks, listRooms } from '../../data/queries';
 import { expoDriver } from '../../db/expo-driver';
 import { LAST_ROOM_KEY, canSubmit } from './draft';
+import { commitCapture } from './commitSignal';
 import { captureLayerGeometry } from './geometry';
 import { CAPTURE_SHORTCUT_LABEL, isCaptureShortcut } from './shortcut';
 import { onCaptureOpenRequest } from './openSignal';
@@ -66,15 +66,12 @@ export function QuickCapture() {
 
   useEffect(() => {
     controller.setLive({
-      commit: async (operation) => {
-        try {
-          const result = await commit(operation);
-          if (!result.ok) return { ok: false, message: result.error.message };
-          return { ok: true, duplicate: result.duplicate };
-        } catch (reason) {
-          return { ok: false, message: reason instanceof Error ? reason.message : 'Could not save' };
-        }
-      },
+      commit: (operation) => commitCapture(operation, async (capture) => {
+        const result = await commit(capture);
+        return result.ok
+          ? { ok: true, duplicate: result.duplicate }
+          : { ok: false, message: result.error.message };
+      }),
       destination: async () => {
         const rooms = await listRooms(db);
         const last = readStorageItem(browserStorage('local'), LAST_ROOM_KEY);
@@ -261,29 +258,8 @@ export function QuickCapture() {
         </View>
       ) : null}
       {warning && !open ? <Notice tone="warning" testID="quick-capture-warning">{warning}</Notice> : null}
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Quick capture"
-        accessibilityState={{ expanded: open }}
-        onPress={() => setOpen((value) => !value)}
-        style={({ pressed }) => ({
-          alignSelf: 'flex-end',
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: theme.space.md,
-          minHeight: 52,
-          paddingLeft: theme.space.base,
-          paddingRight: theme.space.card,
-          backgroundColor: theme.color.accent.bg,
-          borderRadius: theme.radius.pill,
-          opacity: pressed ? 0.85 : 1,
-          ...theme.shadow.float,
-        })}
-        testID="quick-capture-button"
-      >
-        <Icon name={open ? 'cross' : 'plus'} size={20} strokeWidth={2} color={theme.color.accent.fg} />
-        <Text style={[theme.text('buttonCompact'), { color: theme.color.accent.fg }]}>Capture</Text>
-      </Pressable>
+      {/* No floating trigger: the shell opens capture (sidebar "Quick capture" at >= 760px, the tab bar's
+          centre button below), plus the keyboard shortcut. A second button here covered the phone tab bar. */}
     </View>
     </>
   );
