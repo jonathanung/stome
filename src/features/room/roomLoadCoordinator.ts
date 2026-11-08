@@ -1,8 +1,8 @@
 /**
- * Coordinates the room screen's reads. Focus, saves and quick-capture refreshes
- * all read the same room, so only the newest started read may apply.
+ * Coordinates the room screen's reads. Focus loads and save refreshes all read
+ * the same room, so only the newest started read may apply.
  *
- * A capture can land while a focus load is still running. That refresh has to
+ * A save can land while a focus load is still running. That refresh has to
  * wait: running it would invalidate the focus load, and a failed refresh would
  * then throw away a successful read. This matters both on first open and on
  * every refocus. Instead the coordinator defers it until that load has settled.
@@ -88,7 +88,7 @@ export async function settleLatest<T>(
 }
 
 export type RoomReader<T> = {
-  /** Load once for the current focus, then run any capture refresh that waited. */
+  /** Load once for the current focus, then run any refresh that waited. */
   focus: () => Promise<LoadOutcome>;
   /** Queue a reload. Refreshes run one at a time so an older success is applied before a newer failure. */
   refresh: () => Promise<void>;
@@ -97,7 +97,7 @@ export type RoomReader<T> = {
 };
 
 /**
- * The room screen's load lifecycle in one place: focus loads and capture
+ * The room screen's load lifecycle in one place: focus loads and save
  * refreshes share the coordinator, and refreshes are serialised. A later
  * refresh that fails therefore cannot discard an earlier successful read.
  */
@@ -152,8 +152,8 @@ export function createRoomReader<T>(deps: {
       if (outcome === 'applied') {
         if (loads.focusSucceeded()) void refresh();
       } else if (deferredOnFailure) {
-        // The focus read failed after a capture landed; still reload so the
-        // captured chunk is not lost to a transient read error.
+        // The focus read failed after a save landed; still reload so the
+        // saved chunk is not lost to a transient read error.
         void refresh();
       }
       return outcome;

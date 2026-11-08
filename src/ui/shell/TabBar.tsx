@@ -11,8 +11,6 @@ export interface TabBarProps {
   /** The tab for the current route. */
   active: TabKey;
   onSelect: (tab: TabKey) => void;
-  /** Center button: opens quick capture. */
-  onCapture: () => void;
 }
 
 function RoomsGlyph({ color }: { color: string }) {
@@ -50,10 +48,10 @@ function Tab({ tab, label, icon, active, onSelect }: {
 }
 
 /**
- * Phone version of the sidebar: today, rooms, a center quick-capture button, recent, search.
+ * Phone version of the sidebar: today, rooms, recent, search.
  * Not wired into the layout here; the shell mounts it on phone widths.
  */
-export function TabBar({ active, onSelect, onCapture }: TabBarProps) {
+export function TabBar({ active, onSelect }: TabBarProps) {
   const theme = useStoneTheme();
   const insets = useSafeAreaInsets();
   return (
@@ -70,19 +68,6 @@ export function TabBar({ active, onSelect, onCapture }: TabBarProps) {
     >
       <Tab tab="today" label="today" icon="today" active={active === 'today'} onSelect={onSelect} />
       <Tab tab="rooms" label="rooms" active={active === 'rooms'} onSelect={onSelect} />
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="quick capture"
-        onPress={onCapture}
-        testID="tab-capture"
-        style={({ pressed }) => ({
-          width: 52, height: 52, borderRadius: 16, borderWidth: 2, borderColor: theme.color.text.primary,
-          backgroundColor: theme.color.bg.canvas, alignItems: 'center', justifyContent: 'center',
-          opacity: pressed ? 0.75 : 1,
-        })}
-      >
-        <Icon name="plus" size={22} strokeWidth={2} color={theme.color.text.primary} />
-      </Pressable>
       <Tab tab="recent" label="recent" icon="clock" active={active === 'recent'} onSelect={onSelect} />
       <Tab tab="search" label="search" icon="search" active={active === 'search'} onSelect={onSelect} />
     </View>

@@ -1,0 +1,12 @@
+{
+  "note": "Low-frame-rate sampled recording (~4 fps target) of the real Chrome page during the UAT lane. Frames are CDP screenshots of the exact bound page target taken while the script drove real mouse/keyboard input; frame durations preserve real wall-clock spacing, so capture gaps appear as held frames.",
+  "targetId": "FB539436F07616A8874F8EC957BA3E88",
+  "startUrl": "about:blank",
+  "endUrl": "http://127.0.0.1:8091/companion",
+  "frames": 33,
+  "fps": 3.51,
+  "laneSeconds": 13,
+  "videoSeconds": 9.397,
+  "viewport": "phone-390x844-dark",
+  "firstCaptureError": "capture timeout"
+}

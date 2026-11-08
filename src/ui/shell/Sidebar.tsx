@@ -4,8 +4,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 
 import { useStoneTheme } from '../../../design-theme/src/primitives';
-import { requestCaptureOpen } from '../../features/capture/openSignal';
-import { CAPTURE_SHORTCUT_LABEL } from '../../features/capture/shortcut';
 import type { Room } from '../../data/models';
 import { listDueChunks, listRooms } from '../../data/queries';
 import { expoDriver } from '../../db/expo-driver';
@@ -102,14 +100,6 @@ export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle:
         })}
       </ScrollView>
 
-      <Pressable accessibilityRole="button" accessibilityLabel="Quick capture" onPress={requestCaptureOpen}
-        style={{ flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: theme.layout.control, paddingHorizontal: 10, justifyContent: collapsed ? 'center' : 'flex-start', borderRadius: 12, borderWidth: 1, borderColor: BARK.muted }}>
-        <Icon name="plus" size={18} color={BARK.fg} />
-        {collapsed ? null : <>
-          <Text style={[theme.text('nav'), { color: BARK.fg }]}>Quick capture</Text>
-          <Text style={[theme.text('label'), { color: BARK.muted, marginLeft: 'auto' }]}>{CAPTURE_SHORTCUT_LABEL}</Text>
-        </>}
-      </Pressable>
       <Link href="/companion" asChild>
         <Pressable accessibilityRole="link" accessibilityLabel="Companion"
           style={{ flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: theme.layout.navItem, paddingHorizontal: 10, justifyContent: collapsed ? 'center' : 'flex-start' }}>

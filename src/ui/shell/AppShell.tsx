@@ -2,7 +2,6 @@ import { router, usePathname } from 'expo-router';
 import { useState, type ReactNode } from 'react';
 import { View, useWindowDimensions } from 'react-native';
 
-import { requestCaptureOpen } from '../../features/capture/openSignal';
 import { Sidebar } from './Sidebar';
 import { TabBar, type TabKey } from './TabBar';
 
@@ -25,7 +24,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     return (
       <View style={{ flex: 1 }}>
         <View style={{ flex: 1, minHeight: 0 }}>{children}</View>
-        <TabBar active={activeTab(pathname)} onSelect={(tab) => router.navigate(TAB_ROUTES[tab])} onCapture={requestCaptureOpen} />
+        <TabBar active={activeTab(pathname)} onSelect={(tab) => router.navigate(TAB_ROUTES[tab])} />
       </View>
     );
   }

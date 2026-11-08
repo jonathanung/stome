@@ -1,0 +1,150 @@
+PASS phone-390x844-dark rooms home: no capture testIDs
+PASS phone-390x844-dark rooms home: no "Quick capture" copy
+PASS phone-390x844-dark rooms home: no Alt+N hint
+PASS phone-390x844-dark: rooms home loaded
+PASS phone-390x844-dark: phone tab bar has no centre + button
+PASS phone-390x844-dark: tab-today present
+PASS phone-390x844-dark: tab-rooms present
+PASS phone-390x844-dark: tab-recent present
+PASS phone-390x844-dark: tab-search present
+PASS phone-390x844-dark: Alt+N opens nothing
+PASS phone-390x844-dark: Ctrl+Alt+N opens nothing
+PASS phone-390x844-dark: key presses do not change the page
+created room UAT phone-390x844-dark cap4mw77bt1c
+opened room UAT phone-390x844-dark cap4mw77bt1c at http://127.0.0.1:8091/rooms/8a211cb5-bc6f-41a0-a87a-67362048e708
+PASS phone-390x844-dark room: no capture testIDs
+PASS phone-390x844-dark room: no "Quick capture" copy
+PASS phone-390x844-dark room: no Alt+N hint
+PASS phone-390x844-dark: in-room note visible after save
+PASS phone-390x844-dark: chunk card exists
+PASS phone-390x844-dark: in-room note persists across reload
+PASS phone-390x844-dark today: no capture testIDs
+PASS phone-390x844-dark today: no "Quick capture" copy
+PASS phone-390x844-dark today: no Alt+N hint
+PASS phone-390x844-dark today: shows "Nothing due today"
+PASS phone-390x844-dark: today keeps "Capture a note"
+PASS phone-390x844-dark notes: shows "Stome"
+PASS phone-390x844-dark recent/search: no capture testIDs
+PASS phone-390x844-dark recent/search: no "Quick capture" copy
+PASS phone-390x844-dark recent/search: no Alt+N hint
+PASS phone-390x844-dark recent/search: shows "Recent notes"
+PASS phone-390x844-dark import: no capture testIDs
+PASS phone-390x844-dark import: no "Quick capture" copy
+PASS phone-390x844-dark import: no Alt+N hint
+PASS phone-390x844-dark import: shows "bring your notes"
+PASS phone-390x844-dark companion: no capture testIDs
+PASS phone-390x844-dark companion: no "Quick capture" copy
+PASS phone-390x844-dark companion: no Alt+N hint
+PASS phone-390x844-dark companion: shows "Pairing"
+lane phone-390x844-dark complete
+PASS desktop-1280x900-dark rooms home: no capture testIDs
+PASS desktop-1280x900-dark rooms home: no "Quick capture" copy
+PASS desktop-1280x900-dark rooms home: no Alt+N hint
+PASS desktop-1280x900-dark: rooms home loaded
+PASS desktop-1280x900-dark: sidebar has no Quick capture row
+PASS desktop-1280x900-dark: sidebar shows Companion
+PASS desktop-1280x900-dark: Alt+N opens nothing
+PASS desktop-1280x900-dark: Ctrl+Alt+N opens nothing
+PASS desktop-1280x900-dark: key presses do not change the page
+created room UAT desktop-1280x900-dark cap4mw77bt1c
+opened room UAT desktop-1280x900-dark cap4mw77bt1c at http://127.0.0.1:8091/rooms/8cf2847a-f565-4257-a047-6c44e8719abf
+PASS desktop-1280x900-dark room: no capture testIDs
+PASS desktop-1280x900-dark room: no "Quick capture" copy
+PASS desktop-1280x900-dark room: no Alt+N hint
+PASS desktop-1280x900-dark: in-room note visible after save
+PASS desktop-1280x900-dark: chunk card exists
+PASS desktop-1280x900-dark: in-room note persists across reload
+PASS desktop-1280x900-dark today: no capture testIDs
+PASS desktop-1280x900-dark today: no "Quick capture" copy
+PASS desktop-1280x900-dark today: no Alt+N hint
+PASS desktop-1280x900-dark today: shows "Nothing due today"
+PASS desktop-1280x900-dark: today keeps "Capture a note"
+PASS desktop-1280x900-dark notes: shows "Stome"
+PASS desktop-1280x900-dark recent/search: no capture testIDs
+PASS desktop-1280x900-dark recent/search: no "Quick capture" copy
+PASS desktop-1280x900-dark recent/search: no Alt+N hint
+PASS desktop-1280x900-dark recent/search: shows "Recent notes"
+PASS desktop-1280x900-dark import: no capture testIDs
+PASS desktop-1280x900-dark import: no "Quick capture" copy
+PASS desktop-1280x900-dark import: no Alt+N hint
+PASS desktop-1280x900-dark import: shows "bring your notes"
+PASS desktop-1280x900-dark companion: no capture testIDs
+PASS desktop-1280x900-dark companion: no "Quick capture" copy
+PASS desktop-1280x900-dark companion: no Alt+N hint
+PASS desktop-1280x900-dark companion: shows "Pairing"
+lane desktop-1280x900-dark complete
+PASS phone-390x844-light rooms home: no capture testIDs
+PASS phone-390x844-light rooms home: no "Quick capture" copy
+PASS phone-390x844-light rooms home: no Alt+N hint
+PASS phone-390x844-light: rooms home loaded
+PASS phone-390x844-light: phone tab bar has no centre + button
+PASS phone-390x844-light: tab-today present
+PASS phone-390x844-light: tab-rooms present
+PASS phone-390x844-light: tab-recent present
+PASS phone-390x844-light: tab-search present
+PASS phone-390x844-light: Alt+N opens nothing
+PASS phone-390x844-light: Ctrl+Alt+N opens nothing
+PASS phone-390x844-light: key presses do not change the page
+created room UAT phone-390x844-light cap4mw77bt1c
+opened room UAT phone-390x844-light cap4mw77bt1c at http://127.0.0.1:8091/rooms/553b52ff-6a55-4f4f-a75c-6890a030bcd0
+PASS phone-390x844-light room: no capture testIDs
+PASS phone-390x844-light room: no "Quick capture" copy
+PASS phone-390x844-light room: no Alt+N hint
+PASS phone-390x844-light: in-room note visible after save
+PASS phone-390x844-light: chunk card exists
+PASS phone-390x844-light: in-room note persists across reload
+PASS phone-390x844-light today: no capture testIDs
+PASS phone-390x844-light today: no "Quick capture" copy
+PASS phone-390x844-light today: no Alt+N hint
+PASS phone-390x844-light today: shows "Nothing due today"
+PASS phone-390x844-light: today keeps "Capture a note"
+PASS phone-390x844-light notes: shows "Stome"
+PASS phone-390x844-light recent/search: no capture testIDs
+PASS phone-390x844-light recent/search: no "Quick capture" copy
+PASS phone-390x844-light recent/search: no Alt+N hint
+PASS phone-390x844-light recent/search: shows "Recent notes"
+PASS phone-390x844-light import: no capture testIDs
+PASS phone-390x844-light import: no "Quick capture" copy
+PASS phone-390x844-light import: no Alt+N hint
+PASS phone-390x844-light import: shows "bring your notes"
+PASS phone-390x844-light companion: no capture testIDs
+PASS phone-390x844-light companion: no "Quick capture" copy
+PASS phone-390x844-light companion: no Alt+N hint
+PASS phone-390x844-light companion: shows "Pairing"
+lane phone-390x844-light complete
+PASS desktop-1280x900-light rooms home: no capture testIDs
+PASS desktop-1280x900-light rooms home: no "Quick capture" copy
+PASS desktop-1280x900-light rooms home: no Alt+N hint
+PASS desktop-1280x900-light: rooms home loaded
+PASS desktop-1280x900-light: sidebar has no Quick capture row
+PASS desktop-1280x900-light: sidebar shows Companion
+PASS desktop-1280x900-light: Alt+N opens nothing
+PASS desktop-1280x900-light: Ctrl+Alt+N opens nothing
+PASS desktop-1280x900-light: key presses do not change the page
+created room UAT desktop-1280x900-light cap4mw77bt1c
+opened room UAT desktop-1280x900-light cap4mw77bt1c at http://127.0.0.1:8091/rooms/2b16301a-ba31-434e-bf6a-500ef898ebcf
+PASS desktop-1280x900-light room: no capture testIDs
+PASS desktop-1280x900-light room: no "Quick capture" copy
+PASS desktop-1280x900-light room: no Alt+N hint
+PASS desktop-1280x900-light: in-room note visible after save
+PASS desktop-1280x900-light: chunk card exists
+PASS desktop-1280x900-light: in-room note persists across reload
+PASS desktop-1280x900-light today: no capture testIDs
+PASS desktop-1280x900-light today: no "Quick capture" copy
+PASS desktop-1280x900-light today: no Alt+N hint
+PASS desktop-1280x900-light today: shows "Nothing due today"
+PASS desktop-1280x900-light: today keeps "Capture a note"
+PASS desktop-1280x900-light notes: shows "Stome"
+PASS desktop-1280x900-light recent/search: no capture testIDs
+PASS desktop-1280x900-light recent/search: no "Quick capture" copy
+PASS desktop-1280x900-light recent/search: no Alt+N hint
+PASS desktop-1280x900-light recent/search: shows "Recent notes"
+PASS desktop-1280x900-light import: no capture testIDs
+PASS desktop-1280x900-light import: no "Quick capture" copy
+PASS desktop-1280x900-light import: no Alt+N hint
+PASS desktop-1280x900-light import: shows "bring your notes"
+PASS desktop-1280x900-light companion: no capture testIDs
+PASS desktop-1280x900-light companion: no "Quick capture" copy
+PASS desktop-1280x900-light companion: no Alt+N hint
+PASS desktop-1280x900-light companion: shows "Pairing"
+lane desktop-1280x900-light complete

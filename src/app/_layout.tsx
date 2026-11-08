@@ -17,7 +17,6 @@ import { expoDriver } from '../db/expo-driver';
 import { migrateDb } from '../db/migrate';
 import { DATABASE_NAME } from '../db/schema';
 import { classifyStorageFailure, createStorageRetryGate, finishStartup } from '../db/storage-startup';
-import { QuickCapture } from '../features/capture/QuickCapture';
 import { AppShell } from '../ui/shell/AppShell';
 import { StorageOpening, StorageStartupScreen } from '../screens/StorageStartup';
 import { stackHeaderOptions } from '../theme/stack-header';
@@ -121,7 +120,6 @@ export default function RootLayout() {
           <Suspense fallback={<StorageOpening />}>
             <SQLiteProvider databaseName={DATABASE_NAME} onInit={prepareDatabase} useSuspense>
               <AppShell><AppStack /></AppShell>
-              <QuickCapture />
             </SQLiteProvider>
           </Suspense>
         </DatabaseBoundary>
