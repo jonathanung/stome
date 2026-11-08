@@ -271,11 +271,29 @@ export function RoomScreen() {
     });
   }
 
-  /** The composer is at the top and new notes go to the end: "Show it" scrolls there. */
+  /**
+   * The composer is at the top and new notes go to the end: "Show it" scrolls
+   * there. Far rows are not drawn yet, so retry until the note is on screen
+   * (the same approach as revealing a citation).
+   */
   function showAdded() {
-    const index = shown.findIndex((chunk) => chunk.id === addedId);
-    if (index >= 0) listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.3 });
+    const id = addedId;
     setAddedId(null);
+    const index = shown.findIndex((chunk) => chunk.id === id);
+    if (!id || index < 0) return;
+    const doc = (globalThis as { document?: { querySelector(selector: string): { getBoundingClientRect(): { top: number; bottom: number } } | null } }).document;
+    const viewHeight = (globalThis as { innerHeight?: number }).innerHeight ?? 0;
+    let tries = 0;
+    const step = () => {
+      listRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0.3 });
+      const rect = doc?.querySelector(`[data-testid="chunk-${id}"]`)?.getBoundingClientRect();
+      const onScreen = rect !== undefined && rect.top >= 0 && rect.bottom <= viewHeight;
+      if (!onScreen && tries < 20) {
+        tries += 1;
+        setTimeout(step, 60);
+      }
+    };
+    step();
   }
 
   /** A new note right below `item`, taking its subjects. */
