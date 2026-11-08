@@ -1,5 +1,5 @@
 import { useSQLiteContext } from 'expo-sqlite';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ComponentRef } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -16,6 +16,9 @@ import {
 import { createStyles } from '../../design-theme/src/primitives';
 
 import { createNote, listNotes, type Note } from '../db/notes';
+import { formatNote, type NoteFormat, type NoteSelection } from '../features/notes/formatting';
+import { MarkdownToolbar } from '../features/notes/MarkdownToolbar';
+import { NotePreview } from '../features/notes/NotePreview';
 
 type NoteFormProps = {
   title: string;
@@ -38,6 +41,16 @@ function NoteForm({
 }: NoteFormProps) {
   const styles = useStyles();
   const disabled = saving || title.trim().length === 0;
+  const bodyRef = useRef<ComponentRef<typeof TextInput>>(null);
+  const selectionRef = useRef<NoteSelection>({ start: 0, end: 0 });
+  const [selection, setSelection] = useState<NoteSelection | undefined>();
+  const applyFormat = (format: NoteFormat) => {
+    const next = formatNote(body, selectionRef.current, format);
+    onChangeBody(next.text);
+    selectionRef.current = next.selection;
+    setSelection(next.selection);
+    bodyRef.current?.focus();
+  };
   return (
     <View>
       <Text accessibilityRole="header" style={styles.title}>
@@ -56,15 +69,22 @@ function NoteForm({
         value={title}
       />
       <Text style={styles.label}>Note</Text>
+      <MarkdownToolbar context="note body" onFormat={applyFormat} />
       <TextInput
+        ref={bodyRef}
         accessibilityLabel="Note body"
         multiline
         onChangeText={onChangeBody}
+        onSelectionChange={(event) => {
+          selectionRef.current = event.nativeEvent.selection;
+          setSelection(undefined);
+        }}
         nativeID="note-body"
         placeholder="Write a note"
         style={[styles.input, styles.bodyInput]}
         testID="note-body-input"
         value={body}
+        selection={selection}
       />
       <Pressable
         accessibilityRole="button"
@@ -91,7 +111,7 @@ function NoteCard({ note }: { note: Note }) {
   return (
     <View style={styles.note} testID={`note-${note.id}`}>
       <Text style={styles.noteTitle}>{note.title}</Text>
-      {note.body.length > 0 ? <Text style={styles.noteBody}>{note.body}</Text> : null}
+      {note.body.length > 0 ? <NotePreview body={note.body} /> : null}
       <Text style={styles.noteMeta}>{new Date(note.createdAt).toLocaleString()}</Text>
     </View>
   );

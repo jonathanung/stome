@@ -1,7 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { MotionPressable as Pressable, useReduceMotion } from '../../../design-theme/src/motion';
 import { Animated, Platform, ScrollView, Text, View } from 'react-native';
-import Svg, { Path } from 'react-native-svg';
 
 import { useStoneTheme } from '../../../design-theme/src/primitives';
 import { Icon } from '../../ui/Icon';
@@ -49,10 +48,16 @@ export function RoomTabs({ value, onChange }: { value: RoomTab; onChange: (tab: 
   const reduced = useReduceMotion();
   const [width, setWidth] = useState(0);
   const [position] = useState(() => new Animated.Value(0));
+  const positioned = useRef(false);
   const tabWidth = Math.max(0, width - 6) / ROOM_TABS.length;
   useEffect(() => {
+    if (!tabWidth) return;
     const toValue = ROOM_TABS.indexOf(value) * tabWidth;
-    if (reduced) { position.setValue(toValue); return; }
+    if (reduced || !positioned.current) {
+      position.setValue(toValue);
+      positioned.current = true;
+      return;
+    }
     const animation = Animated.spring(position, { toValue, stiffness: 320, damping: 30, mass: 0.8, useNativeDriver: Platform.OS !== 'web' });
     animation.start();
     return () => animation.stop();
@@ -100,21 +105,14 @@ export function SubjectChips({ subjects, value, onChange }: {
   );
 }
 
-/** Floating ask / add note bar pinned above the home indicator. */
-export function PhoneRoomActions({ onAsk, onAddNote }: { onAsk: () => void; onAddNote: () => void }) {
+/** Floating add-note action pinned above the home indicator. */
+export function PhoneRoomActions({ onAddNote }: { onAddNote: () => void }) {
   const theme = useStoneTheme();
   const base = { flex: 1, minHeight: 52, borderRadius: theme.radius.bubble, flexDirection: 'row', alignItems: 'center',
     justifyContent: 'center', gap: theme.space.md, ...theme.shadow.float } as const;
   const label = { ...theme.text('button'), fontSize: 16, lineHeight: 22 };
   return (
     <View pointerEvents="box-none" style={{ position: 'absolute', left: 16, right: 16, bottom: 16, flexDirection: 'row', gap: theme.space.md }}>
-      <Pressable accessibilityRole="button" accessibilityLabel="Ask about this room" onPress={onAsk} testID="room-ask"
-        style={{ ...base, borderWidth: 1, borderColor: theme.color.border.strong, backgroundColor: theme.color.bg.surface }}>
-        <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke={theme.color.text.primary} strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
-          <Path d="M4 5h16v11H9l-5 4z" />
-        </Svg>
-        <Text style={[label, { color: theme.color.text.primary }]}>ask</Text>
-      </Pressable>
       <Pressable accessibilityRole="button" accessibilityLabel="Add note" onPress={onAddNote} testID="room-add-note"
         style={{ ...base, backgroundColor: theme.color.accent.bg }}>
         <Icon name="plus" size={18} color={theme.color.accent.fg} />

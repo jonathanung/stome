@@ -24,16 +24,23 @@ export function NotePreview({ body }: { body: string }) {
     {readingLines(body).map(({ line, code }, index) => {
       const heading = !code ? /^(#{1,6})\s+(.+)$/.exec(line) : null;
       const quote = !code && line.startsWith('> ');
-      const content = heading ? heading[2] : quote ? line.slice(2) : !code ? line.replace(/^[-*] /, '• ') : line;
+      const task = !code ? /^- \[([ xX])\] /.exec(line) : null;
+      const content = heading ? heading[2] : quote ? line.slice(2) : task
+        ? `${task[1].toLowerCase() === 'x' ? '☑' : '☐'} ${line.slice(task[0].length)}`
+        : !code ? line.replace(/^[-*] /, '• ') : line;
       return <Text key={index} selectable accessibilityRole={heading ? 'header' : undefined}
         style={[
           theme.text(heading ? heading[1].length <= 2 ? 'title' : 'cardTitle' : code ? 'bodySmall' : 'reading'),
           { color: quote ? theme.color.text.secondary : theme.color.text.primary },
           quote ? { borderLeftWidth: 2, borderLeftColor: theme.color.border.strong, paddingLeft: theme.space.base, fontStyle: 'italic' } : null,
         ]}>
-        {code ? content : content.split(/(\*\*[^*\n]+\*\*|\*[^*\n]+\*)/g).map((part, i) =>
-          part.startsWith('**') && part.endsWith('**') ? <Text key={i} style={{ fontWeight: '700' }}>{part.slice(2, -2)}</Text>
-            : part.startsWith('*') && part.endsWith('*') && part.length > 2 ? <Text key={i} style={{ fontStyle: 'italic' }}>{part.slice(1, -1)}</Text> : part)}
+        {code ? content : content.split(/(\*\*\*[^*\n]+\*\*\*|\*\*[^*\n]+\*\*|\*[^*\n]+\*|`[^`\n]+`|\[[^\]\n]+\]\([^)\n]+\))/g).map((part, i) =>
+          part.startsWith('***') && part.endsWith('***') ? <Text key={i} style={{ fontWeight: '700', fontStyle: 'italic' }}>{part.slice(3, -3)}</Text>
+            : part.startsWith('**') && part.endsWith('**') ? <Text key={i} style={{ fontWeight: '700' }}>{part.slice(2, -2)}</Text>
+            : part.startsWith('*') && part.endsWith('*') && part.length > 2 ? <Text key={i} style={{ fontStyle: 'italic' }}>{part.slice(1, -1)}</Text>
+              : part.startsWith('`') && part.endsWith('`') ? <Text key={i} style={{ fontFamily: 'monospace', backgroundColor: theme.color.bg.inset }}>{part.slice(1, -1)}</Text>
+                : part.startsWith('[') && part.includes('](') ? <Text key={i} style={{ color: theme.color.accent.bg, textDecorationLine: 'underline' }}>{part.slice(1, part.indexOf(']('))}</Text>
+                  : part)}
       </Text>;
     })}
   </View>;

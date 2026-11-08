@@ -8,6 +8,7 @@ import Svg, { Path } from 'react-native-svg';
 import { Icon } from '../../ui/Icon';
 import { isSubmitShortcut, splitAt } from '../notes/note-ops';
 import { formatNote, type NoteFormat, type NoteSelection } from '../notes/formatting';
+import { MarkdownToolbar } from '../notes/MarkdownToolbar';
 import { NotePreview } from '../notes/NotePreview';
 import { LIMITS } from '../../data/operations';
 import { deleteAfterFlush, type AutosaveController, type AutosaveState } from './autosave';
@@ -244,13 +245,7 @@ export function ChunkEditor({
           <TextAction label={details ? 'Hide details' : 'Details'} accessibilityLabel={`${details ? 'Hide' : 'Show'} details for note ${n}`} onPress={() => setDetails((value) => !value)} />
         </View>
       </View>
-      {!preview && !readView ? <View accessibilityLabel={`Formatting for note ${n}`} style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.space.xs, borderBottomWidth: 1, borderBottomColor: theme.color.border.hairline, paddingBottom: theme.space.md }}>
-        {([['heading', 'H2', 'Heading'], ['bold', 'B', 'Bold'], ['italic', 'I', 'Italic'], ['bullet', '• List', 'Bullet list'], ['quote', '“ Quote', 'Quote']] as const).map(([format, label, accessible]) =>
-          <Pressable key={format} accessibilityRole="button" accessibilityLabel={`${accessible} in note ${n}`} onPress={() => applyFormat(format)}
-            style={({ pressed }) => ({ minWidth: theme.layout.control, minHeight: theme.layout.control, paddingHorizontal: theme.space.md, alignItems: 'center', justifyContent: 'center', borderRadius: theme.radius.sm, backgroundColor: pressed ? theme.color.bg.inset : undefined })}>
-            <Text style={[theme.text('meta'), { color: theme.color.text.secondary, fontWeight: format === 'bold' ? '700' : '500', fontStyle: format === 'italic' ? 'italic' : 'normal' }]}>{label}</Text>
-          </Pressable>)}
-      </View> : null}
+      {!preview && !readView ? <MarkdownToolbar context={`note ${n}`} onFormat={applyFormat} /> : null}
       {readView ? (
         <View style={{ gap: theme.space.sm }}>
           {readView}
@@ -280,7 +275,8 @@ export function ChunkEditor({
         onSelectionChange={(event) => {
           caret.current = event.nativeEvent.selection.start;
           selectionRef.current = event.nativeEvent.selection;
-          setSelection(event.nativeEvent.selection);
+          // Control selection only for a toolbar action, then let normal typing move the caret.
+          setSelection(undefined);
         }}
         onKeyPress={(event) => {
           if (!isSubmitShortcut(event as unknown as Parameters<typeof isSubmitShortcut>[0])) return;

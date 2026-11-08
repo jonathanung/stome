@@ -45,14 +45,16 @@ export function QuickCaptureSheet(props: QuickCaptureSheetProps) {
   const fixed = (Platform.OS === 'web' ? 'fixed' : 'absolute') as 'absolute';
   return (
     <View pointerEvents="box-none" style={{ position: fixed, top: 0, left: 0, right: 0, bottom: 0, zIndex: 40, justifyContent: 'flex-end' }} testID="quick-capture-sheet-layer">
-      <Pressable
-        accessibilityLabel="Close quick capture"
-        accessibilityRole="button"
-        onPress={onClose}
-        style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(36, 34, 30, 0.4)' }}
-        testID="quick-capture-scrim"
-      />
-      <MotionView distance={32}
+      <MotionView distance={0} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
+        <Pressable
+          accessibilityLabel="Close quick capture"
+          accessibilityRole="button"
+          onPress={onClose}
+          style={{ flex: 1, backgroundColor: 'rgba(36, 34, 30, 0.4)' }}
+          testID="quick-capture-scrim"
+        />
+      </MotionView>
+      <MotionView distance={48}
         accessibilityViewIsModal
         style={{
           backgroundColor: theme.color.bg.surface,
