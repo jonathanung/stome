@@ -14,12 +14,12 @@ import { freeformPathSubjects, freeformSourceIdentity } from '../../import/freef
 import { sourceIdentity } from '../../import/markdown';
 import { onenotePathSubjects, onenoteSourceIdentity } from '../../import/onenote/parse';
 import { pdfPathSubjects, pdfSourceIdentity } from '../../import/pdf/parse';
-import { assignRoomToUnmapped, batchLimitMessage, mergeBatch, remainingCapacity, shareCreatedRoom } from '../../import/batch';
+import { assignRoomToUnmapped, batchLimitMessage, mergeBatch, remainingCapacity, saveReadyImports, savedDraftPatch } from '../../import/batch';
 import { pickNotes, type PickedNote } from '../../import/pick-notes';
 import { chooseExistingRoom, destinationForMapping, unsetRoomMapping, type RoomMapping } from '../../import/room-map';
 import { changeSourcePath, changeSubjects, createSubjectReview, type SubjectReview } from '../../import/review-draft';
 import { ImportChooseFiles } from './import-choose-files';
-import { ImportReviewRooms, groupOf, type DuplicateState } from './import-review-rooms';
+import { ImportReviewRooms, type DuplicateState } from './import-review-rooms';
 import { RoomMappingControl } from './room-mapping';
 import { HarnessError } from '../../harness/contract';
 import { companionProvider } from '../../harness/companionClient';
@@ -37,6 +37,8 @@ interface Draft extends SubjectReview {
   done?: boolean;
   skipped?: boolean;
   duplicate?: DuplicateState;
+  /** Set when this note created a new room, so a retry can find that room without scanning others. */
+  createdRoomName?: string;
 }
 
 function applyOnenoteFolders<T extends SubjectReview>(note: PickedNote, draft: T): T {
@@ -199,7 +201,7 @@ export default function NoteImportScreen() {
         payload: { sourceId, fingerprint: draft.note.fingerprint, bodies: draft.note.bodies, subjects: draft.subjects.split(','), destination },
       });
       if (result.ok) {
-        update(draft.id, { done: true, mapping: chooseExistingRoom(result.value.roomId), result: result.value.skipped ? 'Already imported. Your existing notes were kept.' : `Saved ${result.value.chunkIds.length} chunks.` });
+        update(draft.id, savedDraftPatch(draft.mapping, result.value.roomId, result.value.skipped ? 'Already imported. Your existing notes were kept.' : `Saved ${result.value.chunkIds.length} chunks.`));
         await refresh();
         return result.value.roomId;
       }
@@ -208,20 +210,13 @@ export default function NoteImportScreen() {
     return null;
   };
 
-  /** Saves every note with a room, in order. Notes that name the same new room share the room the first one created. */
+  /** Saves every ready note. A retry reuses a room this batch already created. */
   const saveAll = async () => {
     if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
-    const created = new Map<string, string>();
     try {
-      for (const draft of drafts.filter((d) => groupOf({ done: d.done === true, skipped: d.skipped === true, duplicate: d.duplicate, mapping: d.mapping }) === 'ready')) {
-        const destination = destinationForMapping(draft.mapping);
-        const mapping = shareCreatedRoom(draft.mapping, created);
-        const roomId = await save({ ...draft, mapping });
-        if (!roomId) break;
-        if (destination && 'name' in destination) created.set(destination.name.toLowerCase(), roomId);
-      }
+      await saveReadyImports(drafts, async (draft, mapping) => save({ ...draft, mapping }));
     } finally { busyRef.current = false; setBusy(false); }
   };
 
