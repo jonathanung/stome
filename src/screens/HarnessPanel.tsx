@@ -19,6 +19,7 @@ import {
   chunkViewFromFoundation,
   isAnnotationProposal,
   isEditProposal,
+  isStrokeProposal,
   type MockScenario,
   type StoredProposal,
 } from '../harness/contract';
@@ -324,7 +325,14 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
                 ? { kind: 'edit', body: proposal.body, previousBody: proposal.previousBody }
                 : isAnnotationProposal(proposal)
                     ? { kind: 'answer', body: proposal.body }
-                    : null
+                    : isStrokeProposal(proposal)
+                      ? {
+                          kind: 'stroke',
+                          pointCount: proposal.points.length,
+                          chunkLabel: chunks.find((chunk) => chunk.id === proposal.chunkId)?.body.split('\n')[0]?.slice(0, 60) || 'Chunk',
+                          revision: proposal.chunkRevision,
+                        }
+                      : null
               : null
           }
           question={askedPrompt}
@@ -359,7 +367,7 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
         </Pressable>
       ) : null}
       <Text style={styles.runtime} testID="harness-runtime">
-        {live ? `${providerLabel}. Questions go to ${companionStatus ? PROVIDER_NAMES[companionStatus.provider] : 'the provider'} from the companion and cost money.` : 'Mock companion.'} A confirmed answer is saved on the chunk. An edit replaces one whole note and stays marked AI. Older demo pins stay in the harness file and are not copied.
+        {live ? `${providerLabel}. Questions go to ${companionStatus ? PROVIDER_NAMES[companionStatus.provider] : 'the provider'} from the companion and cost money.` : 'Mock companion.'} A confirmed answer is saved on the chunk. An edit replaces one whole note and stays marked AI. A confirmed stroke is saved as a chunk annotation. Older demo pins stay in the harness file and are not copied.
       </Text>
       <Text style={styles.help}>Tick chunks in this room. Paste the pairing token here; it is not saved in browser storage.</Text>
       {chunks.length === 0 ? <Text style={styles.help}>Add a note in this room before asking.</Text> : null}
@@ -430,6 +438,16 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
         >
           <Text style={purpose === 'edit' ? styles.scenarioTextSelected : styles.scenarioText}>Edit note</Text>
         </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Propose a whiteboard stroke"
+          accessibilityState={{ selected: purpose === 'stroke' }}
+          onPress={() => setPurpose('stroke')}
+          style={[styles.scenario, purpose === 'stroke' ? styles.scenarioSelected : null]}
+          testID="purpose-stroke"
+        >
+          <Text style={purpose === 'stroke' ? styles.scenarioTextSelected : styles.scenarioText}>Propose stroke</Text>
+        </Pressable>
       </View>
       {editNeedsOne ? <Text style={styles.help}>Select one chunk. An edit replaces that whole note.</Text> : null}
       <Text style={styles.label}>Question</Text>
@@ -469,7 +487,7 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
           style={[styles.button, askDisabled ? styles.buttonDisabled : null]}
           testID="ask-button"
         >
-          <Text style={styles.buttonText}>{busy ? 'Working…' : purpose === 'edit' ? 'Propose edit' : 'Ask'}</Text>
+          <Text style={styles.buttonText}>{busy ? 'Working…' : purpose === 'edit' ? 'Propose edit' : purpose === 'stroke' ? 'Propose stroke' : 'Ask'}</Text>
         </Pressable>
         <Pressable
           accessibilityRole="button"
@@ -523,6 +541,42 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
           onConfirm={() => { void onConfirm(); }}
           onDiscard={() => { void onDiscard(); }}
         />
+      ) : null}
+      {proposal && isStrokeProposal(proposal) ? (
+        <View accessibilityLabel="proposed ai stroke" style={styles.proposal} testID="proposal-stroke-card">
+          <Text style={styles.proposalTitle}>PROPOSED AI STROKE · not saved</Text>
+          <Text style={styles.secondaryText} testID="proposal-stroke-body">
+            {`${proposal.points.length} points on "${chunks.find((chunk) => chunk.id === proposal.chunkId)?.body.split('\n')[0]?.slice(0, 60) || 'chunk'}" · based on revision ${proposal.chunkRevision}`}
+          </Text>
+          <View style={styles.actions}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ disabled: confirmDisabled }}
+              disabled={confirmDisabled}
+              onPress={() => {
+                void onConfirm();
+              }}
+              style={[styles.button, confirmDisabled ? styles.buttonDisabled : null]}
+              testID="confirm-button"
+            >
+              <Text style={styles.buttonText}>Confirm and save</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Decline without writing"
+              accessibilityState={{ disabled: busy }}
+              disabled={busy}
+              onPress={() => {
+                void onDiscard();
+              }}
+              style={styles.secondary}
+              testID="discard-button"
+            >
+              <Text style={styles.secondaryText}>Decline</Text>
+            </Pressable>
+          </View>
+          <Text style={styles.help}>Decline writes nothing. A confirmed stroke is saved as a chunk annotation.</Text>
+        </View>
       ) : null}
       {error && !proposal && /timed out/i.test(error) ? (
         <AskTimeoutNotice disabled={continueDisabled} onContinue={() => { void onAsk(true); }} />

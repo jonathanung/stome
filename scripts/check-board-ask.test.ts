@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { boundsOverlap, itemBounds, selectionBounds, stickiesToProposal, toBoardItemView } from '../src/features/whiteboard/ask.ts';
+import { boundsOverlap, itemBounds, selectionBounds, stickiesToProposal, strokeToProposal, toBoardItemView } from '../src/features/whiteboard/ask.ts';
 import { SAMPLE_BOARD, acceptedItems, type BoardItem } from '../src/features/whiteboard/model.ts';
 import { HarnessError } from '../src/harness/contract.ts';
 import { completeReadTool, mockProvider } from '../src/harness/provider.ts';
@@ -71,4 +71,24 @@ test('scenario error surfaces provider_error', async () => {
     ),
     (error: unknown) => error instanceof HarnessError && error.code === 'provider_error',
   );
+});
+
+test('a real stroke proposal maps to a dashed strokes item and applies solid', () => {
+  const proposal = strokeToProposal({ points: [[8, 8], [48, 32]] }, 'underline it', newId);
+  assert.equal(proposal.prompt, 'underline it');
+  assert.match(proposal.summary, /2 points/);
+  assert.equal(proposal.items.length, 1);
+  const [item] = proposal.items;
+  assert.equal(item?.kind, 'strokes');
+  assert.equal(item?.checked, true);
+  assert.equal(item?.title, '2-point stroke');
+  const [node] = item?.items ?? [];
+  assert.equal(node?.kind, 'stroke');
+  assert.deepEqual(node?.kind === 'stroke' ? node.points : null, [[8, 8], [48, 32]]);
+  assert.equal(node?.kind === 'stroke' ? node.proposed : null, true);
+  const applied = acceptedItems(proposal);
+  assert.equal(applied.length, 1);
+  assert.equal(applied[0]?.kind === 'stroke' ? applied[0].proposed : null, false);
+  const unticked = { ...proposal, items: proposal.items.map((entry) => ({ ...entry, checked: false })) };
+  assert.deepEqual(acceptedItems(unticked), []);
 });

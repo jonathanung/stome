@@ -5,15 +5,19 @@ import type { StudyDifficulty } from '../features/study/generator.ts';
 import {
   EDIT_TOOL_NAME,
   HarnessError,
+  STROKE_TOOL_NAME,
   STUDY_DECK_TOOL_NAME,
   STUDY_OUTLINE_TOOL_NAME,
   STUDY_QUIZ_TOOL_NAME,
   TOOL_NAME,
   assertOutputInScope,
   assertSingleRoomSelection,
+  assertStrokeOutputInScope,
   assessConfirmedAnnotation,
+  assessConfirmedStroke,
   chunkViewFromFoundation,
   isEditProposal,
+  isStrokeProposal,
   isStudyDeckProposal,
   isStudyOutlineProposal,
   isStudyProposal,
@@ -26,8 +30,10 @@ import {
   type ChunkView,
   type EditProposal,
   type FoundationAnnotationRequest,
+  type FoundationStrokeRequest,
   type MockScenario,
   type StoredProposal,
+  type StrokeProposal,
   type StudyDeckDraft,
   type StudyDeckProposal,
   type StudyKind,
@@ -59,7 +65,7 @@ import {
 
 export type AskStatus = 'proposal' | 'failed' | 'cancelled' | 'discarded';
 
-export type NotePurpose = 'answer' | 'edit';
+export type NotePurpose = 'answer' | 'edit' | 'stroke';
 
 export type FoundationSaveResult = {
   replayed: boolean;
@@ -196,7 +202,11 @@ export async function fulfillQuestion(
     }
     const output = await completeWithLimits(
       input.provider,
-      { tool: purpose === 'edit' ? EDIT_TOOL_NAME : TOOL_NAME, input: providerInput, scenario: input.scenario },
+      {
+        tool: purpose === 'edit' ? EDIT_TOOL_NAME : purpose === 'stroke' ? STROKE_TOOL_NAME : TOOL_NAME,
+        input: providerInput,
+        scenario: input.scenario,
+      },
       input.signal,
       input.timeoutMs,
     );
@@ -249,6 +259,12 @@ function proposalFromOutput(
   output: Awaited<ReturnType<typeof completeWithLimits>>,
   chunks: readonly ChunkView[],
 ): StoredProposal {
+  if (purpose === 'stroke') {
+    if (output.type !== 'stroke') {
+      throw new HarnessError('invalid_output', 'The stroke tool returned a different proposal');
+    }
+    return proposalFromStrokeOutput(output, chunks);
+  }
   if (purpose === 'edit') {
     if (output.type !== 'chunk_edit') {
       throw new HarnessError('invalid_output', 'The edit tool returned an answer');
@@ -270,7 +286,7 @@ function proposalFromOutput(
     };
   }
   if (output.type !== 'ai_answer') {
-    throw new HarnessError('invalid_output', 'The annotation tool returned an edit');
+    throw new HarnessError('invalid_output', 'The annotation tool returned a different proposal');
   }
   assertOutputInScope(output, chunks);
   const chunk = chunks.find((item) => item.id === output.chunkId);
@@ -287,6 +303,27 @@ function proposalFromOutput(
     body: output.body,
     anchorStart: output.anchorStart,
     anchorEnd: output.anchorEnd,
+    chunkRevision: chunk.revision,
+  };
+}
+
+function proposalFromStrokeOutput(
+  output: { roomId: string; chunkId: string; type: 'stroke'; points: [number, number][] },
+  chunks: readonly ChunkView[],
+): StoredProposal {
+  assertStrokeOutputInScope(output, chunks);
+  const chunk = chunks.find((item) => item.id === output.chunkId);
+  if (!chunk) {
+    throw new HarnessError('scope_rejected', 'The proposal targets a chunk that was not selected');
+  }
+  return {
+    id: newId(),
+    tool: STROKE_TOOL_NAME,
+    roomId: output.roomId,
+    chunkId: output.chunkId,
+    noteId: chunk.noteId,
+    type: 'stroke',
+    points: output.points,
     chunkRevision: chunk.revision,
   };
 }
@@ -338,11 +375,34 @@ function operationFromAssessment(request: FoundationAnnotationRequest, quote: st
   };
 }
 
+function operationFromStrokeAssessment(request: FoundationStrokeRequest) {
+  return {
+    opId: request.opId,
+    kind: 'annotation.create' as const,
+    // Permission split (#74 security): AI strokes commit as source 'ai' with
+    // an explicit confirmation, never through the human permission path.
+    source: 'ai' as const,
+    confirmed: true as const,
+    expectedRevision: request.expectedRevision,
+    payload: {
+      chunkId: request.payload.chunkId,
+      type: 'stroke' as const,
+      anchor: { points: request.payload.points },
+      payload: {
+        proposalId: request.payload.proposalId,
+        chunkRevision: request.expectedRevision,
+      },
+    },
+  };
+}
+
 /**
  * Saves the current proposal through createCommit.
- * An answer becomes one confirmed AI annotation. A note edit replaces that chunk's
- * whole body and stays source ai. expectedRevision is the revision stored on the
- * proposal. A newer chunk revision rejects a new write and is not sent in its place.
+ * An answer becomes one confirmed AI annotation. A stroke becomes one
+ * confirmed AI stroke annotation on the same commit path. A note edit replaces
+ * that chunk's whole body and stays source ai. expectedRevision is the revision
+ * stored on the proposal. A newer chunk revision rejects a new write and is
+ * not sent in its place.
  * The operation id was stored on the session before this call. A repeat of that id
  * does not write again. If the commit landed and the session record did not, the
  * next confirm reads applied_ops before it checks the chunk again.
@@ -375,8 +435,12 @@ export async function confirmFoundationQuestion(
   if (isEditProposal(session.proposal)) {
     return confirmChunkEdit(harness, app, session, session.proposal, operationId, input.confirmed, now);
   }
+  if (isStrokeProposal(session.proposal)) {
+    return confirmStroke(harness, app, session, session.proposal, operationId, input.confirmed, now);
+  }
   if (isStudyProposal(session.proposal)) {
     throw new HarnessError('proposal_mismatch', 'This proposal is a study draft. Confirm it through the study path.');
+
   }
   const prior = await app.get<{ kind: string; result: string }>('SELECT kind, result FROM applied_ops WHERE op_id = ?', [
     operationId,
@@ -423,6 +487,73 @@ export async function confirmFoundationQuestion(
     newId: () => globalThis.crypto.randomUUID(),
   });
   const saved = await commit(operationFromAssessment(request, quote));
+  if (!saved.ok) {
+    throw gateFailure(saved.error.code, saved.error.message);
+  }
+  const annotationId = saved.value.annotationId;
+  await recordFoundationPin(harness, { sessionId: session.id, operationId, annotationId, now });
+  return { replayed: saved.duplicate, annotationId, operationId };
+}
+
+/**
+ * Saves a stroke proposal through createCommit as one confirmed AI stroke
+ * annotation. Mirrors the answer path: the applied_ops replay comes first, so
+ * a repeat of the operation id never writes twice, and the stored chunk
+ * revision rejects a stale confirm before anything is written.
+ */
+async function confirmStroke(
+  harness: SqlExecutor,
+  app: Db,
+  session: HarnessSession,
+  proposal: StrokeProposal,
+  operationId: string,
+  confirmed: boolean,
+  now: number,
+): Promise<FoundationSaveResult> {
+  const prior = await app.get<{ kind: string; result: string }>('SELECT kind, result FROM applied_ops WHERE op_id = ?', [
+    operationId,
+  ]);
+  if (prior) {
+    if (prior.kind !== 'annotation.create') {
+      throw new HarnessError('proposal_mismatch', `This operation id was already used for ${prior.kind}`);
+    }
+    const value = JSON.parse(prior.result) as { annotationId?: unknown };
+    if (typeof value.annotationId !== 'string' || value.annotationId.length === 0) {
+      throw new HarnessError('invalid_shape', 'The saved operation has no annotation');
+    }
+    await recordFoundationPin(harness, {
+      sessionId: session.id,
+      operationId,
+      annotationId: value.annotationId,
+      now,
+    });
+    return { replayed: true, annotationId: value.annotationId, operationId };
+  }
+  if (noteIdFromChunk(proposal.chunkId) !== null) {
+    throw new HarnessError(
+      'not_found',
+      'This stroke pointed at a demo note. Ask about a chunk. Nothing was written.',
+    );
+  }
+  const current = await getChunk(app, proposal.chunkId);
+  if (!current) {
+    throw new HarnessError('not_found', 'The chunk for this proposal is not in the library');
+  }
+  const request = assessConfirmedStroke({
+    confirmed,
+    operationId,
+    proposal,
+    sessionRoomId: session.roomId,
+    sessionState: session.state,
+    selectedChunkIds: session.selectedChunkIds,
+    confirmedOperationId: session.confirmedOperationId,
+    chunk: chunkViewFromFoundation(current),
+  });
+  const commit = createCommit(app, {
+    now: () => now,
+    newId: () => globalThis.crypto.randomUUID(),
+  });
+  const saved = await commit(operationFromStrokeAssessment(request));
   if (!saved.ok) {
     throw gateFailure(saved.error.code, saved.error.message);
   }

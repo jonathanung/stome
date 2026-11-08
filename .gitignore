@@ -7,6 +7,8 @@ node_modules/
 .expo/
 dist/
 web-build/
+render-smoke-web/
+render-smoke-android/
 expo-env.d.ts
 
 # Native

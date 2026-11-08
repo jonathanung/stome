@@ -1,9 +1,9 @@
-// Read-only harness tools beyond the two note-write proposals in contract.ts.
+// Read-only harness tools beyond the write proposals in contract.ts.
 //
 // None of these tools writes. Each returns a suggestion the app shows to the
 // person, who accepts it through the existing app paths (a human review mark,
 // a local board item, an import mapping choice). The companion and the live
-// providers treat them like the note tools: same pairing, same limits, same
+// providers treat them like the write tools: same pairing, same limits, same
 // normalized errors, and the output is parsed here before the app sees it.
 
 import {
