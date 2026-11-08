@@ -1780,9 +1780,11 @@ test('a completed proposal and its operation id reopen together', async () => {
   const stable = repairOperationId(prepared.sessionId, outcome.proposal?.id ?? '');
   assert.equal(repaired.pendingOperationId, stable);
   reopened.close();
-  const persisted = await getSession(openMemory(path), prepared.sessionId);
+  const persistedDb = openMemory(path);
+  const persisted = await getSession(persistedDb, prepared.sessionId);
   assert.equal(persisted?.pendingOperationId, stable);
   assert.equal(persisted?.proposal?.chunkRevision, savedChunk.revision);
+  persistedDb.close();
   app.close();
   rmSync(dir, { recursive: true, force: true });
 });

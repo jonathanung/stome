@@ -1,7 +1,7 @@
 import { randomUUID } from 'expo-crypto';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -14,7 +14,15 @@ import type { ReviewMark, Room, RoomStage } from '../../data/models';
 import { getChunk, getRoom, latestReviewMark, listChunks } from '../../data/queries';
 import type { ReviewState } from '../../db/schema';
 import { expoDriver } from '../../db/expo-driver';
+import { companionProvider } from '../../harness/companionClient';
+import { getCompanionSettings, useCompanionSettings } from '../../harness/companionSettings';
 import { EMPTY_TALLY, ReviewDone, nextUpSummary, type ReviewTally } from './ReviewDone';
+import {
+  chooseReviewQuestion,
+  questionCacheKey,
+  requestReviewQuestion,
+  type QuestionChoice,
+} from './question';
 import { reviewMarkController } from './mark-attempt';
 import { acknowledgeDisplayedCards, reviewQueueOnOpen } from './mark-progress';
 import {
@@ -22,7 +30,7 @@ import {
   chunksReadyToReview,
   deviceTimeZone,
   formatDueAt,
-  mockReviewQuestion,
+  localReviewQuestion,
   type ReviewQueueChunk,
 } from './session';
 
@@ -167,7 +175,50 @@ export function ReviewScreen() {
   }
 
   const card = cards[0];
-  const asked = card && roomId ? mockReviewQuestion({ id: card.id, body: card.body, roomId }) : null;
+  const settings = useCompanionSettings();
+  const paired = settings.token.trim().length > 0;
+  const [questionCache, setQuestionCache] = useState<Record<string, QuestionChoice>>({});
+  const [shownAnswerKey, setShownAnswerKey] = useState<string | null>(null);
+  const cardKey = card ? questionCacheKey(card) : null;
+  const cardId = card?.id;
+  const cardBody = card?.body;
+  const cachedChoice = cardKey ? questionCache[cardKey] : undefined;
+  const hasCached = cachedChoice !== undefined;
+
+  useEffect(() => {
+    if (!cardKey || cardId === undefined || cardBody === undefined || !roomId || hasCached) return;
+    const current = getCompanionSettings();
+    if (!current.token.trim() || !cardBody.trim()) return;
+    const controller = new AbortController();
+    requestReviewQuestion({
+      roomId,
+      chunk: { id: cardId, roomId, body: cardBody },
+      provider: companionProvider({ baseUrl: current.url, token: current.token }),
+      scenario: current.scenario,
+      signal: controller.signal,
+    })
+      .then((result) => chooseReviewQuestion({ token: current.token, result }))
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return null;
+        return chooseReviewQuestion({ token: current.token, result: { error } });
+      })
+      .then((choice) => {
+        if (!choice || controller.signal.aborted) return;
+        setQuestionCache((cache) => ({ ...cache, [cardKey]: choice }));
+      });
+    return () => controller.abort();
+  }, [cardKey, cardId, cardBody, roomId, hasCached, paired]);
+
+  const local = card ? localReviewQuestion(card) : null;
+  const choice = cachedChoice ?? (paired ? null : chooseReviewQuestion({ token: '', result: null }));
+  const waiting = Boolean(card && local?.ok && paired && !choice);
+  const asked: typeof local = !card || !local
+    ? null
+    : choice?.source === 'companion'
+      ? { ok: true, question: choice.question }
+      : local;
+  const questionNotice = local?.ok && choice?.source === 'local' ? choice.notice : null;
+  const answer = choice?.source === 'companion' ? choice.answer : null;
   const pending = !busy && card ? reviewMarkController.retained(card.id) : null;
   const shownError = error ?? (pending
     ? `The previous ${REVIEW_LABEL[pending.payload.state]} mark did not finish. Retry that choice. It will not be counted twice.`
@@ -351,7 +402,9 @@ export function ReviewScreen() {
                         <Text testID="review-revision" style={[theme.text('caption'), { color: tertiary }]}>{`Revision ${card.revision}`}</Text>
                       </View>
                       <Text style={[theme.text('caption'), { color: tertiary }]}>Practice question</Text>
-                      {asked.ok ? (
+                      {waiting ? (
+                        <Text testID="review-question-loading" accessibilityRole="progressbar" style={[theme.text('bodySmall'), { color: muted }]}>Writing a question…</Text>
+                      ) : asked.ok ? (
                         <Text testID="review-question" accessibilityRole="header" style={[theme.text('actionTitle'), { color: ink, fontSize: 22, lineHeight: 28, letterSpacing: -0.4 }]}>
                           {asked.question.split('\n')[0]}
                         </Text>
@@ -360,6 +413,18 @@ export function ReviewScreen() {
                           <Text accessibilityRole="alert" testID="review-question-error" style={[theme.text('bodySmall'), { color: theme.color.status.danger.text }]}>{asked.message}</Text>
                         </View>
                       )}
+                      {questionNotice ? (
+                        <Text testID="review-question-notice" style={[theme.text('caption'), { color: tertiary }]}>{questionNotice}</Text>
+                      ) : null}
+                      {answer ? (
+                        shownAnswerKey === cardKey ? (
+                          <Text testID="review-answer" style={[theme.text('bodySmall'), { color: ink }]}>{answer}</Text>
+                        ) : (
+                          <Pressable accessibilityRole="button" accessibilityLabel="Show answer" testID="review-show-answer" onPress={() => setShownAnswerKey(cardKey)} style={{ minHeight: 44, justifyContent: 'center' }}>
+                            <Text style={[theme.text('nav'), { color: muted }]}>Show answer</Text>
+                          </Pressable>
+                        )
+                      ) : null}
                     </View>
                     <View accessibilityLabel="Your note" style={[cardStyle, { gap: 10, paddingVertical: 18 }]}>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>

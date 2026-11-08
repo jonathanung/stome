@@ -103,6 +103,13 @@ export function mockReviewQuestion(
   }
 }
 
+/** Unpaired review uses the same HAR.3 mock answer. It does not call a live model. */
+export function localReviewQuestion(chunk: { id: string; body: string; roomId?: string }):
+  | { ok: true; question: string }
+  | { ok: false; message: string } {
+  return mockReviewQuestion({ id: chunk.id, roomId: chunk.roomId ?? chunk.id, body: chunk.body });
+}
+
 export function deviceTimeZone(): string {
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   return zone && zone.trim() ? zone.trim() : 'UTC';

@@ -13,9 +13,12 @@ import {
   type ProposeInput,
   type ProposeOutput,
 } from './contract.ts';
+import { isReadTool, mockReadToolOutput, parseReadToolInput, parseReadToolOutput, type ReadToolName } from './tools.ts';
+
+export type NoteToolName = typeof TOOL_NAME | typeof EDIT_TOOL_NAME;
 
 export type ProviderRequest = {
-  tool: typeof TOOL_NAME | typeof EDIT_TOOL_NAME;
+  tool: NoteToolName | ReadToolName;
   input: unknown;
   scenario: MockScenario;
 };
@@ -63,13 +66,36 @@ export function mockEditOutput(input: ProposeInput): EditProposeOutput {
   };
 }
 
+async function mockReadComplete(request: ProviderRequest & { tool: ReadToolName }, signal: AbortSignal): Promise<unknown> {
+  if (!MOCK_SCENARIOS.includes(request.scenario)) {
+    throw new HarnessError('invalid_shape', 'The mock scenario is unknown');
+  }
+  if (signal.aborted) {
+    throw abortError(signal);
+  }
+  const input = parseReadToolInput(request.tool, request.input);
+  if (request.scenario === 'timeout') {
+    throw new HarnessError('timeout', 'The mock provider timed out before answering');
+  }
+  if (request.scenario === 'error') {
+    throw new HarnessError('provider_error', 'The mock provider failed before answering');
+  }
+  if (request.scenario === 'cancel') {
+    return await waitForCancel(signal);
+  }
+  if (request.scenario === 'oversize') {
+    throw new HarnessError('output_limit', 'The mock provider answered over the output limit');
+  }
+  return parseReadToolOutput(request.tool, mockReadToolOutput(request.tool, input), input);
+}
+
 /**
  * One deterministic mock result. `cancel` is a terminal error here.
  * `mockComplete` waits for the abort signal instead of settling immediately.
  */
 export function settleMockRequest(request: ProviderRequest): unknown {
   if (request.tool !== TOOL_NAME && request.tool !== EDIT_TOOL_NAME) {
-    throw new HarnessError('invalid_shape', 'The mock provider only runs the notes tools');
+    throw new HarnessError('invalid_shape', 'The mock provider only runs the allowed tools');
   }
   const editing = request.tool === EDIT_TOOL_NAME;
   if (!MOCK_SCENARIOS.includes(request.scenario)) {
@@ -111,6 +137,9 @@ export function settleMockRequest(request: ProviderRequest): unknown {
 }
 
 export async function mockComplete(request: ProviderRequest, signal: AbortSignal): Promise<unknown> {
+  if (isReadTool(request.tool)) {
+    return mockReadComplete(request as ProviderRequest & { tool: ReadToolName }, signal);
+  }
   if (request.tool !== TOOL_NAME && request.tool !== EDIT_TOOL_NAME) {
     throw new HarnessError('invalid_shape', 'The mock provider only runs the notes tools');
   }
@@ -236,4 +265,38 @@ export async function completeWithLimits(
     throw abortError(signal.aborted ? signal : timed.signal);
   }
   return request.tool === EDIT_TOOL_NAME ? parseEditOutput(raw) : parseProposeOutput(raw);
+}
+
+/**
+ * Run one read-only tool with the shared time limit and cancel, then parse
+ * and scope-check the output. Use this for review, board, and import calls.
+ */
+export async function completeReadTool<T>(
+  provider: Provider,
+  request: ProviderRequest & { tool: ReadToolName },
+  signal: AbortSignal,
+  timeoutMs: number = PROVIDER_LIMITS.timeoutMs,
+): Promise<T> {
+  const input = parseReadToolInput(request.tool, request.input);
+  const timed = combineSignals(signal, timeoutMs);
+  let raw: unknown;
+  try {
+    const pending = provider.complete(request, timed.signal);
+    void pending.catch(() => undefined);
+    raw = await Promise.race([pending, rejectWhenAborted(timed.signal)]);
+  } catch (error) {
+    if (error instanceof HarnessError) {
+      throw error;
+    }
+    if (timed.signal.aborted) {
+      throw abortError(timed.signal);
+    }
+    throw new HarnessError('provider_error', 'The provider failed before answering');
+  } finally {
+    timed.stop();
+  }
+  if (signal.aborted || timed.signal.aborted) {
+    throw abortError(signal.aborted ? signal : timed.signal);
+  }
+  return parseReadToolOutput(request.tool, raw, input) as T;
 }

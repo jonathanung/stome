@@ -6,6 +6,7 @@ import { getChunk, getRoom, latestReviewMark } from '../src/data/queries.ts';
 import { migrateDb } from '../src/db/migrate.ts';
 import {
   chunksReadyToReview,
+  localReviewQuestion,
   mockReviewQuestion,
   orderReviewQueue,
   reviewHref,
@@ -27,6 +28,7 @@ test('the same chunk always gets the same mock question and an error continues',
   if (!first.ok || !again.ok) return;
   assert.equal(first.question, again.question);
   assert.equal(first.question, 'Mock answer (c1; messages=0): What should you remember from this note?');
+  assert.deepEqual(localReviewQuestion({ id: 'c1', body: 'photosynthesis makes sugar' }), first);
   const other = mockReviewQuestion({ id: 'c2', roomId: 'room-1', body: 'mitochondria' });
   assert.equal(other.ok, true);
   if (!other.ok) return;
