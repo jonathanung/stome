@@ -1,3 +1,4 @@
+import { classifyCompanionPage, decideCompanionAddress, readCompanionContext, type CompanionContext } from './companionAddress.ts';
 import { HarnessError, type HarnessErrorCode } from './contract';
 import type { Provider, ProviderRequest } from './provider';
 import type { CompanionStatus } from './tools';
@@ -28,35 +29,30 @@ function asCode(value: unknown): HarnessErrorCode {
   return 'provider_error';
 }
 
-function isLoopbackHost(hostname: string): boolean {
-  // URL.hostname keeps the brackets on an IPv6 literal, so "[::1]" is the loopback host.
-  const bare = hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname;
-  return bare === 'localhost' || bare === '127.0.0.1' || bare === '::1';
+export function assertCompanionUrl(baseUrl: string, context: CompanionContext = readCompanionContext()): string {
+  const decision = decideCompanionAddress(baseUrl, context);
+  if (!decision.ok) throw new HarnessError('provider_error', decision.message);
+  return decision.origin;
 }
 
-export function assertCompanionUrl(baseUrl: string): string {
-  let url: URL;
-  try {
-    url = new URL(baseUrl);
-  } catch {
-    throw new HarnessError('provider_error', 'The companion address is not a URL');
+function reachError(error: unknown, context: CompanionContext, signal?: AbortSignal): HarnessError {
+  if (signal?.aborted) return new HarnessError('cancelled', 'The question was cancelled');
+  const kind = classifyCompanionPage(context);
+  if (kind === 'secure-local' || kind === 'device') {
+    return new HarnessError(
+      'provider_error',
+      'The laptop companion did not answer. Keep npm run companion running on the laptop. This device cannot start it.',
+    );
   }
-  if (url.protocol !== 'http:') {
-    throw new HarnessError('provider_error', 'The companion must use http on this machine');
-  }
-  if (url.username !== '' || url.password !== '') {
-    throw new HarnessError('provider_error', 'The companion address cannot include credentials');
-  }
-  if (!isLoopbackHost(url.hostname)) {
-    throw new HarnessError('provider_error', 'The companion must stay on loopback');
-  }
-  return url.origin;
+  const message = error instanceof Error ? error.message : 'The companion could not be reached';
+  return new HarnessError('provider_error', message);
 }
 
-export function companionProvider(options: { baseUrl: string; token: string }): Provider {
+export function companionProvider(options: { baseUrl: string; token: string; context?: CompanionContext }): Provider {
+  const context = options.context ?? readCompanionContext();
   return {
     async complete(request: ProviderRequest, signal: AbortSignal): Promise<unknown> {
-      const origin = assertCompanionUrl(options.baseUrl);
+      const origin = assertCompanionUrl(options.baseUrl, context);
       let response: Response;
       try {
         response = await fetch(`${origin}/v1/tool`, {
@@ -74,11 +70,7 @@ export function companionProvider(options: { baseUrl: string; token: string }): 
           }),
         });
       } catch (error) {
-        if (signal.aborted) {
-          throw new HarnessError('cancelled', 'The question was cancelled');
-        }
-        const message = error instanceof Error ? error.message : 'The companion could not be reached';
-        throw new HarnessError('provider_error', message);
+        throw reachError(error, context, signal);
       }
       const payload = (await response.json()) as {
         ok?: boolean;
@@ -97,10 +89,11 @@ export function companionProvider(options: { baseUrl: string; token: string }): 
 
 /** GET /v1/status. Needs the pairing token; the reply never contains a provider key. */
 export async function fetchCompanionStatus(
-  options: { baseUrl: string; token: string },
+  options: { baseUrl: string; token: string; context?: CompanionContext },
   signal?: AbortSignal,
 ): Promise<CompanionStatus> {
-  const origin = assertCompanionUrl(options.baseUrl);
+  const context = options.context ?? readCompanionContext();
+  const origin = assertCompanionUrl(options.baseUrl, context);
   let response: Response;
   try {
     response = await fetch(`${origin}/v1/status`, {
@@ -110,8 +103,7 @@ export async function fetchCompanionStatus(
       headers: { 'x-stome-token': options.token },
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'The companion could not be reached';
-    throw new HarnessError('provider_error', message);
+    throw reachError(error, context, signal);
   }
   const payload = (await response.json()) as {
     ok?: boolean;
