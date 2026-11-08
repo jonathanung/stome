@@ -9,7 +9,7 @@ import { Button, Screen, useStoneTheme } from '../../design-theme/src/primitives
 import { createCommit } from '../data/commit';
 import { isDueAnswer, type DueItem } from '../data/models';
 import { listDueAnswers, listDueChunks, listRooms } from '../data/queries';
-import { planDueItems } from '../data/today';
+import { dueItemReviewId, planDueItems } from '../data/today';
 import { expoDriver } from '../db/expo-driver';
 import { MarkButtons } from '../features/review/MarkButtons';
 import { reviewMarkController } from '../features/review/mark-attempt';
@@ -85,6 +85,7 @@ export function TodayScreen() {
           if (!active || mine !== ticket) return;
           setItems(planDueItems([...chunks, ...answers]));
           setRoomNames(Object.fromEntries(rooms.map((room) => [room.id, room.name])));
+          setError(null);
           setLoading(false);
         })
         .catch((reason: unknown) => {
@@ -180,7 +181,7 @@ export function TodayScreen() {
                             subtitle={subtitle}
                             leading={item.mark ? <StatusMark state={item.mark.state} /> : <FreshDot />}
                             accessibilityLabel={`Review saved answer ${title}`}
-                            onPress={() => router.push(reviewHref(item.chunk.roomId, item.chunk.id))}
+                            onPress={() => router.push(reviewHref(item.chunk.roomId, dueItemReviewId(item)))}
                             testID={`today-item-${key}`}
                           />
                           <View style={{ paddingHorizontal: theme.space.base, paddingTop: theme.space.sm }}>
@@ -203,7 +204,7 @@ export function TodayScreen() {
                           subtitle={`${STATE_LABEL[item.mark.state]} ${markedLabel(item.mark.markedAt)} · due ${dueLabel(item.mark.dueAt)}`}
                           leading={<StatusMark state={item.mark.state} />}
                           accessibilityLabel={`Review ${title}`}
-                          onPress={() => router.push(reviewHref(item.chunk.roomId, item.chunk.id))}
+                          onPress={() => router.push(reviewHref(item.chunk.roomId, dueItemReviewId(item)))}
                           testID={`today-item-${key}`}
                         />
                         <View style={{ paddingHorizontal: theme.space.base, paddingTop: theme.space.sm }}>
@@ -224,7 +225,7 @@ export function TodayScreen() {
           {items.length ? (
             <Button
               label={`review all ${items.length}`}
-              onPress={() => router.push(reviewHref(items[0].chunk.roomId, items[0].chunk.id))}
+              onPress={() => router.push(reviewHref(items[0].chunk.roomId, dueItemReviewId(items[0])))}
             />
           ) : null}
         </View>
