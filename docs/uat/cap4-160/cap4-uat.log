@@ -1,5 +1,3 @@
-console:phone-390x844-dark: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. accessibilityElementsHidden accessibilityelemen
-console:phone-390x844-dark: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. importantForAccessibility importantforaccessibi
 PASS phone-390x844-dark rooms home: no capture testIDs
 PASS phone-390x844-dark rooms home: no "Quick capture" copy
 PASS phone-390x844-dark rooms home: no Alt+N hint
@@ -12,38 +10,28 @@ PASS phone-390x844-dark: tab-search present
 PASS phone-390x844-dark: Alt+N opens nothing
 PASS phone-390x844-dark: Ctrl+Alt+N opens nothing
 PASS phone-390x844-dark: key presses do not change the page
-created room UAT phone-390x844-dark cap4mw75zq98
-opened room UAT phone-390x844-dark cap4mw75zq98 at http://127.0.0.1:8091/rooms/ae03cca8-cfe1-4695-a9ab-2ab44e841e0f
+created room UAT phone-390x844-dark cap4mw766o11
+opened room UAT phone-390x844-dark cap4mw766o11 at http://127.0.0.1:8091/rooms/16a142ba-c65d-473a-8dc0-aea4209e6336
 PASS phone-390x844-dark room: no capture testIDs
 PASS phone-390x844-dark room: no "Quick capture" copy
 PASS phone-390x844-dark room: no Alt+N hint
 PASS phone-390x844-dark: in-room note visible after save
 PASS phone-390x844-dark: chunk card exists
-console:phone-390x844-dark: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. accessibilityElementsHidden accessibilityelemen
-console:phone-390x844-dark: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. importantForAccessibility importantforaccessibi
 PASS phone-390x844-dark: in-room note persists across reload
-console:phone-390x844-dark: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. accessibilityElementsHidden accessibilityelemen
-console:phone-390x844-dark: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. importantForAccessibility importantforaccessibi
 PASS phone-390x844-dark today: no capture testIDs
 PASS phone-390x844-dark today: no "Quick capture" copy
 PASS phone-390x844-dark today: no Alt+N hint
 PASS phone-390x844-dark today: shows "Nothing due today"
 PASS phone-390x844-dark: today keeps "Capture a note"
 PASS phone-390x844-dark notes: shows "Stome"
-console:phone-390x844-dark: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. accessibilityElementsHidden accessibilityelemen
-console:phone-390x844-dark: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. importantForAccessibility importantforaccessibi
 PASS phone-390x844-dark recent/search: no capture testIDs
 PASS phone-390x844-dark recent/search: no "Quick capture" copy
 PASS phone-390x844-dark recent/search: no Alt+N hint
 PASS phone-390x844-dark recent/search: shows "Recent notes"
-console:phone-390x844-dark: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. accessibilityElementsHidden accessibilityelemen
-console:phone-390x844-dark: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. importantForAccessibility importantforaccessibi
 PASS phone-390x844-dark import: no capture testIDs
 PASS phone-390x844-dark import: no "Quick capture" copy
 PASS phone-390x844-dark import: no Alt+N hint
 PASS phone-390x844-dark import: shows "bring your notes"
-console:phone-390x844-dark: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. accessibilityElementsHidden accessibilityelemen
-console:phone-390x844-dark: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. importantForAccessibility importantforaccessibi
 PASS phone-390x844-dark companion: no capture testIDs
 PASS phone-390x844-dark companion: no "Quick capture" copy
 PASS phone-390x844-dark companion: no Alt+N hint
@@ -58,8 +46,8 @@ PASS desktop-1280x900-dark: sidebar shows Companion
 PASS desktop-1280x900-dark: Alt+N opens nothing
 PASS desktop-1280x900-dark: Ctrl+Alt+N opens nothing
 PASS desktop-1280x900-dark: key presses do not change the page
-created room UAT desktop-1280x900-dark cap4mw75zq98
-opened room UAT desktop-1280x900-dark cap4mw75zq98 at http://127.0.0.1:8091/rooms/cdb81d90-9dbd-43a6-aa28-605927cf222d
+created room UAT desktop-1280x900-dark cap4mw766o11
+opened room UAT desktop-1280x900-dark cap4mw766o11 at http://127.0.0.1:8091/rooms/67f89f73-ee0b-4143-be87-588bbd82a018
 PASS desktop-1280x900-dark room: no capture testIDs
 PASS desktop-1280x900-dark room: no "Quick capture" copy
 PASS desktop-1280x900-dark room: no Alt+N hint
@@ -85,8 +73,6 @@ PASS desktop-1280x900-dark companion: no "Quick capture" copy
 PASS desktop-1280x900-dark companion: no Alt+N hint
 PASS desktop-1280x900-dark companion: shows "Pairing"
 lane desktop-1280x900-dark complete
-console:phone-390x844-light: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. accessibilityElementsHidden accessibilityelemen
-console:phone-390x844-light: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. importantForAccessibility importantforaccessibi
 PASS phone-390x844-light rooms home: no capture testIDs
 PASS phone-390x844-light rooms home: no "Quick capture" copy
 PASS phone-390x844-light rooms home: no Alt+N hint
@@ -99,38 +85,28 @@ PASS phone-390x844-light: tab-search present
 PASS phone-390x844-light: Alt+N opens nothing
 PASS phone-390x844-light: Ctrl+Alt+N opens nothing
 PASS phone-390x844-light: key presses do not change the page
-created room UAT phone-390x844-light cap4mw75zq98
-opened room UAT phone-390x844-light cap4mw75zq98 at http://127.0.0.1:8091/rooms/481a3964-9f76-459a-ba01-95b068480d22
+created room UAT phone-390x844-light cap4mw766o11
+opened room UAT phone-390x844-light cap4mw766o11 at http://127.0.0.1:8091/rooms/55cdcc6e-59e7-4c55-9d99-a9e8a0f6d4b7
 PASS phone-390x844-light room: no capture testIDs
 PASS phone-390x844-light room: no "Quick capture" copy
 PASS phone-390x844-light room: no Alt+N hint
 PASS phone-390x844-light: in-room note visible after save
 PASS phone-390x844-light: chunk card exists
-console:phone-390x844-light: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. accessibilityElementsHidden accessibilityelemen
-console:phone-390x844-light: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. importantForAccessibility importantforaccessibi
 PASS phone-390x844-light: in-room note persists across reload
-console:phone-390x844-light: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. accessibilityElementsHidden accessibilityelemen
-console:phone-390x844-light: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. importantForAccessibility importantforaccessibi
 PASS phone-390x844-light today: no capture testIDs
 PASS phone-390x844-light today: no "Quick capture" copy
 PASS phone-390x844-light today: no Alt+N hint
 PASS phone-390x844-light today: shows "Nothing due today"
 PASS phone-390x844-light: today keeps "Capture a note"
 PASS phone-390x844-light notes: shows "Stome"
-console:phone-390x844-light: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. accessibilityElementsHidden accessibilityelemen
-console:phone-390x844-light: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. importantForAccessibility importantforaccessibi
 PASS phone-390x844-light recent/search: no capture testIDs
 PASS phone-390x844-light recent/search: no "Quick capture" copy
 PASS phone-390x844-light recent/search: no Alt+N hint
 PASS phone-390x844-light recent/search: shows "Recent notes"
-console:phone-390x844-light: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. accessibilityElementsHidden accessibilityelemen
-console:phone-390x844-light: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. importantForAccessibility importantforaccessibi
 PASS phone-390x844-light import: no capture testIDs
 PASS phone-390x844-light import: no "Quick capture" copy
 PASS phone-390x844-light import: no Alt+N hint
 PASS phone-390x844-light import: shows "bring your notes"
-console:phone-390x844-light: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. accessibilityElementsHidden accessibilityelemen
-console:phone-390x844-light: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. importantForAccessibility importantforaccessibi
 PASS phone-390x844-light companion: no capture testIDs
 PASS phone-390x844-light companion: no "Quick capture" copy
 PASS phone-390x844-light companion: no Alt+N hint
@@ -145,8 +121,8 @@ PASS desktop-1280x900-light: sidebar shows Companion
 PASS desktop-1280x900-light: Alt+N opens nothing
 PASS desktop-1280x900-light: Ctrl+Alt+N opens nothing
 PASS desktop-1280x900-light: key presses do not change the page
-created room UAT desktop-1280x900-light cap4mw75zq98
-opened room UAT desktop-1280x900-light cap4mw75zq98 at http://127.0.0.1:8091/rooms/7a0a460f-a0b8-4c97-8d5d-56634eaa6a1d
+created room UAT desktop-1280x900-light cap4mw766o11
+opened room UAT desktop-1280x900-light cap4mw766o11 at http://127.0.0.1:8091/rooms/f0b5cc05-da9e-4b90-89b7-2024f972bb52
 PASS desktop-1280x900-light room: no capture testIDs
 PASS desktop-1280x900-light room: no "Quick capture" copy
 PASS desktop-1280x900-light room: no Alt+N hint

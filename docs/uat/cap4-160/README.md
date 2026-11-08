@@ -5,7 +5,7 @@ Browser UAT for the removal of the global Quick Capture feature.
 | | |
 | --- | --- |
 | Issue | #160 (CAP.4); #138 and #114 close as obsolete |
-| Source | UAT ran on `6f17dbb` (`chore/remove-quick-capture`); `src/`, `tests/` and the shell are identical to the deletion commit `7572dba`, branched from `origin/main` `b40c499` |
+| Source | UAT ran on merge commit `d46e5fd` (`chore/remove-quick-capture` with `origin/main` merged); the removed feature and its wiring are the same as deletion commit `7572dba`, branched from `origin/main` `b40c499` |
 | App | Expo web dev server (`npm run web:sqlite` → `scripts/serve-web.mjs`), Metro dev bundle |
 | Browser | Google Chrome 156.0.8078.80, non-headless window |
 | URL | `http://127.0.0.1:8091/` |
