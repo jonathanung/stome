@@ -401,6 +401,7 @@ export function RoomScreen() {
               onBack={leaveRoom} onReview={() => router.push(`/rooms/${room.id}/review`)}
               onOptions={() => Alert.alert(room.name, undefined, [
                 { text: 'Review this room', onPress: () => router.push(`/rooms/${room.id}/review`) },
+                { text: 'Study materials', onPress: () => router.push(`/study/pick?roomId=${room.id}`) },
                 { text: 'Slides', onPress: () => router.push(`/rooms/${room.id}/slides`) },
                 { text: 'Whiteboard', onPress: () => router.push(`/rooms/${room.id}/whiteboard`) },
                 { text: 'Import notes', onPress: () => router.push({ pathname: '/import', params: { roomId: room.id } }) },
