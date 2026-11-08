@@ -15,11 +15,13 @@ export function gridColumns(width: number): number {
   return width <= 980 ? 2 : 3;
 }
 
+const COVER_HEIGHT = 118;
+
 /** Painted cover for a room's stage, cropped like the design (xMidYMax slice). */
 function Cover({ stage }: { stage: RoomStage }) {
   const theme = useStoneTheme();
   return (
-    <View style={{ height: 118, backgroundColor: theme.color.bg.alt, borderBottomWidth: 1, borderColor: theme.color.border.hairline, overflow: 'hidden' }}>
+    <View style={{ height: COVER_HEIGHT, backgroundColor: theme.color.bg.alt, borderBottomWidth: 1, borderColor: theme.color.border.hairline, overflow: 'hidden' }}>
       <Svg width="100%" height="100%" viewBox="0 0 360 118" preserveAspectRatio="xMidYMax slice">
         <Rect width={360} height={118} fill="#cfc9bd" />
         <Rect y={96} width={360} height={22} fill="#a9ad8f" />
@@ -91,32 +93,40 @@ export function RoomCard(p: RoomCardProps) {
     </View></GridCard>;
   }
 
-  return <GridCard selected={p.mode === 'rename'}>
-    <Cover stage={room.stage} />
-    {p.mode === 'rename' ? <View style={{ padding: theme.space.base, paddingBottom: 18, gap: theme.space.lg }}>
-      <Text style={[theme.text('label'), { color: theme.color.text.tertiary, letterSpacing: 0.8 }]}>Rename room</Text>
-      <Field accessibilityLabel="Rename room" value={p.editName} onChangeText={p.onEditName} autoFocus />
-      <View style={{ flexDirection: 'row', gap: theme.space.md }}>
-        <Button label="Save" disabled={!p.editName.trim() || p.busy} onPress={p.onSaveRename} />
-        <Button label="Cancel" variant="outline" onPress={p.onCancel} />
+  if (p.mode === 'rename') {
+    return <GridCard selected>
+      <Cover stage={room.stage} />
+      <View style={{ padding: theme.space.base, paddingBottom: 18, gap: theme.space.lg }}>
+        <Text style={[theme.text('label'), { color: theme.color.text.tertiary, letterSpacing: 0.8 }]}>Rename room</Text>
+        <Field accessibilityLabel="Rename room" value={p.editName} onChangeText={p.onEditName} autoFocus />
+        <View style={{ flexDirection: 'row', gap: theme.space.md }}>
+          <Button label="Save" disabled={!p.editName.trim() || p.busy} onPress={p.onSaveRename} />
+          <Button label="Cancel" variant="outline" onPress={p.onCancel} />
+        </View>
       </View>
-    </View> : <View style={{ padding: theme.space.base, paddingBottom: 18, gap: theme.space.lg }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Pressable accessibilityRole="link" accessibilityLabel={`Open ${room.name}`} onPress={p.onOpen} style={{ flex: 1 }}>
-          <Text numberOfLines={1} style={[theme.text('title'), { color: theme.color.text.primary }]}>{room.name}</Text>
-        </Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel={`Room options for ${room.name}`} onPress={p.onOptions}
-          style={{ width: theme.layout.control, height: theme.layout.control, borderRadius: theme.radius.control, alignItems: 'center', justifyContent: 'center' }}>
-          <Icon name="more" size={18} color={theme.color.text.secondary} />
-        </Pressable>
+    </GridCard>;
+  }
+
+  // The whole card opens the room. The options button sits on top as a sibling (not nested in
+  // the link), so pressing it never also opens the room.
+  return <GridCard>
+    <Pressable accessibilityRole="link" accessibilityLabel={`Open ${room.name}`} onPress={p.onOpen} testID={`room-card-${room.id}`}
+      style={(state) => ({ flex: 1, opacity: state.pressed ? 0.85 : 1, backgroundColor: (state as { hovered?: boolean }).hovered ? theme.color.bg.inset : 'transparent' })}>
+      <Cover stage={room.stage} />
+      <View style={{ padding: theme.space.base, paddingBottom: 18, gap: theme.space.lg }}>
+        <Text numberOfLines={1} style={[theme.text('title'), { color: theme.color.text.primary, minHeight: theme.layout.control, lineHeight: theme.layout.control, paddingRight: theme.layout.control }]}>{room.name}</Text>
+        {room.stage === 'brick'
+          ? <Badge tone="success" label={stageName(room.stage)} />
+          : <View style={{ alignSelf: 'flex-start', paddingVertical: 2, paddingHorizontal: 10, borderRadius: theme.radius.pill, backgroundColor: theme.color.bg.inset }}>
+              <Text style={[theme.text('label'), { color: theme.color.text.secondary }]}>{stageName(room.stage)}</Text>
+            </View>}
+        <Text style={[theme.text('bodySmall'), { color: theme.color.text.tertiary, fontSize: 13, lineHeight: 18 }]}>{meta}</Text>
       </View>
-      {room.stage === 'brick'
-        ? <Badge tone="success" label={stageName(room.stage)} />
-        : <View style={{ alignSelf: 'flex-start', paddingVertical: 2, paddingHorizontal: 10, borderRadius: theme.radius.pill, backgroundColor: theme.color.bg.inset }}>
-            <Text style={[theme.text('label'), { color: theme.color.text.secondary }]}>{stageName(room.stage)}</Text>
-          </View>}
-      <Text style={[theme.text('bodySmall'), { color: theme.color.text.tertiary, fontSize: 13, lineHeight: 18 }]}>{meta}</Text>
-    </View>}
+    </Pressable>
+    <Pressable accessibilityRole="button" accessibilityLabel={`Room options for ${room.name}`} onPress={p.onOptions}
+      style={{ position: 'absolute', top: COVER_HEIGHT + 1 + theme.space.base, right: theme.space.md, width: theme.layout.control, height: theme.layout.control, borderRadius: theme.radius.control, alignItems: 'center', justifyContent: 'center' }}>
+      <Icon name="more" size={18} color={theme.color.text.secondary} />
+    </Pressable>
   </GridCard>;
 }
 

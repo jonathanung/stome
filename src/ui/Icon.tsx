@@ -33,7 +33,16 @@ export type IconName =
   | 'highlightArea'
   | 'questionPin'
   | 'addPage'
-  | 'pin';
+  | 'pin'
+  | 'draw'
+  | 'select'
+  | 'rectangle'
+  | 'diamond'
+  | 'ellipse'
+  | 'lineSegment'
+  | 'arrowRight'
+  | 'textT'
+  | 'trash';
 
 /** 24px stroke glyphs, drawn the way the Stone boards draw them (1.75 stroke, round caps). */
 function Glyph({ name }: { name: IconName }) {
@@ -98,8 +107,26 @@ function Glyph({ name }: { name: IconName }) {
       return <><Path d="M6 3h9l4 4v14H6z" /><Path d="M12 10v6M9 13h6" /></>;
     case 'pin':
       return <><Path d="M12 17v5" /><Path d="M9 3h6l-1 6 3 3H7l3-3z" /></>;
+    case 'draw':
+      return <><Path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /><Path d="m15 5 4 4" /></>;
     case 'spark':
       return <><Path d="M12 3v3" /><Path d="M12 18v3" /><Path d="M3 12h3" /><Path d="M18 12h3" /><Path d="m6 6 2 2" /><Path d="m16 16 2 2" /><Path d="m6 18 2-2" /><Path d="m16 8 2-2" /></>;
+    case 'select':
+      return <Path d="M5 3l14 9-7 1-4 7z" />;
+    case 'rectangle':
+      return <Rect x="4" y="6" width="16" height="12" rx="1" />;
+    case 'diamond':
+      return <Path d="M12 3l9 9-9 9-9-9z" />;
+    case 'ellipse':
+      return <Ellipse cx="12" cy="12" rx="9" ry="7" />;
+    case 'lineSegment':
+      return <Path d="M5 19L19 5" />;
+    case 'arrowRight':
+      return <><Path d="M5 12h14" /><Path d="m12 5 7 7-7 7" /></>;
+    case 'textT':
+      return <><Path d="M4 7h16" /><Path d="M12 7v10" /></>;
+    case 'trash':
+      return <><Path d="M3 6h18" /><Path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" /><Path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></>;
   }
 }
 

@@ -1,4 +1,4 @@
-import { Link } from 'expo-router';
+import { router } from 'expo-router';
 import { Pressable, Text, View } from 'react-native';
 
 import { useStoneTheme } from '../../../design-theme/src/primitives';
@@ -36,23 +36,22 @@ export function RoomSidePanel({ roomId, subjects, chunks, dueToday, activeSubjec
     </Pressable>
   );
   const attached = (label: string, kind: string, href: `/rooms/${string}/slides` | `/rooms/${string}/whiteboard`) => (
-    <Link key={label} href={href} asChild>
-      <Pressable accessibilityRole="link" accessibilityLabel={`${label}, ${kind}`}
-        style={({ pressed }) => ({
-          flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minHeight: 36,
-          paddingHorizontal: theme.space.md, borderRadius: theme.radius.md, borderWidth: 1,
-          borderColor: theme.color.border.hairline, opacity: pressed ? 0.6 : 1,
-        })}>
-        <Text style={[theme.text('bodySmall'), { color: theme.color.text.primary }]}>{label}</Text>
-        <Text style={[theme.text('label'), { color: theme.color.text.tertiary }]}>{kind}</Text>
-      </Pressable>
-    </Link>
+    // Not <Link asChild>: on web the slot drops this style function, so the row lost its border.
+    <Pressable key={label} accessibilityRole="link" accessibilityLabel={`${label}, ${kind}`} onPress={() => router.push(href)}
+      style={({ pressed }) => ({
+        flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minHeight: 36,
+        paddingHorizontal: theme.space.md, borderRadius: theme.radius.md, borderWidth: 1,
+        borderColor: theme.color.border.hairline, opacity: pressed ? 0.6 : 1,
+      })}>
+      <Text style={[theme.text('bodySmall'), { color: theme.color.text.primary }]}>{label}</Text>
+      <Text style={[theme.text('label'), { color: theme.color.text.tertiary }]}>{kind}</Text>
+    </Pressable>
   );
 
   return (
     <View testID="room-side-panel" style={{ width: 260, gap: theme.space.xl, padding: theme.space.base,
       borderRadius: theme.radius.float, borderWidth: 1, borderColor: theme.color.border.hairline,
-      backgroundColor: theme.color.bg.surface, alignSelf: 'flex-start' }}>
+      backgroundColor: theme.color.bg.canvas, alignSelf: 'flex-start' }}>
       <View style={{ gap: theme.space.xs }}>
         {heading('subjects')}
         {row('all chunks', chunks.length, activeSubject === null, () => onSubject(null))}

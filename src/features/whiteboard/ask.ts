@@ -5,8 +5,9 @@
  * proposal only after the person accepts it.
  */
 
+import type { StrokeProposal } from '../../harness/contract.ts';
 import type { BoardItemView, BoardStickiesOutput } from '../../harness/tools.ts';
-import type { BoardItem, Proposal, StickyNode } from './model.ts';
+import type { BoardItem, Point, Proposal, StickyNode, StrokeNode } from './model.ts';
 
 export const BOARD_W = 1440;
 export const BOARD_H = 900;
@@ -112,5 +113,40 @@ export function stickiesToProposal(
         checked: true,
       };
     }),
+  };
+}
+
+/**
+ * A real stroke proposal (HAR.6 #74) as a board `Proposal`: one ticked
+ * `strokes` item holding a dashed `proposed` stroke. Accept applies it
+ * through `acceptedItems`, which re-checks the point limits and flips
+ * `proposed` to false; the screen confirms the harness session first so
+ * the commit lands only on accept.
+ */
+export function strokeToProposal(
+  proposal: Pick<StrokeProposal, 'points'>,
+  prompt: string,
+  newId: () => string,
+): Proposal {
+  const count = proposal.points.length;
+  const node: StrokeNode = {
+    kind: 'stroke',
+    id: newId(),
+    points: proposal.points.map(([x, y]): Point => [x, y]),
+    arrow: false,
+    proposed: true,
+  };
+  return {
+    prompt,
+    summary: `AI stroke proposal (${count} points). Accept to save it as an annotation.`,
+    items: [
+      {
+        id: `stroke-${node.id}`,
+        title: count === 1 ? '1-point stroke' : `${count}-point stroke`,
+        kind: 'strokes',
+        items: [node],
+        checked: true,
+      },
+    ],
   };
 }

@@ -125,13 +125,14 @@ export function ImportChooseFiles({
         </View>
 
         <View style={styles.drop}>
-          <View style={styles.dropText}>
+          {/* The whole zone opens the picker; the button below stays the one focusable control. */}
+          <Pressable accessible={false} focusable={false} disabled={busy} onPress={onChoose} style={[styles.dropText, { flex: 1 }]}>
             <Icon name="upload" size={24} color={theme.color.text.primary} />
             <View style={{ flexShrink: 1 }}>
               <Text style={styles.dropTitle}>{Platform.OS === 'web' ? 'drop .md files or choose them' : 'choose .md files'}</Text>
               <Text style={styles.meta}>up to {MAX_IMPORT_BATCH} per import · {rows.length} chosen</Text>
             </View>
-          </View>
+          </Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel="choose files" accessibilityState={{ disabled: busy }} disabled={busy} onPress={onChoose} style={[styles.btn, styles.btnSec, busy && styles.disabled]}>
             <Text style={styles.btnSecText}>{rows.length ? 'choose more files' : 'choose files'}</Text>
           </Pressable>

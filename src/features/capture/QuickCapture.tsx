@@ -6,7 +6,6 @@ import { Platform, Pressable, Text, TextInput, View, useWindowDimensions } from 
 
 import { useStoneTheme } from '../../../design-theme/src/primitives';
 import { createCommit } from '../../data/commit';
-import { Icon } from '../../ui/Icon';
 import { Field, Notice } from '../../ui/kit';
 import { getRoom, listChunks, listRooms } from '../../data/queries';
 import { expoDriver } from '../../db/expo-driver';
@@ -261,29 +260,8 @@ export function QuickCapture() {
         </View>
       ) : null}
       {warning && !open ? <Notice tone="warning" testID="quick-capture-warning">{warning}</Notice> : null}
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Quick capture"
-        accessibilityState={{ expanded: open }}
-        onPress={() => setOpen((value) => !value)}
-        style={({ pressed }) => ({
-          alignSelf: 'flex-end',
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: theme.space.md,
-          minHeight: 52,
-          paddingLeft: theme.space.base,
-          paddingRight: theme.space.card,
-          backgroundColor: theme.color.accent.bg,
-          borderRadius: theme.radius.pill,
-          opacity: pressed ? 0.85 : 1,
-          ...theme.shadow.float,
-        })}
-        testID="quick-capture-button"
-      >
-        <Icon name={open ? 'cross' : 'plus'} size={20} strokeWidth={2} color={theme.color.accent.fg} />
-        <Text style={[theme.text('buttonCompact'), { color: theme.color.accent.fg }]}>Capture</Text>
-      </Pressable>
+      {/* No floating trigger: the shell opens capture (sidebar "Quick capture" at >= 760px, the tab bar's
+          centre button below), plus the keyboard shortcut. A second button here covered the phone tab bar. */}
     </View>
     </>
   );
