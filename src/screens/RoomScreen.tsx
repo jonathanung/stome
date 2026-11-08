@@ -16,7 +16,7 @@ import { getChunk, getRoom, listChunks, listDueChunks, listRoomAnnotations } fro
 import { expoDriver } from '../db/expo-driver';
 import { AnchoredChunkText, PinnedAnswer } from '../features/ask/AnchoredChunkText';
 import type { ChunkFocus } from '../features/ask/citations';
-import { watchCaptureCommits } from '../features/capture/commitSignal';
+import { watchRoomCaptureRefresh } from '../features/capture/commitSignal';
 import { ChunkEditor, type EditResult } from '../features/chunks/ChunkEditor';
 import { readDraft } from '../features/chunks/draft-store';
 import { pastedParagraphs } from '../features/chunks/paste';
@@ -26,6 +26,7 @@ import { InkLassoActions } from '../features/ask/InkLassoActions';
 import { PencilToolbar, type PencilTool } from '../features/ask/PencilToolbar';
 import { RoomAskPanel, type AskMessage } from '../features/ask/RoomAskPanel';
 import { RoomSidePanel } from '../features/room/RoomSidePanel';
+import { createLatestLoad } from '../features/room/latestLoad';
 import { PhoneRoomActions, PhoneRoomHeader, RoomTabs, SubjectChips, roomSubjects, type RoomTab } from '../features/room/PhoneRoomChrome';
 import { Icon } from '../ui/Icon';
 import { stageName } from '../ui/StageGlyph';
@@ -165,24 +166,31 @@ export function RoomScreen() {
       ...chunk, annotations: byChunk.get(chunk.id) ?? [],
     })) };
   }, [db, id]);
+  // Focus loads, saves and quick-capture refreshes all read the same room.
+  // Only the newest started read may apply, so an older one cannot restore stale chunks.
+  const loads = useRef(createLatestLoad()).current;
   const refresh = useCallback(async () => {
+    const token = loads.start();
     const next = await load();
+    if (!loads.isLatest(token)) return;
     setRoom(next.room);
     setChunks(next.chunks);
     setDueToday(next.due);
-  }, [load]);
+  }, [load, loads]);
   useFocusEffect(useCallback(() => {
     let active = true;
+    const token = loads.start();
     load().then((next) => {
-      if (active) { setRoom(next.room); setChunks(next.chunks); setDueToday(next.due); setLoading(false); }
+      if (active && loads.isLatest(token)) { setRoom(next.room); setChunks(next.chunks); setDueToday(next.due); setLoading(false); }
     }).catch((reason: unknown) => {
-      if (active) { setError(reason instanceof Error ? reason.message : 'Could not load room'); setLoading(false); }
+      if (active && loads.isLatest(token)) { setError(reason instanceof Error ? reason.message : 'Could not load room'); setLoading(false); }
     });
-    return () => { active = false; };
-  }, [load]));
-  // A capture from the global panel commits outside this screen; reload so the
-  // note list and the Ask chunk selection see it without a reload.
-  useEffect(() => watchCaptureCommits(id ?? null, () => { void refresh(); }), [id, refresh]);
+    // A capture from the global panel commits outside this screen; reload so the
+    // note list and the Ask chunk selection see it without a reload. It is scoped
+    // to focus so a retained, unfocused room does not keep reading the database.
+    const stop = watchRoomCaptureRefresh(id ?? null, refresh, setError);
+    return () => { active = false; stop(); };
+  }, [id, loads, load, refresh]));
   const openCitation = useCallback((next: ChunkFocus) => {
     setFocus(next);
   }, []);
