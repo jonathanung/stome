@@ -122,6 +122,23 @@ export function ChunkEditor({
   const [contentHeight, setContentHeight] = useState(0);
 
   const [subjectDraft, setSubjectDraft] = useState('');
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const confirmingDelete = confirmingId === chunk.id;
+  const [deleting, setDeleting] = useState(false);
+  const doDelete = () => {
+    if (deleting) return;
+    setDeleting(true);
+    void deleteAfterFlush(
+      controller,
+      () => revisionsRef.current?.expectedStructural(chunkRevision.current) ?? chunk.revision,
+      onDelete,
+    ).then((result) => {
+      if (!result.ok) onError(result.message);
+      setConfirmingId(null);
+    }).finally(() => {
+      setDeleting(false);
+    });
+  };
   const addSubjects = () => {
     const added = subjectDraft.split(',').map((s) => s.trim()).filter(Boolean);
     if (!added.length) return;
@@ -243,6 +260,39 @@ export function ChunkEditor({
       ) : null}
       {children}
 
+      {confirmingDelete ? (
+        <View
+          accessibilityRole="alert"
+          style={{
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            gap: theme.space.lg,
+            paddingVertical: theme.space.md,
+            paddingLeft: theme.space.xl,
+            paddingRight: theme.space.md,
+            borderRadius: theme.radius.control,
+            backgroundColor: theme.color.status.danger.wash,
+          }}>
+          <Text style={[theme.text('bodySmall'), { flex: 1, minWidth: 160, color: theme.color.status.danger.text }]}>
+            {`Delete chunk ${n}? This cannot be undone.`}
+          </Text>
+          <TextAction
+            label={deleting ? 'Deleting…' : 'Confirm delete'}
+            accessibilityLabel={`Confirm delete chunk ${n}`}
+            tone="danger"
+            disabled={deleting}
+            onPress={doDelete}
+          />
+          <TextAction
+            label="Keep it"
+            accessibilityLabel={`Cancel delete chunk ${n}`}
+            disabled={deleting}
+            onPress={() => setConfirmingId(null)}
+          />
+        </View>
+      ) : null}
+
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: theme.space.md }}>
         <StoneText role="fine" tone="tertiary">
           {`Chunk ${n} · edited ${new Date(chunk.updatedAt).toLocaleString()}`}
@@ -252,20 +302,14 @@ export function ChunkEditor({
             <TextAction label="Up" accessibilityLabel={`Move chunk ${n} up`} disabled={index === 0} onPress={() => void run((rev) => onMove(index - 1, rev))} />
             <TextAction label="Down" accessibilityLabel={`Move chunk ${n} down`} disabled={index === count - 1} onPress={() => void run((rev) => onMove(index + 1, rev))} />
           </> : null}
+          {confirmingDelete ? null : (
           <TextAction
             label="Delete"
             accessibilityLabel={`Delete chunk ${n}`}
             tone="danger"
-            onPress={() => {
-              void deleteAfterFlush(
-                controller,
-                () => revisionsRef.current?.expectedStructural(chunkRevision.current) ?? chunk.revision,
-                onDelete,
-              ).then((result) => {
-                if (!result.ok) onError(result.message);
-              });
-            }}
+            onPress={() => setConfirmingId(chunk.id)}
           />
+          )}
         </View>
       </View>
     </View>

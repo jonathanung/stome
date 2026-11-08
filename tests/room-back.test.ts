@@ -38,5 +38,7 @@ test('the room header uses one chevron label and the screen does not add another
   assert.equal(header.includes('←'), false);
   assert.equal(screen.includes('←'), false);
   assert.match(screen, /followRoomBack\(roomBackStep\(router\.canGoBack\(\)\), router\)/);
-  assert.match(screen, /Open whiteboard/);
+  assert.equal(screen.includes("router.replace('/')"), false);
+  const backs = screen.match(/\{leaveRoom\}/g);
+  assert.equal(backs?.length, 3);
 });

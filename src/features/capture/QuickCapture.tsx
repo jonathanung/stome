@@ -8,11 +8,12 @@ import { useStoneTheme } from '../../../design-theme/src/primitives';
 import { createCommit } from '../../data/commit';
 import { Icon } from '../../ui/Icon';
 import { Field, Notice } from '../../ui/kit';
-import { getRoom, listRooms } from '../../data/queries';
+import { getRoom, listChunks, listRooms } from '../../data/queries';
 import { expoDriver } from '../../db/expo-driver';
 import { LAST_ROOM_KEY, canSubmit } from './draft';
 import { captureLayerGeometry } from './geometry';
 import { CAPTURE_SHORTCUT_LABEL, isCaptureShortcut } from './shortcut';
+import { onCaptureOpenRequest } from './openSignal';
 import {
   CLEANUP_FAILED_MESSAGE,
   STORAGE_DEGRADED_MESSAGE,
@@ -52,6 +53,7 @@ export function QuickCapture() {
   const [open, setOpen] = useState(false);
   const phone = useWindowDimensions().width < CAPTURE_SHEET_MAX_WIDTH;
   const [roomName, setRoomName] = useState<string | null>(null);
+  const [recent, setRecent] = useState<{ id: string; content: string; createdAt: number }[]>([]);
   const [session, setSession] = useState<CaptureSession>(() => loadCaptureState(browserStorage('session'), randomUUID));
   const [controller] = useState(() => createCaptureController({
     storage: browserStorage('session'),
@@ -117,10 +119,16 @@ export function QuickCapture() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  useEffect(() => onCaptureOpenRequest(() => setOpen(true)), []);
+
   useEffect(() => {
     if (!open || !phone || !pathRoom) return;
     let live = true;
     getRoom(db, pathRoom).then((room) => { if (live) setRoomName(room?.name ?? null); }, () => { if (live) setRoomName(null); });
+    listChunks(db, pathRoom).then(
+      (chunks) => { if (live) setRecent(chunks.slice().sort((a, b) => b.createdAt - a.createdAt).slice(0, 3).map((c) => ({ id: c.id, content: c.body, createdAt: c.createdAt }))); },
+      () => { if (live) setRecent([]); },
+    );
     return () => { live = false; };
   }, [db, open, phone, pathRoom]);
 
@@ -180,6 +188,7 @@ export function QuickCapture() {
         onClose={() => setOpen(false)}
         onSave={() => { void save(); }}
         ready={ready}
+        recent={pathRoom ? recent : []}
         roomName={pathRoom ? roomName : null}
         text={session.draft.text}
         warning={warning}

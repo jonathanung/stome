@@ -1,4 +1,3 @@
-import { router } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -29,7 +28,7 @@ function ToolGlyph({ glyph, color }: { glyph: (typeof TOOLS)[number]['glyph']; c
   );
 }
 
-function IconBtn({ label, selected, disabled, onPress, children }: { label: string; selected?: boolean; disabled?: boolean; onPress: () => void; children: (color: string) => React.ReactNode }) {
+export function IconBtn({ label, selected, disabled, onPress, children }: { label: string; selected?: boolean; disabled?: boolean; onPress: () => void; children: (color: string) => React.ReactNode }) {
   const theme = useStoneTheme();
   const color = selected ? theme.color.accent.fg : theme.color.text.secondary;
   return (
@@ -54,7 +53,7 @@ function IconBtn({ label, selected, disabled, onPress, children }: { label: stri
   );
 }
 
-function Eyebrow({ children }: { children: string }) {
+export function Eyebrow({ children }: { children: string }) {
   const theme = useStoneTheme();
   return <Text style={[theme.text('eyebrow'), { color: theme.color.text.tertiary }]}>{children}</Text>;
 }
@@ -106,7 +105,7 @@ function Thumbs({ deck, current, onPick }: { deck: SlideDeck; current: number; o
   );
 }
 
-function SlideTable({ page, onSelect, selected }: { page: SlidePage; onSelect: () => void; selected: boolean }) {
+export function SlideTable({ page, onSelect, selected }: { page: SlidePage; onSelect: () => void; selected: boolean }) {
   const theme = useStoneTheme();
   return (
     <View style={{ flex: 1 }}>
@@ -235,7 +234,7 @@ function SidePanel({ page, wide, onAsk }: { page: SlidePage; wide: boolean; onAs
           {chip('chunk every page', () => undefined)}
         </View>
         <View style={{ marginTop: 16, padding: 12, borderRadius: theme.radius.lg, borderWidth: 1, borderStyle: 'dashed', borderColor: theme.color.border.strong }}>
-          <Text style={[theme.text('caption'), { color: theme.color.text.secondary }]}>got a .pptx? export it as pdf first. fonts and animations may shift.</Text>
+          <Text style={[theme.text('caption'), { color: theme.color.text.secondary }]}>got a .pptx? export it as pdf first. fonts and animations may shift. pdf first; pptx asks for a pdf export.</Text>
         </View>
       </View>
     </View>
@@ -262,9 +261,6 @@ export function SlideWorkspace({ deck = SAMPLE_DECK }: { deck?: SlideDeck }) {
   const viewer = (
     <View style={{ flex: wide ? 1 : undefined, minWidth: 0 }}>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 12, paddingHorizontal: 24, borderBottomWidth: 1, borderBottomColor: theme.color.border.hairline }}>
-        <Pressable accessibilityRole="button" accessibilityLabel="Rooms" onPress={() => router.back()} hitSlop={8}>
-          <Icon name="chevronLeft" size={20} />
-        </Pressable>
         <View style={{ flex: 1, minWidth: 160 }}>
           <Text accessibilityRole="header" style={[theme.text('actionTitle'), { lineHeight: 22, color: theme.color.text.primary }]}>{deck.title}</Text>
           <Text style={[theme.text('caption'), { color: theme.color.text.tertiary }]}>{`${deck.course} · imported from ${deck.source} · your marks sit on top, the file is untouched`}</Text>

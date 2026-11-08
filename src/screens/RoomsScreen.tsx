@@ -116,6 +116,8 @@ export function RoomsScreen() {
     setDeletingId(null);
   }
 
+  const bricks = rooms.filter((r) => r.stage === 'brick').length;
+  const roomsSummary = `${rooms.length} ${rooms.length === 1 ? 'room' : 'rooms'}, ${bricks} ${bricks === 1 ? 'brick' : 'bricks'}. Your notes stay on this device.`;
   const cols = gridColumns(width);
   if (cols > 1) {
     const gap = theme.space.base;
@@ -128,7 +130,7 @@ export function RoomsScreen() {
           <View style={{ gap: theme.space.sm, flexShrink: 1 }}>
             <Text style={[theme.text('label'), { color: theme.color.text.tertiary, letterSpacing: 0.8 }]}>{todayLabel()}</Text>
             <Text accessibilityRole="header" style={[theme.text('screenTitle'), { color: theme.color.text.primary }]}>Your rooms</Text>
-            <Text style={[theme.text('bodySmall'), { color: theme.color.text.secondary }]}>Your rooms and notes stay on this device.</Text>
+            <Text style={[theme.text('bodySmall'), { color: theme.color.text.secondary }]}>{roomsSummary}</Text>
           </View>
           <View style={{ flexDirection: 'row', gap: theme.space.md }}>
             <Button label="Import Markdown" variant="outline" onPress={() => router.push('/import')} />
@@ -201,7 +203,6 @@ export function RoomsScreen() {
       <Shortcut icon="today" title="Today" subtitle="Notes due for review" onPress={() => router.push('/today')} testID="open-today" />
       <Shortcut icon="spark" title="Stone home" subtitle="Credits from reviews you finish" onPress={() => router.push('/stone')} />
       <Shortcut icon="clock" title="Recent notes" subtitle="What you edited last, across rooms" onPress={() => router.push('/recent')} />
-      <Shortcut icon="draw" title="Whiteboard" subtitle="Freehand canvas for sketching ideas" onPress={() => router.push('/whiteboard')} />
       <Shortcut icon="spark" title="AI companion" subtitle="Pair, pick a model, see saved sessions" onPress={() => router.push('/companion')} />
       <Shortcut icon="upload" title="Import Markdown" subtitle="Bring notes in from .md files" onPress={() => router.push('/import')} />
     </Group>
