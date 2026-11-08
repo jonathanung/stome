@@ -127,11 +127,13 @@ Limits: request text 8,000 characters (prompt + selected note bodies + saved mes
 
 ## Companion
 
-- Binds `127.0.0.1` only.
-- Requires the configured `Origin` and a pairing token that expires (default two hours). The deadline is computed once at process start. A later request does not extend it. `STOME_PAIRING_TTL_MS` must be a positive finite number of milliseconds.
+- Binds `127.0.0.1` only. It does not open a LAN port. An iPad cannot run `npm run companion`.
+- Requires a pairing token that expires (default two hours). The deadline is computed once at process start. A later request does not extend it. `STOME_PAIRING_TTL_MS` must be a positive finite number of milliseconds.
 - Rejects a non-loopback socket and a `Host` that is not `127.0.0.1` or `localhost` on its port.
-- The app sends the selected text and the token only after the companion URL is `http` on `127.0.0.1`, `localhost`, or literal IPv6 loopback, with no user or password in the URL. `http://[::1]` is accepted: the hostname still includes the brackets, and the check reads the address inside them. An IPv4-mapped address such as `::ffff:127.0.0.1` is rejected before `fetch`. The companion process still listens on `127.0.0.1` only.
-- Responses do not contain the pairing token or `STOME_PROVIDER_API_KEY`.
+- Accepts the configured `Origin` (default `http://localhost:8081`). It also accepts that web port on `http://127.0.0.1`, `http://localhost`, and `http://[::1]`, and `https` on those loopback names or a canonical private IPv4 address (`10/8`, `172.16/12`, `192.168/16`, `169.254/16`). `STOME_WEB_PORT` adds another port. Cleartext `http://192.168…` is rejected. Non-canonical addresses (leading zeros, decimal IPs) are rejected.
+- On the laptop, the app sends the selected text and the token only after the companion URL is `http` on `127.0.0.1`, `localhost`, or literal IPv6 loopback, with no user or password in the URL. `http://[::1]` is accepted. An IPv4-mapped address such as `::ffff:127.0.0.1` is rejected before `fetch`.
+- On a tablet, open `npm run web:lan` in Safari (`https://<laptop-lan-ip>:8081`) after trusting `.expo/web-cert/cert.pem`. The companion address must be that same https origin. The page proxies `/v1/status` and `/v1/tool` to `127.0.0.1:8787`. `http://127.0.0.1:8787` is the tablet itself and is refused. An https page is not allowed to call the companion's http port (mixed content). The proxy still requires the pairing token and does not serve those routes without it.
+- Responses do not contain the pairing token or a provider key. The proxy does not log the token.
 - While a confirmation is in progress, Ask, Continue, Cancel, and Discard stay disabled. Cancel is only enabled while a question is running.
 
 Browser requests need the page origin to match. Expo web SQLite needs these headers on the HTML document, not only on the bundle:

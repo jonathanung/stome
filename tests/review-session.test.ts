@@ -9,8 +9,11 @@ import {
   localReviewQuestion,
   mockReviewQuestion,
   orderReviewQueue,
+  resolveReviewStartId,
+  reviewCardId,
   reviewHref,
   reviewMarkOperation,
+  reviewQueueForRoom,
 } from '../src/features/review/session.ts';
 import { nodeDb } from './support/node-db.ts';
 
@@ -70,6 +73,37 @@ test('a session shows unreviewed and due notes in room order', () => {
   const held = chunksReadyToReview(chunks, marks, 1_000);
   assert.deepEqual(orderReviewQueue(held, 'b', chunks).map((chunk) => chunk.id), ['b', 'a', 'c']);
   assert.deepEqual(orderReviewQueue(held, 'missing', chunks).map((chunk) => chunk.id), ['a', 'c']);
+});
+
+test('a chunk id for a due answer opens that answer, not an earlier note', () => {
+  const cards = reviewQueueForRoom({
+    chunks: [
+      { id: 'note', position: 0, body: 'earlier note', revision: 1 },
+      { id: 'source', position: 1, body: 'source note', revision: 1 },
+    ],
+    answers: [{
+      id: 'pin-1',
+      annotationId: 'pin-1',
+      chunkId: 'source',
+      position: 1,
+      answer: 'saved answer',
+      quote: null,
+      chunkBody: 'source note',
+      chunkRevision: 1,
+      anchor: { start: 0, end: 6 },
+      grounding: { quote: 'source' },
+    }],
+    latestByChunk: new Map(),
+    latestByAnnotation: new Map(),
+    now: 1_000,
+  });
+  assert.equal(resolveReviewStartId(cards, 'source'), 'pin-1');
+  assert.equal(resolveReviewStartId(cards, 'pin-1'), 'pin-1');
+  assert.equal(resolveReviewStartId(cards, 'note'), 'note');
+  assert.equal(resolveReviewStartId(cards, 'missing'), undefined);
+  const entries = cards.map((card) => ({ id: reviewCardId(card), card }));
+  assert.equal(orderReviewQueue(entries, resolveReviewStartId(cards, 'source'), entries)[0]?.id, 'pin-1');
+  assert.equal(orderReviewQueue(entries, 'source', entries)[0]?.id, 'note');
 });
 
 test('a human mark uses the seen revision and a mismatch does not write or credit', async () => {

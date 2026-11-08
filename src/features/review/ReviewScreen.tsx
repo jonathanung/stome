@@ -33,6 +33,7 @@ import {
   localReviewQuestion,
   mockAnswerQuestion,
   orderReviewQueue,
+  resolveReviewStartId,
   reviewCardId,
   reviewQueueForRoom,
   type ReviewCard,
@@ -179,7 +180,8 @@ export function ReviewScreen() {
     });
     const entries = queue.map((card) => ({ id: reviewCardId(card), card }));
     const retainedIds = entries.filter((entry) => reviewMarkController.retained(entry.id)).map((entry) => entry.id);
-    const startId = startChunkId ?? retainedIds.find((id) => entries.some((entry) => entry.id === id));
+    const requested = startChunkId ?? retainedIds.find((id) => entries.some((entry) => entry.id === id));
+    const startId = resolveReviewStartId(entries.map((entry) => entry.card), requested);
     const cards = orderReviewQueue(entries, startId, entries).map((entry) => entry.card);
     const scheduled: Scheduled[] = [
       ...[...latest.values()]

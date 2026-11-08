@@ -34,6 +34,15 @@ function itemKey(item: DueItem): string {
 }
 
 /**
+ * Id the review screen uses to open this due row.
+ * Answer rows are keyed by annotation id; the chunk id would open a different card
+ * once the answer has replaced its note.
+ */
+export function dueItemReviewId(item: DueItem): string {
+  return isDueAnswer(item) ? item.annotation.id : item.chunk.id;
+}
+
+/**
  * Orders due chunks and due pinned answers together (#127).
  *
  * Dedup ownership (annotation-keyed): a chunk whose answer is due is hidden —

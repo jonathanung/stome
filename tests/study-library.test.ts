@@ -16,6 +16,9 @@ import {
   listStudyQuizzes,
 } from '../src/data/queries.ts';
 import {
+  answerAfterChoiceEdit,
+  bulletsFromField,
+  choicesFromField,
   distinctSubjects,
   draftItemCount,
   previewStudyDraft,
@@ -272,6 +275,60 @@ test('removing an unsaved item between failure and retry still lands each item o
   assert.equal(decks.length, 1);
   // Key-based op ids: the fixed card lands once; nothing is duplicated.
   assert.equal((await listStudyCards(db, decks[0]!.id)).length, 2);
+});
+
+test('slide bullets and quiz choices keep the character still being typed', () => {
+  assert.deepEqual(bulletsFromField('one\n'), ['one', '']);
+  assert.deepEqual(bulletsFromField('hello '), ['hello ']);
+  assert.deepEqual(choicesFromField('New York '), ['New York ']);
+  assert.deepEqual(choicesFromField('red, blue'), ['red', 'blue']);
+  assert.deepEqual(choicesFromField('red, blue '), ['red', 'blue ']);
+  assert.equal(
+    answerAfterChoiceEdit(['Mitochondria', 'None'], ['Mitochondria make', 'None'], 'Mitochondria'),
+    'Mitochondria make',
+  );
+  assert.equal(
+    answerAfterChoiceEdit(['Mitochondria', 'None'], ['Mitochondria', 'Something else'], 'Mitochondria'),
+    'Mitochondria',
+  );
+});
+
+test('a trailing blank bullet is dropped on save and the outline still lands once', async () => {
+  const { db } = setupDb();
+  const { commit, roomId, first } = await seededRoom(db);
+  const one = (await getChunk(db, first)) as Chunk;
+  const previewed = previewStudyDraft('outline', 'Cells in slides', [one]);
+  assert.ok(previewed.ok && previewed.draft.kind === 'outline');
+  const draft = previewed.draft;
+  draft.slides[0] = { ...draft.slides[0]!, bullets: [...draft.slides[0]!.bullets, '', '  '] };
+  const before = JSON.stringify(draft);
+  const saved = await saveStudyDraft(draft, ctxFor(commit, roomId, 'blank-bullet'));
+  assert.deepEqual(saved, { ok: true, duplicate: false });
+  assert.equal(JSON.stringify(draft), before);
+  const outlines = await listSlideOutlines(db, roomId);
+  assert.equal(outlines.length, 1);
+  const bullets = outlines[0]!.slides[0]!.bullets;
+  assert.ok(bullets.length >= 1);
+  assert.ok(bullets.every((bullet) => bullet.trim() === bullet && bullet.length > 0));
+});
+
+test('a trailing empty quiz choice is dropped and the answer still matches', async () => {
+  const { db } = setupDb();
+  const { commit, roomId, first } = await seededRoom(db);
+  const one = (await getChunk(db, first)) as Chunk;
+  const previewed = previewStudyDraft('quiz', 'Cell quiz', [one]);
+  assert.ok(previewed.ok && previewed.draft.kind === 'quiz');
+  const question = previewed.draft.questions[0]!;
+  assert.equal(question.kind, 'mcq');
+  question.choices = [...question.choices, '  '];
+  const saved = await saveStudyDraft(previewed.draft, ctxFor(commit, roomId, 'blank-choice'));
+  assert.deepEqual(saved, { ok: true, duplicate: false });
+  const quizzes = await listStudyQuizzes(db, roomId);
+  const stored = await listStudyQuestions(db, quizzes[0]!.id);
+  assert.equal(stored.length, 1);
+  assert.equal(stored[0]!.kind, 'mcq');
+  assert.ok(stored[0]!.choices.includes(stored[0]!.answer));
+  assert.ok(stored[0]!.choices.every((choice) => choice.trim().length > 0));
 });
 
 test('draftItemCount counts every reviewable item', () => {

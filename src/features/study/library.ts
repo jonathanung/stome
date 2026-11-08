@@ -97,6 +97,39 @@ export function snapshotRevision(chunks: Chunk[]): number {
   return chunks.reduce((max, chunk) => Math.max(max, chunk.revision), 1);
 }
 
+/**
+ * Bullet field text, kept as typed. Trimming here would eat the space or the
+ * new line the person is still writing, so the next character glues on.
+ * `saveStudyDraft` trims and drops blank lines.
+ */
+export function bulletsFromField(text: string): string[] {
+  return text.split('\n');
+}
+
+/**
+ * MCQ choice field. Finished choices are trimmed so "a, b" round-trips through
+ * the comma join. The choice being typed keeps its trailing space.
+ */
+export function choicesFromField(text: string): string[] {
+  const parts = text.split(',');
+  return parts.map((part, index) => (index === parts.length - 1 ? part.replace(/^\s+/, '') : part.trim()));
+}
+
+/**
+ * Follow an edit of the choice that is the current answer, so Confirm still
+ * sees the answer among the choices. Other edits leave the answer alone.
+ */
+export function answerAfterChoiceEdit(previous: readonly string[], next: readonly string[], answer: string): string {
+  const prev = previous.map((choice) => choice.trim()).filter(Boolean);
+  const trimmed = next.map((choice) => choice.trim()).filter(Boolean);
+  if (trimmed.includes(answer) || next.includes(answer)) return answer;
+  if (!prev.includes(answer) || prev.length !== trimmed.length) return answer;
+  const changed = prev.findIndex((choice, index) => choice !== trimmed[index]);
+  if (changed < 0 || prev[changed] !== answer) return answer;
+  const edits = prev.filter((choice, index) => choice !== trimmed[index]);
+  return edits.length === 1 ? trimmed[changed]! : answer;
+}
+
 /** First sentence of a body, for fronts, stems and slide titles. */
 function leadSentence(body: string): string {
   const match = body.replace(/\s+/g, ' ').trim().match(/^.*?[.!?…](?=\s|$)|^.{1,140}/);
@@ -341,7 +374,7 @@ export async function saveStudyDraft(draft: StudyDraft, ctx: SaveContext): Promi
         opId: `${ctx.opIdBase}:question:${question.key}`, kind: 'study.question.create', ...confirmedHuman(),
         payload: {
           quizId: savedQuizId, roomId, kind: question.kind, stem: question.stem,
-          choices: question.kind === 'mcq' ? question.choices : undefined,
+          choices: question.kind === 'mcq' ? question.choices.map((choice) => choice.trim()).filter(Boolean) : undefined,
           answer: question.answer, explanation: question.explanation || undefined, position: i,
           sourceChunkIds: question.sourceChunkIds, sourceRevision: question.sourceRevision,
         },
@@ -359,7 +392,9 @@ export async function saveStudyDraft(draft: StudyDraft, ctx: SaveContext): Promi
     payload: {
       outlineId, roomId, title: draft.title, sourceChunkIds, sourceRevision: outlineRevision,
       slides: draft.slides.map((slide) => ({
-        title: slide.title, bullets: slide.bullets, notes: slide.notes,
+        title: slide.title,
+        bullets: slide.bullets.map((bullet) => bullet.trim()).filter(Boolean),
+        notes: slide.notes,
         sourceChunkIds: slide.sourceChunkIds, sourceRevision: slide.sourceRevision,
       })),
     },

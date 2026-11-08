@@ -22,6 +22,33 @@ export function boardToScreen(
   ];
 }
 
+/** Zoom around a canvas-local point. That point stays under the pointer. */
+export function zoomTransform(
+  current: CanvasTransform,
+  pointerX: number,
+  pointerY: number,
+  factor: number,
+  min = 0.1,
+  max = 20,
+): CanvasTransform {
+  const scale = Math.min(max, Math.max(min, current.scale * factor));
+  const ratio = scale / current.scale;
+  return {
+    scale,
+    offsetX: pointerX - (pointerX - current.offsetX) * ratio,
+    offsetY: pointerY - (pointerY - current.offsetY) * ratio,
+  };
+}
+
+/** Canvas-local pointer from a viewport event and the canvas box. */
+export function pointerOnCanvas(
+  clientX: number,
+  clientY: number,
+  rect: { left: number; top: number },
+): { x: number; y: number } {
+  return { x: clientX - rect.left, y: clientY - rect.top };
+}
+
 
 export function elementBounds(el: WhiteboardElement): {
   x: number;

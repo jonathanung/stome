@@ -24,6 +24,9 @@ import { BackButton, EmptyState, Field, Notice, ScreenHeader, SectionTitle, useC
 import {
   STUDY_DRAFT_KINDS,
   STUDY_DRAFT_LABEL,
+  answerAfterChoiceEdit,
+  bulletsFromField,
+  choicesFromField,
   distinctSubjects,
   draftItemCount,
   previewErrorMessage,
@@ -505,7 +508,13 @@ export function StudyLibraryPicker() {
                             <Field
                               accessibilityLabel={`Question ${i + 1} choices, comma separated`}
                               value={question.choices.join(', ')}
-                              onChangeText={(v) => updateQuestion(question.key, { choices: v.split(',').map((c) => c.trim()) })}
+                              onChangeText={(v) => {
+                                const choices = choicesFromField(v);
+                                updateQuestion(question.key, {
+                                  choices,
+                                  answer: answerAfterChoiceEdit(question.choices, choices, question.answer),
+                                });
+                              }}
                             />
                           ) : null}
                           <Field accessibilityLabel={`Question ${i + 1} answer`} value={question.answer} onChangeText={(v) => updateQuestion(question.key, { answer: v })} />
@@ -543,7 +552,7 @@ export function StudyLibraryPicker() {
                             accessibilityLabel={`Slide ${i + 1} bullets, one per line`}
                             value={slide.bullets.join('\n')}
                             multiline
-                            onChangeText={(v) => updateSlide(slide.key, { bullets: v.split('\n').map((b) => b.trim()).filter(Boolean) })}
+                            onChangeText={(v) => updateSlide(slide.key, { bullets: bulletsFromField(v) })}
                             style={{ minHeight: 88 }}
                           />
                           <Field accessibilityLabel={`Slide ${i + 1} speaker notes`} value={slide.notes} multiline onChangeText={(v) => updateSlide(slide.key, { notes: v })} />

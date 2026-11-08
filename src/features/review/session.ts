@@ -49,6 +49,20 @@ export function reviewCardId(card: ReviewCard): string {
   return card.kind === 'answer' ? card.answer.id : card.chunk.id;
 }
 
+/**
+ * The card a review link should open.
+ *
+ * A due answer replaces its chunk, so the card id is the annotation id.
+ * Links that still carry the chunk id (Today used to) must land on that
+ * answer. An unknown id opens the normal queue instead of a missing card.
+ */
+export function resolveReviewStartId(cards: readonly ReviewCard[], requested: string | undefined): string | undefined {
+  if (!requested) return undefined;
+  if (cards.some((card) => reviewCardId(card) === requested)) return requested;
+  const replacement = cards.find((card) => card.kind === 'answer' && card.answer.chunkId === requested);
+  return replacement ? reviewCardId(replacement) : undefined;
+}
+
 function cardKey(card: ReviewCard): string {
   return reviewCardId(card);
 }

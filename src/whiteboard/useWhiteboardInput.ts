@@ -2,16 +2,10 @@
 
 import { PanResponder, type PanResponderInstance } from 'react-native';
 
-import { boardToScreen, hitTest, moveElement, newId, screenToBoard } from './geometry';
+import { hitTest, moveElement, newId, screenToBoard } from './geometry';
 import type { ElementStyle } from './StylePanel';
 import type {
-  ArrowElement,
   CanvasTransform,
-  DiamondElement,
-  EllipseElement,
-  FreedrawElement,
-  LineElement,
-  RectangleElement,
   TextElement,
   Tool,
   WhiteboardElement,
@@ -210,7 +204,9 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
 
       if (el) {
         refs.drawingRef.current = el;
-        refs.setElements((prev) => [...prev, el!]);
+        const next = [...refs.elementsRef.current!, el];
+        refs.elementsRef.current = next;
+        refs.setElements(next);
       }
     },
 
@@ -225,8 +221,12 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
         const dist = Math.sqrt(dx * dx + dy * dy);
         const scaleFactor = dist / refs.pinchRef.current.dist;
         const newScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, refs.pinchRef.current.scale * scaleFactor));
-        // Midpoint in canvas coords for zoom anchor
-        const [mx, my] = eventXY({ locationX: (t1.pageX + t2.pageX) / 2, locationY: (t1.pageY + t2.pageY) / 2 });
+        // Midpoint in canvas coords. pageX is viewport-absolute, so subtract the canvas origin.
+        const origin = refs.canvasOriginRef.current ?? { x: 0, y: 0 };
+        const [mx, my] = eventXY({
+          locationX: (t1.pageX + t2.pageX) / 2 - origin.x,
+          locationY: (t1.pageY + t2.pageY) / 2 - origin.y,
+        });
         const newOffsetX = mx - (mx - refs.pinchRef.current.ox) * (newScale / refs.pinchRef.current.scale);
         const newOffsetY = my - (my - refs.pinchRef.current.oy) * (newScale / refs.pinchRef.current.scale);
         const next = { offsetX: newOffsetX, offsetY: newOffsetY, scale: newScale };
@@ -264,26 +264,22 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
       const [bx, by] = screenToBoard(sx, sy, t);
       const el = refs.drawingRef.current;
 
+      const paint = (updated: WhiteboardElement) => {
+        refs.drawingRef.current = updated;
+        const next = refs.elementsRef.current!.map((e) => (e.id === updated.id ? updated : e));
+        refs.elementsRef.current = next;
+        refs.setElements(next);
+      };
       if (el.type === 'freedraw') {
-        const updated: FreedrawElement = { ...el, points: [...el.points, [bx - el.x, by - el.y]] };
-        refs.drawingRef.current = updated;
-        refs.setElements((prev) => prev.map((e) => (e.id === el.id ? updated : e)));
+        paint({ ...el, points: [...el.points, [bx - el.x, by - el.y]] });
       } else if (el.type === 'rectangle') {
-        const updated: RectangleElement = { ...el, width: bx - el.x, height: by - el.y };
-        refs.drawingRef.current = updated;
-        refs.setElements((prev) => prev.map((e) => (e.id === el.id ? updated : e)));
+        paint({ ...el, width: bx - el.x, height: by - el.y });
       } else if (el.type === 'diamond') {
-        const updated: DiamondElement = { ...el, width: bx - el.x, height: by - el.y };
-        refs.drawingRef.current = updated;
-        refs.setElements((prev) => prev.map((e) => (e.id === el.id ? updated : e)));
+        paint({ ...el, width: bx - el.x, height: by - el.y });
       } else if (el.type === 'ellipse') {
-        const updated: EllipseElement = { ...el, width: bx - el.x, height: by - el.y };
-        refs.drawingRef.current = updated;
-        refs.setElements((prev) => prev.map((e) => (e.id === el.id ? updated : e)));
+        paint({ ...el, width: bx - el.x, height: by - el.y });
       } else if (el.type === 'line' || el.type === 'arrow') {
-        const updated = { ...el, points: [[0, 0], [bx - el.x, by - el.y]] } as LineElement | ArrowElement;
-        refs.drawingRef.current = updated;
-        refs.setElements((prev) => prev.map((e) => (e.id === el.id ? updated : e)));
+        paint({ ...el, points: [[0, 0], [bx - el.x, by - el.y]] });
       }
     },
 

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { planToday, TODAY_LIMIT } from '../src/data/today.ts';
-import type { DueChunk } from '../src/data/models.ts';
+import { dueItemReviewId, planToday, TODAY_LIMIT } from '../src/data/today.ts';
+import type { DueAnswer, DueChunk } from '../src/data/models.ts';
 import type { ReviewState } from '../src/db/schema.ts';
 
 function due(id: string, state: ReviewState, dueAt: number): DueChunk {
@@ -28,6 +28,26 @@ function due(id: string, state: ReviewState, dueAt: number): DueChunk {
     },
   };
 }
+
+test('a due answer opens by its annotation id and a due note by its chunk id', () => {
+  const note = due('chunk-1', 'missed', 5);
+  const answer: DueAnswer = {
+    chunk: { ...note.chunk, id: 'chunk-1' },
+    annotation: {
+      id: 'ann-1',
+      chunkId: 'chunk-1',
+      type: 'ai_answer',
+      anchor: { start: 0, end: 4 },
+      payload: { answer: 'saved' },
+      createdAt: 1,
+      updatedAt: 1,
+    },
+    mark: null,
+  };
+  assert.equal(dueItemReviewId(note), 'chunk-1');
+  assert.equal(dueItemReviewId(answer), 'ann-1');
+  assert.notEqual(dueItemReviewId(answer), answer.chunk.id);
+});
 
 test('Today orders missed, then unclear, then got it, longest due first', () => {
   const input = [

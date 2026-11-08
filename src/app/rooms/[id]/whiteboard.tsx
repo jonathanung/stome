@@ -1,15 +1,16 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 
+import { whiteboardNotesTarget } from '../../../features/room/whiteboard-entry';
 import { WhiteboardScreen } from '../../../whiteboard/WhiteboardScreen';
 
 export default function WhiteboardRoute() {
   const router = useRouter();
-  // Keep the room id available for future persistence — the screen shows ← Notes to go back
-  useLocalSearchParams<{ id?: string }>();
+  const { id } = useLocalSearchParams<{ id?: string | string[] }>();
+  const roomId = Array.isArray(id) ? id[0] : id;
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
-      <WhiteboardScreen onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+      <WhiteboardScreen onBack={() => (router.canGoBack() ? router.back() : router.replace(whiteboardNotesTarget(roomId)))} />
     </>
   );
 }
