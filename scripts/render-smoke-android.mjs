@@ -86,6 +86,7 @@ function screenshot(name) {
 const buildLog = [];
 const child = spawn('npx', ['expo', 'run:android', '--port', '8081'], {
   cwd: repoRoot,
+  detached: true,
   env: {
     ...process.env,
     EXPO_NO_TELEMETRY: '1',
@@ -156,13 +157,22 @@ try {
 } finally {
   writeFileSync(path.join(outDir, 'build.log'), buildLog.join('').slice(-200_000));
   writeFileSync(path.join(outDir, 'report.json'), `${JSON.stringify({ results }, null, 2)}\n`);
-  if (child.exitCode == null) child.kill('SIGTERM');
-  await delay(1000);
-  if (child.exitCode == null) child.kill('SIGKILL');
+  const pid = child.pid;
+  if (pid != null && child.exitCode == null) {
+    try {
+      process.kill(-pid, 'SIGTERM');
+    } catch {
+      try { child.kill('SIGTERM'); } catch { /* already gone */ }
+    }
+    await delay(1000);
+    if (child.exitCode == null) {
+      try { process.kill(-pid, 'SIGKILL'); } catch { /* already gone */ }
+    }
+  }
+  child.stdout?.destroy();
+  child.stderr?.destroy();
 }
 
-if (failed) {
-  console.error('android render smoke failed');
-  process.exit(1);
-}
-console.log(`android render smoke ok: ${routes.map((route) => route.name).join(', ')}`);
+if (failed) console.error('android render smoke failed');
+else console.log(`android render smoke ok: ${routes.map((route) => route.name).join(', ')}`);
+process.exit(failed ? 1 : 0);
