@@ -51,6 +51,23 @@ test('valid zlib checksums permit only bounded trailing PDF whitespace', () => {
   assert.throws(() => inflateBounded(Uint8Array.from([...zlib, ...new Array(9).fill(32)]), 'zlib', 100), /checksum/);
 });
 
+test('chunked inflation matches streams larger than the 32 KiB decoder window', () => {
+  const plain = new Uint8Array(100_000);
+  for (let i = 0; i < plain.length; i += 1) plain[i] = (i * 17 + (i >> 8)) & 0xff;
+  const previousStream = Object.getOwnPropertyDescriptor(globalThis, 'DecompressionStream');
+  const previousBlob = Object.getOwnPropertyDescriptor(globalThis, 'Blob');
+  Reflect.deleteProperty(globalThis, 'DecompressionStream');
+  Reflect.deleteProperty(globalThis, 'Blob');
+  try {
+    for (const [format, compressed] of [['raw', deflateRawSync(plain)], ['zlib', deflateSync(plain)]] as const) {
+      assert.deepEqual(inflateBounded(new Uint8Array(compressed), format, plain.length), plain);
+    }
+  } finally {
+    if (previousStream) Object.defineProperty(globalThis, 'DecompressionStream', previousStream);
+    if (previousBlob) Object.defineProperty(globalThis, 'Blob', previousBlob);
+  }
+});
+
 test('CRC32 uses the standard ZIP checksum and empty streams remain valid', () => {
   assert.equal(crc32(new TextEncoder().encode('123456789')), 0xcbf43926);
   assert.equal(crc32(new Uint8Array()), 0);
