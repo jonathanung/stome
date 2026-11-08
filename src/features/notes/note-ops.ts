@@ -53,6 +53,19 @@ export function consumeCommaList(holder: { current: string }): string[] {
   return raw.split(',').map((part) => part.trim()).filter((part) => part.length > 0);
 }
 
+/** The composer may commit only while the loaded room is the one in the URL. */
+export function sameRoom(roomId: string | null | undefined, routeId: string | undefined): boolean {
+  return typeof roomId === 'string' && roomId.length > 0 && roomId === routeId;
+}
+
+/**
+ * A submit clears the box only when it still holds the text that was saved.
+ * Characters typed while that save was running stay in the box.
+ */
+export function composerAfterSubmit(current: string, submitted: string): string {
+  return current === submitted ? '' : current;
+}
+
 /** Ctrl+Enter or Cmd+Enter. On devices without modifier keys this never matches. */
 export function isSubmitShortcut(event: { key?: string; ctrlKey?: boolean; metaKey?: boolean; nativeEvent?: { key?: string; ctrlKey?: boolean; metaKey?: boolean } }): boolean {
   const key = event.key ?? event.nativeEvent?.key;

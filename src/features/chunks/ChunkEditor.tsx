@@ -16,7 +16,7 @@ import { readDraft, syncChunkDraft } from './draft-store';
 import { useAutosave } from './use-autosave';
 
 /** What a parent returns after trying a change: the chunk's new revision, or why it failed. */
-export type EditResult = { ok: true; revision?: number; pending?: boolean } | { ok: false; message: string };
+export type EditResult = { ok: true; revision?: number; pending?: boolean; body?: string } | { ok: false; message: string };
 
 export interface ChunkEditorProps {
   chunk: Chunk;
@@ -141,6 +141,7 @@ export function ChunkEditor({
       revisions.noteStructural(sent, result.revision);
       setView({ written: revisions.written, frozen: revisions.frozen });
     }
+    if (result.ok && result.body !== undefined) controller.adoptSaved(result.body);
     if (!result.ok) onError(result.message);
   };
 

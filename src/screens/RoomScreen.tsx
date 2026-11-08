@@ -24,7 +24,7 @@ import { ChunkEditor, type EditResult } from '../features/chunks/ChunkEditor';
 import { forgetDraft, readDraft } from '../features/chunks/draft-store';
 import { pastedParagraphs } from '../features/chunks/paste';
 import { commitDeferredDelete, restoreDeferredBody } from '../features/notes/deferred-delete';
-import { isSubmitShortcut, matchesQuery, mergeNotes } from '../features/notes/note-ops';
+import { composerAfterSubmit, isSubmitShortcut, matchesQuery, mergeNotes, sameRoom } from '../features/notes/note-ops';
 import { PendingDeletes, type PendingDelete } from '../features/notes/pending-delete';
 import { InkLassoActions } from '../features/ask/InkLassoActions';
 import { PencilToolbar, type PencilTool } from '../features/ask/PencilToolbar';
@@ -107,7 +107,8 @@ function annotationLabel(annotation: Annotation): string {
 }
 
 export function RoomScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id: routeParam } = useLocalSearchParams<{ id: string }>();
+  const routeId = typeof routeParam === 'string' ? routeParam : undefined;
   const sqlite = useSQLiteContext();
   const db = useMemo(() => expoDriver(sqlite), [sqlite]);
   const commit = useMemo(() => createCommit(db, { now: Date.now, newId: randomUUID }), [db]);
@@ -126,6 +127,7 @@ export function RoomScreen() {
   const [annotationText, setAnnotationText] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [pasteNotice, setPasteNotice] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -159,6 +161,7 @@ export function RoomScreen() {
   const visible = useMemo(() => tab !== 'notes' ? [] : activeSubject ? chunks.filter((chunk) => chunk.subjects.includes(activeSubject)) : chunks, [tab, chunks, activeSubject]);
 
   const load = useCallback(async () => {
+    const id = routeId;
     if (!id) return { room: null, chunks: [] as ChunkWithAnnotations[], due: 0 };
     const now = Date.now();
     const [nextRoom, notes, annotations, chunksDue, answersDue] = await Promise.all([
@@ -175,7 +178,7 @@ export function RoomScreen() {
     return { room: nextRoom, due, chunks: notes.map((chunk) => ({
       ...chunk, annotations: byChunk.get(chunk.id) ?? [],
     })) };
-  }, [db, id]);
+  }, [db, routeId]);
   const refresh = useCallback(async () => {
     const next = await load();
     setRoom(next.room);
@@ -227,14 +230,18 @@ export function RoomScreen() {
     };
   }, [chunks, visible, phone, focus]);
   async function action(run: () => Promise<void>) {
-    if (busy) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     setError(null);
     try { await run(); await refresh(); }
     catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not save');
       await refresh().catch(() => undefined);
-    } finally { setBusy(false); }
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
   }
   /**
    * Chunk edits from ChunkEditor. They skip `action`'s busy lock so autosave
@@ -253,12 +260,14 @@ export function RoomScreen() {
   function onContentChange(next: string) {
     const paragraphs = pastedParagraphs(content, next);
     setContent(next);
-    if (!paragraphs || !room) return;
+    if (!routeId || !paragraphs || !sameRoom(room?.id, routeId) || busyRef.current) return;
+    const roomId = routeId;
+    const submitted = next;
     void action(async () => {
       const result = await commit({ opId: randomUUID(), kind: 'chunk.create', ...human,
-        payload: { roomId: room.id, bodies: paragraphs, subjects: tags.split(','), sourceLink: source.trim() || null } });
+        payload: { roomId, bodies: paragraphs, subjects: tags.split(','), sourceLink: source.trim() || null } });
       if (!result.ok) throw new Error(result.error.message);
-      setContent('');
+      setContent((current) => composerAfterSubmit(current, submitted));
       setPasteNotice(`Added ${paragraphs.length} chunks from the pasted paragraphs.`);
     });
   }
@@ -279,12 +288,17 @@ export function RoomScreen() {
 
   /** Subjects stay for the next note (consecutive notes usually share a topic); the source link does not. */
   function addNote() {
-    if (!content.trim() || !room || busy) return;
+    const submitted = content;
+    const submittedSource = source;
+    if (!routeId || !submitted.trim() || !sameRoom(room?.id, routeId) || busyRef.current) return;
+    const roomId = routeId;
     void action(async () => {
       const result = await commit({ opId: randomUUID(), kind: 'chunk.create', ...human,
-        payload: { roomId: room.id, bodies: [content], subjects: tags.split(','), sourceLink: source.trim() || null } });
+        payload: { roomId, bodies: [submitted], subjects: tags.split(','), sourceLink: submittedSource.trim() || null } });
       if (!result.ok) throw new Error(result.error.message);
-      setContent(''); setSource(''); setPasteNotice(null);
+      setContent((current) => composerAfterSubmit(current, submitted));
+      setSource((current) => composerAfterSubmit(current, submittedSource));
+      setPasteNotice(null);
       setAddedId(result.value.chunkIds[0] ?? null);
       requestAnimationFrame(() => composerRef.current?.focus());
     });
@@ -317,29 +331,34 @@ export function RoomScreen() {
 
   /** A new note right below `item`, taking its subjects. */
   function addBelow(item: ChunkWithAnnotations) {
-    if (!belowText.trim() || !room || busy) return;
+    const submitted = belowText;
+    if (!routeId || !submitted.trim() || !sameRoom(room?.id, routeId) || busyRef.current) return;
+    const roomId = routeId;
     void action(async () => {
       const result = await commit({ opId: randomUUID(), kind: 'chunk.create', ...human,
-        payload: { roomId: room.id, bodies: [belowText], subjects: item.subjects, index: item.position + 1 } });
+        payload: { roomId, bodies: [submitted], subjects: item.subjects, index: item.position + 1 } });
       if (!result.ok) throw new Error(result.error.message);
-      setBelowText(''); setBelowId(null);
+      setBelowText((current) => composerAfterSubmit(current, submitted));
+      setBelowId(null);
     });
   }
 
   /** Split: create the tail below first, then shorten this note, so a failure can duplicate text but never lose it. */
   async function splitNote(item: ChunkWithAnnotations, head: string, tail: string, rev: number): Promise<EditResult> {
-    if (!room) return { ok: false, message: 'This room is not loaded.' };
+    if (!routeId || !sameRoom(room?.id, routeId)) return { ok: false, message: 'This room is not loaded.' };
     const created = await commit({ opId: randomUUID(), kind: 'chunk.create', ...human,
-      payload: { roomId: room.id, bodies: [tail], subjects: item.subjects, index: item.position + 1 } });
+      payload: { roomId: routeId, bodies: [tail], subjects: item.subjects, index: item.position + 1 } });
     if (!created.ok) {
       await refresh().catch(() => undefined);
       return { ok: false, message: readable(created.error) };
     }
-    return edit(() => commit({ opId: randomUUID(), kind: 'chunk.update', ...human, expectedRevision: rev, payload: { chunkId: item.id, body: head } }));
+    const updated = await edit(() => commit({ opId: randomUUID(), kind: 'chunk.update', ...human, expectedRevision: rev, payload: { chunkId: item.id, body: head } }));
+    return updated.ok ? { ...updated, body: head } : updated;
   }
 
   /** Merge the next note into this one: write the joined text first, then remove the next note. */
   async function mergeNext(item: ChunkWithAnnotations, rev: number): Promise<EditResult> {
+    if (!sameRoom(room?.id, routeId)) return { ok: false, message: 'This room is not loaded.' };
     const next = chunksRef.current.find((chunk) => chunk.position === item.position + 1);
     if (!next) return { ok: false, message: 'There is no next note to merge.' };
     if (next.annotations.length) return { ok: false, message: 'The next note has annotations, and merging would lose them. Keep the notes separate.' };
@@ -354,7 +373,7 @@ export function RoomScreen() {
     const removed = await commit({ opId: randomUUID(), kind: 'chunk.delete', ...human, expectedRevision: following.revision, payload: { chunkId: following.id } });
     await refresh().catch(() => undefined);
     if (!removed.ok) setError(`The notes were joined, but the next note could not be removed: ${readable(removed.error)}`);
-    return updated;
+    return { ...updated, body: merged.body };
   }
 
   async function removeLater(entry: PendingDelete): Promise<EditResult> {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { consumeCommaList, isSubmitShortcut, matchesQuery, mergeNotes, splitAt } from '../src/features/notes/note-ops.ts';
+import { composerAfterSubmit, consumeCommaList, isSubmitShortcut, matchesQuery, mergeNotes, sameRoom, splitAt } from '../src/features/notes/note-ops.ts';
 import { PendingDeletes, type PendingDelete } from '../src/features/notes/pending-delete.ts';
 
 /* ---------------------------------------------------------------- search */
@@ -14,6 +14,18 @@ test('search matches every word in the text or subjects, ignoring case and order
   assert.equal(matchesQuery(note, 'ATP mitochondria'), true);
   assert.equal(matchesQuery(note, 'cell atp'), true, 'subjects are searched too');
   assert.equal(matchesQuery(note, 'atp ribosome'), false, 'every word must match');
+});
+
+test('a note is saved only into the room currently in the URL', () => {
+  assert.equal(sameRoom('room-a', 'room-a'), true);
+  assert.equal(sameRoom('room-a', 'room-b'), false);
+  assert.equal(sameRoom(null, 'room-b'), false);
+  assert.equal(sameRoom('room-a', undefined), false);
+});
+
+test('typing during a composer save is kept when that save finishes', () => {
+  assert.equal(composerAfterSubmit('first', 'first'), '');
+  assert.equal(composerAfterSubmit('first second', 'first'), 'first second');
 });
 
 /* ----------------------------------------------------------------- split */

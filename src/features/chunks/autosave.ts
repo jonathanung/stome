@@ -116,6 +116,16 @@ export class AutosaveController {
     return Promise.resolve();
   }
 
+  /**
+   * A split or merge replaced the saved body. Follow that text. An open
+   * draft or a save still running is left alone, and this does not write.
+   */
+  adoptSaved(text: string): void {
+    if (this.dropped || this.inFlight || this.state.status !== 'saved') return;
+    if (this.state.text === text) return;
+    this.set({ status: 'saved', text, error: null });
+  }
+
   /** Manual retry after a failed save. */
   retry(): Promise<void> {
     if (this.dropped || this.state.status !== 'error') return Promise.resolve();

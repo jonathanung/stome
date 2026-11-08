@@ -186,6 +186,27 @@ test('dispose does not reschedule a draft typed during an in-flight save', async
   assert.deepEqual(s.saves, ['A'], 'no silent save after dispose');
 });
 
+test('adopting a split or merge replaces the saved text and does not write it', async () => {
+  const s = setup(async () => ({ ok: true }));
+  s.ctl.edit('full note tail');
+  await s.clock.advance(800);
+  s.ctl.adoptSaved('full note');
+  assert.deepEqual(s.last(), { status: 'saved', text: 'full note', error: null });
+  assert.equal(s.clock.pending(), 0);
+  assert.deepEqual(s.saves, ['full note tail']);
+  s.ctl.edit('full note!');
+  await s.clock.advance(800);
+  assert.deepEqual(s.saves, ['full note tail', 'full note!']);
+});
+
+test('adopting a saved body does not replace an unsaved draft', () => {
+  const s = setup(async () => ({ ok: true }));
+  s.ctl.edit('still typing');
+  s.ctl.adoptSaved('full note');
+  assert.equal(s.ctl.current.text, 'still typing');
+  assert.equal(s.ctl.current.status, 'unsaved');
+});
+
 test('flush of a failed save does not retry, and the text stays', async () => {
   const s = setup(async () => ({ ok: false, message: 'disk is full' }));
   s.ctl.edit('keep me');
