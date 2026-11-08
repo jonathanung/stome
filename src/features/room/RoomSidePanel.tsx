@@ -51,7 +51,7 @@ export function RoomSidePanel({ roomId, subjects, chunks, dueToday, activeSubjec
   return (
     <View testID="room-side-panel" style={{ width: 260, gap: theme.space.xl, padding: theme.space.base,
       borderRadius: theme.radius.float, borderWidth: 1, borderColor: theme.color.border.hairline,
-      backgroundColor: theme.color.bg.surface, alignSelf: 'flex-start' }}>
+      backgroundColor: theme.color.bg.canvas, alignSelf: 'flex-start' }}>
       <View style={{ gap: theme.space.xs }}>
         {heading('subjects')}
         {row('all chunks', chunks.length, activeSubject === null, () => onSubject(null))}
