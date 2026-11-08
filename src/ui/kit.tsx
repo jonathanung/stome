@@ -1,7 +1,8 @@
 import { Children, isValidElement, useState, type ComponentRef, type ReactNode, type Ref } from 'react';
-import { Pressable, Text, TextInput, View, type TextInputProps, type ViewStyle } from 'react-native';
+import { Text, TextInput, View, type TextInputProps, type ViewStyle } from 'react-native';
 
 import { useStoneTheme } from '../../design-theme/src/primitives';
+import { MotionPressable as Pressable, MotionView } from '../../design-theme/src/motion';
 import { Icon, type IconName } from './Icon';
 
 /** One reading column, centred on wide screens. */
@@ -67,7 +68,7 @@ export function ScreenHeader({
 }) {
   const theme = useStoneTheme();
   return (
-    <View style={{ gap: theme.space.xs, paddingTop: back ? 0 : theme.space.base }}>
+    <MotionView style={{ gap: theme.space.xs, paddingTop: back ? 0 : theme.space.base }}>
       {back}
       <View style={{ flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: theme.space.xl }}>
         <View style={{ flex: 1, gap: theme.space.xs }}>
@@ -79,7 +80,7 @@ export function ScreenHeader({
         {action}
       </View>
       {children}
-    </View>
+    </MotionView>
   );
 }
 
@@ -142,7 +143,7 @@ export function Group({ children, testID }: { children: ReactNode; testID?: stri
   const theme = useStoneTheme();
   const items = Children.toArray(children).filter(isValidElement);
   return (
-    <View
+    <MotionView
       testID={testID}
       style={{
         backgroundColor: theme.color.bg.surface,
@@ -161,7 +162,7 @@ export function Group({ children, testID }: { children: ReactNode; testID?: stri
           {child}
         </View>
       ))}
-    </View>
+    </MotionView>
   );
 }
 

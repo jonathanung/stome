@@ -1,7 +1,8 @@
+import { MotionPressable as Pressable } from '../../../design-theme/src/motion';
 import { Link, usePathname, type Href } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { ScrollView, Text, View } from 'react-native';
 
 import { useStoneTheme } from '../../../design-theme/src/primitives';
 import { requestCaptureOpen } from '../../features/capture/openSignal';
