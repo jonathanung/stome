@@ -16,11 +16,11 @@ const outDir = path.resolve(process.env.STOME_RENDER_OUT ?? path.join(repoRoot, 
 mkdirSync(outDir, { recursive: true });
 
 const routes = [
-  { name: 'home', text: 'Study rooms' },
-  { name: 'today', url: 'stome://today', text: 'Due notes from this device.' },
+  { name: 'home', text: 'No rooms yet' },
+  { name: 'today', url: 'stome://today', text: 'Nothing due today' },
   { name: 'notes', url: 'stome://notes', text: 'Notes stay on this device.' },
   { name: 'recent', url: 'stome://recent', text: 'Recent notes' },
-  { name: 'import', url: 'stome://import', text: 'Bring your notes' },
+  { name: 'import', url: 'stome://import', text: 'bring your notes' },
 ];
 
 const fatalPattern = /FATAL EXCEPTION|JavascriptException|Unable to load script|\[(?:TypeError|ReferenceError|SyntaxError):|Invariant Violation/;

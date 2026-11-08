@@ -22,11 +22,11 @@ const chromeCandidates = [
 ].filter(Boolean);
 
 const routes = [
-  { path: '/', text: 'Study rooms' },
-  { path: '/today', text: 'Due notes from this device.' },
+  { path: '/', text: 'Your rooms' },
+  { path: '/today', text: 'Nothing due today' },
   { path: '/notes', text: 'Notes stay on this device.' },
   { path: '/recent', text: 'Recent notes' },
-  { path: '/import', text: 'Bring your notes' },
+  { path: '/import', text: 'bring your notes' },
 ];
 
 const types = new Map([
@@ -120,6 +120,7 @@ const results = [];
 let failed = false;
 try {
   const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 800 });
   page.setDefaultTimeout(20_000);
   const pageErrors = [];
   page.on('pageerror', (error) => {
