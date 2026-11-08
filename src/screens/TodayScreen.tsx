@@ -1,3 +1,4 @@
+import { randomUUID } from 'expo-crypto';
 import { router, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useMemo, useState } from 'react';
@@ -5,10 +6,12 @@ import { ActivityIndicator, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button, Screen, useStoneTheme } from '../../design-theme/src/primitives';
-import type { DueChunk } from '../data/models';
-import { listDueChunks, listRooms } from '../data/queries';
-import { planToday } from '../data/today';
+import { createCommit } from '../data/commit';
+import { isDueAnswer, type DueItem } from '../data/models';
+import { listDueAnswers, listDueChunks, listRooms } from '../data/queries';
+import { planDueItems } from '../data/today';
 import { expoDriver } from '../db/expo-driver';
+import { MarkButtons } from '../features/review/MarkButtons';
 import { reviewMarkController } from '../features/review/mark-attempt';
 import { reviewHref } from '../features/review/session';
 import { TodaySummary } from './TodaySummary';
@@ -43,20 +46,31 @@ function dueLabel(dueAt: number): string {
   return `today ${new Date(dueAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: false })}`;
 }
 
+function itemKey(item: DueItem): string {
+  return isDueAnswer(item) ? item.annotation.id : item.chunk.id;
+}
+
+function answerText(item: Extract<DueItem, { annotation: unknown }>): string {
+  const payload = item.annotation.payload as { answer?: unknown };
+  return typeof payload.answer === 'string' && payload.answer.trim() ? payload.answer : item.chunk.body;
+}
+
 export function TodayScreen() {
   const sqlite = useSQLiteContext();
   const db = useMemo(() => expoDriver(sqlite), [sqlite]);
+  const commit = useMemo(() => createCommit(db, { now: Date.now, newId: randomUUID }), [db]);
   const theme = useStoneTheme();
   const column = useColumn();
-  const [items, setItems] = useState<DueChunk[]>([]);
+  const [items, setItems] = useState<DueItem[]>([]);
   const [roomNames, setRoomNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setError(null);
-    const due = await listDueChunks(db, Date.now());
-    setItems(planToday(due));
+    const now = Date.now();
+    const [chunks, answers] = await Promise.all([listDueChunks(db, now), listDueAnswers(db, now)]);
+    setItems(planDueItems([...chunks, ...answers]));
     setRoomNames(Object.fromEntries((await listRooms(db)).map((room) => [room.id, room.name])));
   }, [db]);
 
@@ -65,10 +79,11 @@ export function TodayScreen() {
     let ticket = 0;
     const load = () => {
       const mine = ++ticket;
-      return Promise.all([listDueChunks(db, Date.now()), listRooms(db)])
-        .then(([due, rooms]) => {
+      const now = Date.now();
+      return Promise.all([listDueChunks(db, now), listDueAnswers(db, now), listRooms(db)])
+        .then(([chunks, answers, rooms]) => {
           if (!active || mine !== ticket) return;
-          setItems(planToday(due));
+          setItems(planDueItems([...chunks, ...answers]));
           setRoomNames(Object.fromEntries(rooms.map((room) => [room.id, room.name])));
           setLoading(false);
         })
@@ -89,7 +104,7 @@ export function TodayScreen() {
   }, [db]));
 
   const groups = useMemo(() => {
-    const byRoom = new Map<string, DueChunk[]>();
+    const byRoom = new Map<string, DueItem[]>();
     for (const item of items) byRoom.set(item.chunk.roomId, [...(byRoom.get(item.chunk.roomId) ?? []), item]);
     return [...byRoom].map(([roomId, list]) => ({ roomId, items: list }));
   }, [items]);
@@ -152,17 +167,54 @@ export function TodayScreen() {
                     {roomNames[group.roomId] ?? 'Room'}
                   </Text>
                   {group.items.map((item) => {
+                    const key = itemKey(item);
+                    if (isDueAnswer(item)) {
+                      const title = answerText(item).split('\n')[0]?.slice(0, 80) || 'Saved answer';
+                      const subtitle = item.mark === null
+                        ? 'saved answer · due now'
+                        : `saved answer · ${STATE_LABEL[item.mark.state]} ${markedLabel(item.mark.markedAt)} · due ${dueLabel(item.mark.dueAt)}`;
+                      return (
+                        <View key={key} style={{ paddingBottom: theme.space.lg }}>
+                          <Row
+                            title={title}
+                            subtitle={subtitle}
+                            leading={item.mark ? <StatusMark state={item.mark.state} /> : <FreshDot />}
+                            accessibilityLabel={`Review saved answer ${title}`}
+                            onPress={() => router.push(reviewHref(item.chunk.roomId, item.chunk.id))}
+                            testID={`today-item-${key}`}
+                          />
+                          <View style={{ paddingHorizontal: theme.space.base, paddingTop: theme.space.sm }}>
+                            <MarkButtons
+                              chunkId={item.chunk.id}
+                              annotationId={item.annotation.id}
+                              expectedRevision={item.chunk.revision}
+                              commit={commit}
+                              testID={`today-mark-${key}`}
+                            />
+                          </View>
+                        </View>
+                      );
+                    }
                     const title = item.chunk.body.split('\n')[0]?.slice(0, 80) || 'Empty chunk';
                     return (
-                      <Row
-                        key={item.chunk.id}
-                        title={title}
-                        subtitle={`${STATE_LABEL[item.mark.state]} ${markedLabel(item.mark.markedAt)} · due ${dueLabel(item.mark.dueAt)}`}
-                        leading={<StatusMark state={item.mark.state} />}
-                        accessibilityLabel={`Review ${title}`}
-                        onPress={() => router.push(reviewHref(item.chunk.roomId, item.chunk.id))}
-                        testID={`today-item-${item.chunk.id}`}
-                      />
+                      <View key={key} style={{ paddingBottom: theme.space.lg }}>
+                        <Row
+                          title={title}
+                          subtitle={`${STATE_LABEL[item.mark.state]} ${markedLabel(item.mark.markedAt)} · due ${dueLabel(item.mark.dueAt)}`}
+                          leading={<StatusMark state={item.mark.state} />}
+                          accessibilityLabel={`Review ${title}`}
+                          onPress={() => router.push(reviewHref(item.chunk.roomId, item.chunk.id))}
+                          testID={`today-item-${key}`}
+                        />
+                        <View style={{ paddingHorizontal: theme.space.base, paddingTop: theme.space.sm }}>
+                          <MarkButtons
+                            chunkId={item.chunk.id}
+                            expectedRevision={item.chunk.revision}
+                            commit={commit}
+                            testID={`today-mark-${key}`}
+                          />
+                        </View>
+                      </View>
                     );
                   })}
                 </View>
@@ -179,5 +231,25 @@ export function TodayScreen() {
         </ScrollView>
       </SafeAreaView>
     </Screen>
+  );
+}
+
+/** Neutral day tile for a pinned answer with no mark yet. */
+function FreshDot() {
+  const theme = useStoneTheme();
+  const size = 28;
+  return (
+    <View
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={{
+        width: size,
+        height: size,
+        borderRadius: (size / 8) * 2,
+        backgroundColor: theme.color.bg.inset,
+        borderWidth: 1,
+        borderColor: theme.color.border.strong,
+      }}
+    />
   );
 }

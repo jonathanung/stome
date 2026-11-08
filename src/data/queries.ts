@@ -2,7 +2,23 @@
 
 import type { Db } from '../db/driver.ts';
 import type { ReviewState } from '../db/schema.ts';
-import type { Annotation, Chunk, DueChunk, RecentChunk, ReviewMark, Room, RoomStage } from './models.ts';
+import type {
+  Annotation,
+  AnswerMark,
+  Chunk,
+  DueAnswer,
+  DueChunk,
+  RecentChunk,
+  ReviewMark,
+  Room,
+  RoomStage,
+  SlideOutline,
+  StudyAttempt,
+  StudyCard,
+  StudyDeck,
+  StudyQuestion,
+  StudyQuiz,
+} from './models.ts';
 
 interface RoomRow {
   id: string;
@@ -108,6 +124,11 @@ export async function listAnnotations(db: Db, chunkId: string): Promise<Annotati
   return rows.map(toAnnotation);
 }
 
+export async function getAnnotation(db: Db, annotationId: string): Promise<Annotation | null> {
+  const row = await db.get<AnnotationRow>('SELECT * FROM annotations WHERE id = ?', [annotationId]);
+  return row ? toAnnotation(row) : null;
+}
+
 interface ReviewRow {
   chunk_id: string;
   state: ReviewState;
@@ -172,4 +193,344 @@ export async function listRoomAnnotations(db: Db, roomId: string): Promise<Annot
     [roomId],
   );
   return rows.map(toAnnotation);
+}
+
+interface AnswerMarkRow {
+  annotation_id: string;
+  chunk_id: string;
+  state: ReviewState;
+  local_day: string;
+  marked_at: number;
+  due_at: number;
+  time_zone: string;
+}
+
+const toAnswerMark = (row: AnswerMarkRow): AnswerMark => ({
+  annotationId: row.annotation_id,
+  chunkId: row.chunk_id,
+  state: row.state,
+  localDay: row.local_day,
+  markedAt: row.marked_at,
+  dueAt: row.due_at,
+  timeZone: row.time_zone,
+});
+
+/** The answer mark that currently sets this pin's due time, if it has been marked. */
+export async function latestAnswerMark(db: Db, annotationId: string): Promise<AnswerMark | null> {
+  const row = await db.get<AnswerMarkRow>(
+    `SELECT m.annotation_id, a.chunk_id AS chunk_id, m.state, m.local_day, m.marked_at, m.due_at, m.time_zone
+       FROM answer_marks m
+       JOIN annotations a ON a.id = m.annotation_id
+      WHERE m.annotation_id = ?
+      ORDER BY m.marked_at DESC, m.local_day DESC
+      LIMIT 1`,
+    [annotationId],
+  );
+  return row ? toAnswerMark(row) : null;
+}
+
+type DueAnswerRow = ChunkRow & {
+  annotation_id: string;
+  annotation_chunk_id: string;
+  annotation_type: Annotation['type'];
+  annotation_anchor: string;
+  annotation_payload: string;
+  annotation_created: number;
+  annotation_updated: number;
+  mark_state: ReviewState | null;
+  mark_day: string | null;
+  mark_marked: number | null;
+  mark_due: number | null;
+  mark_zone: string | null;
+};
+
+const ANSWER_COLUMNS = `
+  a.id AS annotation_id, a.chunk_id AS annotation_chunk_id, a.type AS annotation_type,
+  a.anchor AS annotation_anchor, a.payload AS annotation_payload,
+  a.created_at AS annotation_created, a.updated_at AS annotation_updated`;
+
+function toDueAnswer(row: DueAnswerRow): DueAnswer {
+  const mark =
+    row.mark_state === null || row.mark_day === null || row.mark_marked === null || row.mark_due === null || row.mark_zone === null
+      ? null
+      : {
+          annotationId: row.annotation_id,
+          chunkId: row.annotation_chunk_id,
+          state: row.mark_state,
+          localDay: row.mark_day,
+          markedAt: row.mark_marked,
+          dueAt: row.mark_due,
+          timeZone: row.mark_zone,
+        };
+  return {
+    chunk: toChunk(row),
+    annotation: {
+      id: row.annotation_id,
+      chunkId: row.annotation_chunk_id,
+      type: row.annotation_type,
+      anchor: JSON.parse(row.annotation_anchor),
+      payload: JSON.parse(row.annotation_payload),
+      createdAt: row.annotation_created,
+      updatedAt: row.annotation_updated,
+    },
+    mark,
+  };
+}
+
+/**
+ * Pinned `ai_answer` annotations that are due at `now` (#127). An answer with
+ * no mark is due as soon as it is pinned; a marked answer is due when its
+ * latest answer mark is due. Staleness is not filtered here — marking rejects
+ * a stale anchor or passage with a message and writes nothing.
+ */
+export async function listDueAnswers(db: Db, now: number): Promise<DueAnswer[]> {
+  return dueAnswers(db, now);
+}
+
+/** Due pinned answers in one room, for the review session. */
+export async function listRoomDueAnswers(db: Db, roomId: string, now: number): Promise<DueAnswer[]> {
+  return dueAnswers(db, now, roomId);
+}
+
+async function dueAnswers(db: Db, now: number, roomId?: string): Promise<DueAnswer[]> {
+  const roomFilter = roomId === undefined ? '' : 'AND c.room_id = ?';
+  const roomParams = roomId === undefined ? [] : [roomId];
+  const marked = await db.all<DueAnswerRow>(
+    `SELECT ${CHUNK_COLUMNS}, ${ANSWER_COLUMNS},
+            m.state AS mark_state, m.local_day AS mark_day, m.marked_at AS mark_marked,
+            m.due_at AS mark_due, m.time_zone AS mark_zone
+       FROM answer_marks m
+       JOIN annotations a ON a.id = m.annotation_id
+       JOIN chunks c ON c.id = a.chunk_id
+      WHERE a.type = 'ai_answer'
+        AND m.due_at <= ?
+        AND NOT EXISTS (
+          SELECT 1 FROM answer_marks newer
+           WHERE newer.annotation_id = m.annotation_id
+             AND (newer.marked_at > m.marked_at
+                  OR (newer.marked_at = m.marked_at AND newer.local_day > m.local_day))
+        )
+        ${roomFilter}
+      ORDER BY m.due_at, a.id`,
+    [now, ...roomParams],
+  );
+  const fresh = await db.all<DueAnswerRow>(
+    `SELECT ${CHUNK_COLUMNS}, ${ANSWER_COLUMNS},
+            NULL AS mark_state, NULL AS mark_day, NULL AS mark_marked,
+            NULL AS mark_due, NULL AS mark_zone
+       FROM annotations a
+       JOIN chunks c ON c.id = a.chunk_id
+      WHERE a.type = 'ai_answer'
+        AND NOT EXISTS (
+          SELECT 1 FROM answer_marks m WHERE m.annotation_id = a.id
+        )
+        ${roomFilter}
+      ORDER BY a.created_at, a.id`,
+    [...roomParams],
+  );
+  return [...fresh.map(toDueAnswer), ...marked.map(toDueAnswer)];
+}
+
+/* ------------------------------------------------ study materials (#130) */
+
+function parseIdList(value: string, what: string): string[] {
+  const parsed: unknown = JSON.parse(value);
+  if (!Array.isArray(parsed) || parsed.some((id) => typeof id !== 'string')) {
+    throw new Error(`Stored ${what} is not a list of ids`);
+  }
+  return parsed;
+}
+
+interface StudyDeckRow {
+  id: string;
+  room_id: string;
+  title: string;
+  source_chunk_ids: string;
+  source_revision: number;
+  created_at: number;
+  updated_at: number;
+}
+
+const toStudyDeck = (row: StudyDeckRow): StudyDeck => ({
+  id: row.id,
+  roomId: row.room_id,
+  title: row.title,
+  sourceChunkIds: parseIdList(row.source_chunk_ids, 'source chunk ids'),
+  sourceRevision: row.source_revision,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
+interface StudyQuizRow {
+  id: string;
+  room_id: string;
+  title: string;
+  source_chunk_ids: string;
+  source_revision: number;
+  created_at: number;
+  updated_at: number;
+}
+
+const toStudyQuiz = (row: StudyQuizRow): StudyQuiz => ({
+  id: row.id,
+  roomId: row.room_id,
+  title: row.title,
+  sourceChunkIds: parseIdList(row.source_chunk_ids, 'source chunk ids'),
+  sourceRevision: row.source_revision,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
+interface StudyCardRow extends StudyDeckRow {
+  deck_id: string;
+  position: number;
+  front: string;
+  back: string;
+}
+
+const toStudyCard = (row: StudyCardRow): StudyCard => ({
+  id: row.id,
+  deckId: row.deck_id,
+  roomId: row.room_id,
+  position: row.position,
+  front: row.front,
+  back: row.back,
+  sourceChunkIds: parseIdList(row.source_chunk_ids, 'source chunk ids'),
+  sourceRevision: row.source_revision,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
+interface StudyQuestionRow extends StudyDeckRow {
+  quiz_id: string;
+  position: number;
+  kind: StudyQuestion['kind'];
+  stem: string;
+  choices: string;
+  answer: string;
+  explanation: string;
+}
+
+const toStudyQuestion = (row: StudyQuestionRow): StudyQuestion => ({
+  id: row.id,
+  quizId: row.quiz_id,
+  roomId: row.room_id,
+  position: row.position,
+  kind: row.kind,
+  stem: row.stem,
+  choices: JSON.parse(row.choices) as string[],
+  answer: row.answer,
+  explanation: row.explanation,
+  sourceChunkIds: parseIdList(row.source_chunk_ids, 'source chunk ids'),
+  sourceRevision: row.source_revision,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
+interface StudyAttemptRow {
+  id: string;
+  quiz_id: string;
+  room_id: string;
+  score_pct: number;
+  correct: number;
+  total: number;
+  results: string;
+  duration_ms: number;
+  created_at: number;
+}
+
+const toStudyAttempt = (row: StudyAttemptRow): StudyAttempt => ({
+  id: row.id,
+  quizId: row.quiz_id,
+  roomId: row.room_id,
+  scorePct: row.score_pct,
+  correct: row.correct,
+  total: row.total,
+  results: JSON.parse(row.results) as StudyAttempt['results'],
+  durationMs: row.duration_ms,
+  createdAt: row.created_at,
+});
+
+interface SlideOutlineRow extends StudyDeckRow {
+  slides: string;
+}
+
+const toSlideOutline = (row: SlideOutlineRow): SlideOutline => ({
+  id: row.id,
+  roomId: row.room_id,
+  title: row.title,
+  slides: JSON.parse(row.slides) as SlideOutline['slides'],
+  sourceChunkIds: parseIdList(row.source_chunk_ids, 'source chunk ids'),
+  sourceRevision: row.source_revision,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
+/** Decks for one room, oldest first. Never leaks another room's decks. */
+export async function listStudyDecks(db: Db, roomId: string): Promise<StudyDeck[]> {
+  const rows = await db.all<StudyDeckRow>(
+    'SELECT * FROM study_decks WHERE room_id = ? ORDER BY created_at, id',
+    [roomId],
+  );
+  return rows.map(toStudyDeck);
+}
+
+export async function getStudyDeck(db: Db, deckId: string): Promise<StudyDeck | null> {
+  const row = await db.get<StudyDeckRow>('SELECT * FROM study_decks WHERE id = ?', [deckId]);
+  return row ? toStudyDeck(row) : null;
+}
+
+/** Cards of one deck in study order. */
+export async function listStudyCards(db: Db, deckId: string): Promise<StudyCard[]> {
+  const rows = await db.all<StudyCardRow>(
+    'SELECT * FROM study_cards WHERE deck_id = ? ORDER BY position',
+    [deckId],
+  );
+  return rows.map(toStudyCard);
+}
+
+/** Quizzes for one room, oldest first. */
+export async function listStudyQuizzes(db: Db, roomId: string): Promise<StudyQuiz[]> {
+  const rows = await db.all<StudyQuizRow>(
+    'SELECT * FROM study_quizzes WHERE room_id = ? ORDER BY created_at, id',
+    [roomId],
+  );
+  return rows.map(toStudyQuiz);
+}
+
+export async function getStudyQuiz(db: Db, quizId: string): Promise<StudyQuiz | null> {
+  const row = await db.get<StudyQuizRow>('SELECT * FROM study_quizzes WHERE id = ?', [quizId]);
+  return row ? toStudyQuiz(row) : null;
+}
+
+/** Questions of one quiz in study order. */
+export async function listStudyQuestions(db: Db, quizId: string): Promise<StudyQuestion[]> {
+  const rows = await db.all<StudyQuestionRow>(
+    'SELECT * FROM study_questions WHERE quiz_id = ? ORDER BY position',
+    [quizId],
+  );
+  return rows.map(toStudyQuestion);
+}
+
+/** Attempts for one quiz, oldest first. */
+export async function listStudyAttempts(db: Db, quizId: string): Promise<StudyAttempt[]> {
+  const rows = await db.all<StudyAttemptRow>(
+    'SELECT * FROM study_attempts WHERE quiz_id = ? ORDER BY created_at, id',
+    [quizId],
+  );
+  return rows.map(toStudyAttempt);
+}
+
+/** Slide outlines for one room, oldest first. */
+export async function listSlideOutlines(db: Db, roomId: string): Promise<SlideOutline[]> {
+  const rows = await db.all<SlideOutlineRow>(
+    'SELECT * FROM slide_outlines WHERE room_id = ? ORDER BY created_at, id',
+    [roomId],
+  );
+  return rows.map(toSlideOutline);
+}
+
+export async function getSlideOutline(db: Db, outlineId: string): Promise<SlideOutline | null> {
+  const row = await db.get<SlideOutlineRow>('SELECT * FROM slide_outlines WHERE id = ?', [outlineId]);
+  return row ? toSlideOutline(row) : null;
 }

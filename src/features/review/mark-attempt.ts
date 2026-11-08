@@ -1,6 +1,6 @@
 import type { CommitResult } from '../../data/operations.ts';
 import type { ReviewState } from '../../db/schema.ts';
-import { reviewMarkOperation } from './session.ts';
+import { reviewAnswerMarkOperation, reviewMarkOperation } from './session.ts';
 
 export type MarkAttempt = ReturnType<typeof reviewMarkOperation>;
 
@@ -16,12 +16,19 @@ export type MarkOutcome =
 
 type MarkRequest = {
   chunkId: string;
+  /** Present when the mark targets a pinned answer; the attempt is keyed by it. */
+  annotationId?: string;
   state: ReviewState;
   expectedRevision: number;
 };
 
+function attemptKey(request: MarkRequest): string {
+  return request.annotationId ?? request.chunkId;
+}
+
 /**
- * One frozen review.mark for a chunk. The same op id, time zone, revision,
+ * One frozen review.mark for a chunk — or for a pinned answer, keyed by its
+ * annotation id. The same op id, time zone, revision,
  * and choice are reused when a commit succeeded but the response did not
  * come back, even if the note on screen has a newer revision. A different
  * choice waits. After that attempt is acknowledged or rejected, a later
@@ -57,42 +64,52 @@ export function createMarkController() {
     report: (result: Saved, attempt: MarkAttempt) => void;
   }): Promise<MarkOutcome> {
     const { request } = input;
-    if (flights.has(request.chunkId)) return Promise.resolve({ status: 'busy' });
+    const key = attemptKey(request);
+    if (flights.has(key)) return Promise.resolve({ status: 'busy' });
 
-    const held = retained.get(request.chunkId) ?? null;
+    const held = retained.get(key) ?? null;
     if (
       held &&
-      (held.payload.state !== request.state || held.payload.chunkId !== request.chunkId)
+      (held.payload.state !== request.state || (held.payload.annotationId ?? held.payload.chunkId) !== (request.annotationId ?? request.chunkId))
     ) {
       return Promise.resolve({ status: 'blocked', attempt: held });
     }
 
-    const attempt = held ?? freezeAttempt(reviewMarkOperation({
-      opId: input.newId(),
-      chunkId: request.chunkId,
-      state: request.state,
-      expectedRevision: request.expectedRevision,
-      timeZone: input.timeZone(),
-    }));
-    if (!held) retained.set(request.chunkId, attempt);
+    const attempt = held ?? freezeAttempt(request.annotationId === undefined
+      ? reviewMarkOperation({
+        opId: input.newId(),
+        chunkId: request.chunkId,
+        state: request.state,
+        expectedRevision: request.expectedRevision,
+        timeZone: input.timeZone(),
+      })
+      : reviewAnswerMarkOperation({
+        opId: input.newId(),
+        chunkId: request.chunkId,
+        annotationId: request.annotationId,
+        state: request.state,
+        expectedRevision: request.expectedRevision,
+        timeZone: input.timeZone(),
+      }));
+    if (!held) retained.set(key, attempt);
 
     const seen = generation;
     let settle!: (outcome: MarkOutcome) => void;
     const run = new Promise<MarkOutcome>((resolve) => {
       settle = resolve;
     });
-    flights.set(request.chunkId, run);
+    flights.set(key, run);
 
     void (async () => {
       try {
         const result = await input.commit(attempt);
         if (!result.ok) {
-          retained.delete(request.chunkId);
+          retained.delete(key);
           settle({ status: 'rejected', result });
           return;
         }
         if (seen !== generation) {
-          retained.delete(request.chunkId);
+          retained.delete(key);
           settle({ status: 'saved', result, painted: false });
           return;
         }
@@ -102,12 +119,12 @@ export function createMarkController() {
           settle({ status: 'ambiguous', error });
           return;
         }
-        retained.delete(request.chunkId);
+        retained.delete(key);
         settle({ status: 'saved', result, painted: true });
       } catch (error) {
         settle({ status: 'ambiguous', error });
       } finally {
-        flights.delete(request.chunkId);
+        flights.delete(key);
         notify();
       }
     })();
@@ -131,7 +148,7 @@ export function createMarkController() {
     invalidate,
     subscribe,
     generation: () => generation,
-    retained: (chunkId: string) => retained.get(chunkId) ?? null,
+    retained: (key: string) => retained.get(key) ?? null,
   };
 }
 

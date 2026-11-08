@@ -1,5 +1,6 @@
 import { HarnessError, type HarnessErrorCode } from './contract';
 import type { Provider, ProviderRequest } from './provider';
+import type { CompanionStatus } from './tools';
 
 const ERROR_CODES: readonly HarnessErrorCode[] = [
   'invalid_shape',
@@ -92,4 +93,34 @@ export function companionProvider(options: { baseUrl: string; token: string }): 
       return payload.output;
     },
   };
+}
+
+/** GET /v1/status. Needs the pairing token; the reply never contains a provider key. */
+export async function fetchCompanionStatus(
+  options: { baseUrl: string; token: string },
+  signal?: AbortSignal,
+): Promise<CompanionStatus> {
+  const origin = assertCompanionUrl(options.baseUrl);
+  let response: Response;
+  try {
+    response = await fetch(`${origin}/v1/status`, {
+      method: 'GET',
+      credentials: 'omit',
+      signal,
+      headers: { 'x-stome-token': options.token },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'The companion could not be reached';
+    throw new HarnessError('provider_error', message);
+  }
+  const payload = (await response.json()) as {
+    ok?: boolean;
+    status?: CompanionStatus;
+    error?: { code?: unknown; message?: unknown };
+  };
+  if (!payload.ok || !payload.status) {
+    const message = typeof payload.error?.message === 'string' ? payload.error.message : 'The companion rejected the request';
+    throw new HarnessError(asCode(payload.error?.code), message);
+  }
+  return payload.status;
 }
