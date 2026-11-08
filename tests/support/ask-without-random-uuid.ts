@@ -107,7 +107,8 @@ async function askConfirmReplay(label: string, issued?: { count: number }): Prom
     chunks: [{ id: view.id, roomId: view.roomId, text: view.text }],
     priorMessages: [],
   });
-  assert.equal(outcome.proposal?.body, expected.body);
+  const proposal = outcome.proposal;
+  assert.equal(proposal && 'body' in proposal ? proposal.body : undefined, expected.body);
   const operationId = outcome.session?.pendingOperationId ?? '';
   assert.match(operationId, UUID_V4);
   const saved = await confirmFoundationQuestion(harness, app, {
