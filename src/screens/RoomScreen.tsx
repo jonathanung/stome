@@ -387,6 +387,7 @@ export function RoomScreen() {
                 { text: 'Review this room', onPress: () => router.push(`/rooms/${room.id}/review`) },
                 { text: 'Slides', onPress: () => router.push(`/rooms/${room.id}/slides`) },
                 { text: 'Whiteboard', onPress: () => router.push(`/rooms/${room.id}/whiteboard`) },
+                { text: 'Import notes', onPress: () => router.push({ pathname: '/import', params: { roomId: room.id } }) },
                 { text: 'Cancel', style: 'cancel' },
               ])} />
             <RoomTabs value={tab} onChange={setTab} />
@@ -395,6 +396,7 @@ export function RoomScreen() {
             <RoomHeader room={room} chunkCount={chunks.length}
               onBack={() => router.replace('/')}
               onAsk={() => listRef.current?.scrollToEnd({ animated: true })}
+              onImport={() => router.push({ pathname: '/import', params: { roomId: room.id } })}
               onNewNote={() => { listRef.current?.scrollToOffset({ offset: 0, animated: true }); composerRef.current?.focus(); }} />
           </>}
           {phone && tab !== 'notes' ? null : <View style={{ gap: theme.space.xl, backgroundColor: theme.color.bg.surface, borderRadius: theme.radius.float, borderWidth: 1, borderColor: theme.color.border.hairline, padding: theme.space.base, ...theme.shadow.card }}>
