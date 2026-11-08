@@ -294,7 +294,7 @@ export function RoomScreen() {
 
   function formatComposer(format: NoteFormat) {
     const next = formatNote(content, composerSelectionRef.current, format);
-    if (next.text.length > LIMITS.body) { setError('This note is too long to add formatting. Split it first.'); return; }
+    if (next.text.length > LIMITS.body) { setActionError('This note is too long to add formatting. Split it first.'); return; }
     setContent(next.text);
     composerSelectionRef.current = next.selection;
     setComposerSelection(next.selection);
@@ -303,7 +303,7 @@ export function RoomScreen() {
 
   function formatBelow(format: NoteFormat) {
     const next = formatNote(belowText, belowSelectionRef.current, format);
-    if (next.text.length > LIMITS.body) { setError('This note is too long to add formatting. Split it first.'); return; }
+    if (next.text.length > LIMITS.body) { setActionError('This note is too long to add formatting. Split it first.'); return; }
     setBelowText(next.text);
     belowSelectionRef.current = next.selection;
     setBelowSelection(next.selection);
