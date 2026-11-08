@@ -8,10 +8,10 @@ import { Badge, Button, Screen, useStoneTheme } from '../../design-theme/src/pri
 import type { Room } from '../data/models';
 import { listRooms } from '../data/queries';
 import { expoDriver } from '../db/expo-driver';
-import { listRoomLedger, type LedgerEntry } from '../features/stone/ledger';
+import { listRoomImports, listRoomLedger, type ImportActivity, type LedgerEntry } from '../features/stone/ledger';
 import { stoneHeadline, stoneProgress, stoneSubline } from '../features/stone/stone-progress';
 import { Icon } from '../ui/Icon';
-import { EmptyState, BackButton, useColumn } from '../ui/kit';
+import { EmptyState, useColumn } from '../ui/kit';
 import { PathArrow, StagePicture, type PathStage } from '../ui/StonePath';
 
 const WIDE = 900;
@@ -132,6 +132,7 @@ export function StoneHomeScreen() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [ledger, setLedger] = useState<LedgerEntry[]>([]);
+  const [imports, setImports] = useState<ImportActivity[]>([]);
   const [loading, setLoading] = useState(true);
 
   const room = rooms.find((r) => r.id === selectedId) ?? rooms[0] ?? null;
@@ -145,11 +146,17 @@ export function StoneHomeScreen() {
   }, [db]));
 
   useFocusEffect(useCallback(() => {
-    if (!roomId) { setLedger([]); return undefined; }
+    if (!roomId) { setLedger([]); setImports([]); return undefined; }
     let active = true;
     listRoomLedger(db, roomId).then((rows) => { if (active) setLedger(rows); }).catch(() => { if (active) setLedger([]); });
+    listRoomImports(db, roomId).then((rows) => { if (active) setImports(rows); }).catch(() => { if (active) setImports([]); });
     return () => { active = false; };
   }, [db, roomId]));
+
+  const activity = useMemo(() => [
+    ...ledger.map((entry) => ({ kind: 'mark' as const, key: `${entry.chunkId}:${entry.localDay}`, at: entry.markedAt, entry })),
+    ...imports.map((imp) => ({ kind: 'import' as const, key: `import:${imp.sourceId}`, at: imp.importedAt, imp })),
+  ].sort((a, b) => b.at - a.at), [ledger, imports]);
 
   const progress = room ? stoneProgress(ledger.length, room.stage) : null;
   const isBrick = room?.stage === 'brick';
@@ -157,7 +164,6 @@ export function StoneHomeScreen() {
   return <Screen><SafeAreaView style={{ flex: 1 }} edges={['top', 'left', 'right']}>
     <ScrollView contentContainerStyle={[column, { paddingBottom: 120, gap: theme.space.section }]}>
       <View style={{ gap: theme.space.xs }}>
-        <BackButton label="rooms" onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
         <Text accessibilityRole="header" style={[theme.text('screenTitle'), { color: theme.color.text.primary }]}>stone home</Text>
         <Text style={[theme.text('bodySmall'), { color: theme.color.text.secondary }]}>
           real study builds your rooms. stones come from reviews you finish yourself, not from imports or ai.
@@ -238,16 +244,30 @@ export function StoneHomeScreen() {
                 <Text accessibilityRole="header" style={[theme.text('title'), { color: theme.color.text.primary }]}>ledger</Text>
                 <Text style={[theme.text('bodySmall'), { color: theme.color.text.tertiary }]}>{room.name.toLowerCase()} · newest first</Text>
               </View>
-              {ledger.length === 0
+              {activity.length === 0
                 ? <Text style={[theme.text('bodySmall'), { color: theme.color.text.secondary }]}>no credits yet. finish a review and it shows up here.</Text>
-                : ledger.map((entry) => (
-                  <View key={`${entry.chunkId}:${entry.localDay}`} style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.md, paddingVertical: theme.space.md, borderTopWidth: 1, borderTopColor: theme.color.border.hairline }}>
-                    <Text style={[theme.text('bodySmall'), { width: 84, color: theme.color.text.tertiary, fontVariant: ['tabular-nums'] }]}>{whenLabel(entry.markedAt)}</Text>
-                    <Text numberOfLines={1} style={[theme.text('bodySmall'), { flex: 1, color: theme.color.text.primary }]}>{entry.title}</Text>
-                    <Badge tone={MARK_TONE[entry.state]} label={MARK_LABEL[entry.state]} />
-                    <Text style={[theme.text('button'), { width: 28, textAlign: 'right', color: theme.color.text.primary }]}>+1</Text>
+                : <>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.md }}>
+                    <Text style={[theme.text('label'), { width: 84, color: theme.color.text.tertiary }]}>WHEN</Text>
+                    <Text style={[theme.text('label'), { flex: 1, color: theme.color.text.tertiary }]}>NOTE</Text>
+                    <Text style={[theme.text('label'), { width: 76, color: theme.color.text.tertiary }]}>MARK</Text>
+                    <Text style={[theme.text('label'), { width: 64, textAlign: 'right', color: theme.color.text.tertiary }]}>CREDIT</Text>
                   </View>
-                ))}
+                  {activity.map((item) => (
+                    <View key={item.key} style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.md, paddingVertical: theme.space.md, borderTopWidth: 1, borderTopColor: theme.color.border.hairline }}>
+                      <Text style={[theme.text('bodySmall'), { width: 84, color: theme.color.text.tertiary, fontVariant: ['tabular-nums'] }]}>{whenLabel(item.at)}</Text>
+                      {item.kind === 'mark' ? <>
+                        <Text numberOfLines={1} style={[theme.text('bodySmall'), { flex: 1, color: theme.color.text.primary }]}>{item.entry.title}</Text>
+                        <View style={{ width: 76, alignItems: 'flex-start' }}><Badge tone={MARK_TONE[item.entry.state]} label={MARK_LABEL[item.entry.state]} /></View>
+                        <Text style={[theme.text('button'), { width: 64, textAlign: 'right', color: theme.color.text.primary }]}>+1</Text>
+                      </> : <>
+                        <Text numberOfLines={1} style={[theme.text('bodySmall'), { flex: 1, color: theme.color.text.primary }]}>{`${item.imp.noteCount} ${item.imp.noteCount === 1 ? 'note' : 'notes'} imported`}</Text>
+                        <View style={{ width: 76, alignItems: 'flex-start' }}><PlainBadge text="import" /></View>
+                        <Text style={[theme.text('bodySmall'), { width: 64, textAlign: 'right', color: theme.color.text.tertiary }]}>no credit</Text>
+                      </>}
+                    </View>
+                  ))}
+                </>}
             </Card>
           </View>
         </View>

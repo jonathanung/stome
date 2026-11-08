@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 
+import Svg, { Path, Rect } from 'react-native-svg';
+
 import { createStyles, useStoneTheme } from '../../../design-theme/src/primitives';
 import { Icon } from '../../ui/Icon';
 import type { ChunkFocus } from './citations';
@@ -180,6 +182,13 @@ export function AskSheetPhone(props: AskSheetProps) {
               testID="ask-sheet-input"
               value={text}
             />
+            <Pressable accessibilityLabel="dictate" accessibilityRole="button" style={styles.dictate} testID="ask-sheet-dictate">
+              <Svg fill="none" height={20} stroke={theme.color.text.secondary} strokeLinecap="round" strokeWidth={1.75} viewBox="0 0 24 24" width={20}>
+                <Rect height={11} rx={3} width={6} x={9} y={3} />
+                <Path d="M5 11a7 7 0 0 0 14 0" />
+                <Path d="M12 18v3" />
+              </Svg>
+            </Pressable>
             <Pressable
               accessibilityLabel="Send"
               accessibilityRole="button"
@@ -335,6 +344,7 @@ const useStyles = createStyles((theme) => ({
     fontSize: 16,
     color: theme.color.text.primary,
   },
+  dictate: { width: 44, height: 44, alignItems: 'center' as const, justifyContent: 'center' as const },
   send: {
     width: 44,
     height: 44,

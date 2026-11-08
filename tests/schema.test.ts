@@ -24,7 +24,7 @@ test('a fresh database migrates to the latest version, and running again does no
   await migrateDb(db);
   assert.equal(await version(db), SUPPORTED_VERSION);
   const before = await tables(db);
-  assert.deepEqual(before, ['annotations', 'applied_ops', 'chunk_subjects', 'chunks', 'import_sources', 'notes', 'review_marks', 'rooms']);
+  assert.deepEqual(before, ['annotations', 'applied_ops', 'chunk_subjects', 'chunks', 'import_sources', 'notes', 'review_marks', 'rooms', 'slide_outlines', 'study_attempts', 'study_cards', 'study_decks', 'study_questions', 'study_quizzes']);
 
   await migrateDb(db);
   assert.equal(await version(db), SUPPORTED_VERSION);
@@ -84,6 +84,32 @@ test('upgrading the shipped main v2 schema preserves rooms, content, tags, annot
   assert.equal(await count(db, 'notes'), 1);
   await migrateDb(db);
   assert.equal(await count(db, 'chunks'), 2); // original + one scaffold snapshot, no second migration copy
+});
+
+test('upgrading a v5 database creates the study tables and keeps existing rows', async (t) => {
+  const db = nodeDb();
+  t.after(() => db.close());
+  await db.exec('PRAGMA foreign_keys = ON');
+  for (const migration of MIGRATIONS.slice(0, 5)) await db.exec(migration.sql);
+  await db.exec('PRAGMA user_version = 5');
+  db.raw.prepare("INSERT INTO rooms (id, name, stage, created_at, updated_at) VALUES ('r1', 'bio', 'stonehenge', 1, 2)").run();
+  db.raw.prepare("INSERT INTO chunks (id, room_id, position, content, created_at, updated_at) VALUES ('c1', 'r1', 0, 'cells', 1, 2)").run();
+  await migrateDb(db);
+  assert.equal(await version(db), SUPPORTED_VERSION);
+  const names = await tables(db);
+  for (const table of ['study_decks', 'study_cards', 'study_quizzes', 'study_questions', 'study_attempts', 'slide_outlines']) {
+    assert.ok(names.includes(table), table);
+  }
+  assert.equal((await db.get<{ content: string }>("SELECT content FROM chunks WHERE id = 'c1'"))?.content, 'cells');
+  await assert.rejects(
+    db.run("INSERT INTO study_decks (id, room_id, title, source_chunk_ids, source_revision, created_at, updated_at) VALUES ('d', 'r1', 't', 'not-json', 1, 1, 1)"),
+    /CHECK constraint/,
+  );
+  await assert.rejects(
+    db.run("INSERT INTO study_decks (id, room_id, title, source_chunk_ids, source_revision, created_at, updated_at) VALUES ('d', 'missing', 't', '[]', 1, 1, 1)"),
+    /FOREIGN KEY constraint/,
+  );
+  assert.equal(await count(db, 'study_decks'), 0);
 });
 
 test('a failed migration rolls back and leaves the previous version', async () => {

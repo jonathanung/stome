@@ -11,11 +11,19 @@ export type CompanionSettings = {
   scenario: MockScenario;
   /** What the companion last reported. Null means unknown or unpaired. */
   status: CompanionStatus | null;
+  /** Placeholder limits shown in settings; the harness does not read them yet. */
+  limits: { timeoutSec: string; maxChunks: string; maxAnswerChars: string };
 };
 
 export const DEFAULT_COMPANION_URL = 'http://127.0.0.1:8787';
 
-let settings: CompanionSettings = { url: DEFAULT_COMPANION_URL, token: '', scenario: 'success', status: null };
+let settings: CompanionSettings = {
+  url: DEFAULT_COMPANION_URL,
+  token: '',
+  scenario: 'success',
+  status: null,
+  limits: { timeoutSec: '30', maxChunks: '8', maxAnswerChars: '2000' },
+};
 const listeners = new Set<() => void>();
 
 export function getCompanionSettings(): CompanionSettings {
