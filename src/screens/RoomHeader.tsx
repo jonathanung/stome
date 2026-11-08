@@ -1,4 +1,4 @@
-import { Link } from 'expo-router';
+import { router } from 'expo-router';
 import { Pressable, Text, View, useWindowDimensions } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
@@ -8,7 +8,6 @@ import { Icon } from '../ui/Icon';
 import { StageGlyph, stageName } from '../ui/StageGlyph';
 import { BackButton } from '../ui/kit';
 import type { Room } from '../data/models';
-import { ROOM_BACK_LABEL } from '../navigation/room-back';
 
 type ActionProps = { label: string; accessibilityLabel: string; onPress?: () => void; primary?: boolean; icon?: 'plus' | 'ask' };
 
@@ -44,7 +43,7 @@ export function RoomHeader({ room, chunkCount, onBack, onAsk, onNewNote, onImpor
   const success = theme.color.status.success;
   return <View style={{ gap: theme.space.base }}>
     <View style={{ gap: theme.space.xs }}>
-      <BackButton label={ROOM_BACK_LABEL} accessibilityLabel="All rooms" onPress={onBack} testID="room-back" />
+      <BackButton label="rooms" accessibilityLabel="All rooms" onPress={onBack} />
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.base, flexWrap: 'wrap' }}>
         <StageGlyph stage={room.stage} size={phone ? 44 : 56} onCanvas />
         <Text accessibilityRole="header" style={[theme.text('screenTitle'), { color: theme.color.text.primary }]}>{room.name}</Text>
@@ -60,13 +59,13 @@ export function RoomHeader({ room, chunkCount, onBack, onAsk, onNewNote, onImpor
       </View>
     </View>
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.space.md }}>
-      <Link href={reviewHref(room.id)} asChild>
-        <Pressable accessibilityRole="link" accessibilityLabel="Review notes in this room" testID="open-review"
-          style={({ pressed }) => ({ minHeight: theme.layout.control, paddingHorizontal: theme.space.xxl + 2, borderRadius: theme.radius.lg,
-            justifyContent: 'center', borderWidth: 1, borderColor: theme.color.border.strong, opacity: pressed ? 0.7 : 1 })}>
-          <Text style={[theme.text('buttonCompact'), { color: theme.color.text.primary }]}>review room</Text>
-        </Pressable>
-      </Link>
+      {/* A plain Pressable: under <Link asChild> on web the style function was dropped, so this rendered as bare text. */}
+      <Pressable accessibilityRole="link" accessibilityLabel="Review notes in this room" testID="open-review"
+        onPress={() => router.push(reviewHref(room.id))}
+        style={({ pressed }) => ({ minHeight: theme.layout.control, paddingHorizontal: theme.space.xxl + 2, borderRadius: theme.radius.lg,
+          justifyContent: 'center', borderWidth: 1, borderColor: theme.color.border.strong, opacity: pressed ? 0.7 : 1 })}>
+        <Text style={[theme.text('buttonCompact'), { color: theme.color.text.primary }]}>review room</Text>
+      </Pressable>
       <Action label="ask" accessibilityLabel="Ask about this room" icon="ask" onPress={onAsk} />
       <Action label="import notes" accessibilityLabel="Import notes into this room" onPress={onImport} />
       <Action label="new note" accessibilityLabel="Jump to new note" icon="plus" primary onPress={onNewNote} />

@@ -66,7 +66,7 @@ function clockTime(at: number) {
 
 function StoneMark({ color, accent }: { color: string; accent: string }) {
   return (
-    <Svg width={120} height={64} viewBox="0 0 120 64" accessibilityElementsHidden>
+    <Svg width={120} height={64} viewBox="0 0 120 64" aria-hidden>
       <Rect y={56} width={120} height={8} rx={3} fill="#a9ad8f" />
       <G fill={color}>
         <Rect x={22} y={22} width={14} height={34} rx={2} />

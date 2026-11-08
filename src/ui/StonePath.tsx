@@ -45,7 +45,7 @@ export function StagePicture({ stage, width = 150, label }: { stage: PathStage; 
 export function PathArrow() {
   const theme = useStoneTheme();
   return (
-    <Svg width={40} height={20} viewBox="0 0 40 20" accessibilityElementsHidden>
+    <Svg width={40} height={20} viewBox="0 0 40 20" aria-hidden>
       <Path d="M2 10h32M28 4l6 6-6 6" fill="none" stroke={theme.color.border.strong} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
     </Svg>
   );

@@ -34,8 +34,9 @@ test('ordinary back pops history and a direct open opens the rooms list', () => 
 test('the room header uses one chevron label and the screen does not add another arrow', () => {
   const header = source('../src/screens/RoomHeader.tsx');
   const screen = source('../src/screens/RoomScreen.tsx');
-  assert.match(header, /label=\{ROOM_BACK_LABEL\}/);
+  assert.match(header, /label="rooms"/);
   assert.equal(header.includes('←'), false);
+  assert.equal(header.includes('ROOM_BACK_LABEL'), false);
   assert.equal(screen.includes('←'), false);
   assert.match(screen, /followRoomBack\(roomBackStep\(router\.canGoBack\(\)\), router\)/);
   assert.equal(screen.includes("router.replace('/')"), false);
