@@ -26,6 +26,10 @@ test('a multi-paragraph paste is recognized; typing is not', () => {
   assert.equal(pastedParagraphs('one paragraph', 'one paragraph.'), null); // typed one character
   assert.equal(pastedParagraphs('a\n', 'a\n\n'), null); // typed Enter
   assert.equal(pastedParagraphs('', 'a single pasted line'), null);
+  assert.equal(pastedParagraphs('first', 'first\n\nsecond paragraph')?.length, 2);
+  // A draft that already has a blank line must not commit when a short edit lands in it.
+  assert.equal(pastedParagraphs('Hello\n\nWorld', 'Hello\n\nWorld!!'), null);
+  assert.equal(pastedParagraphs('Hello\n\nWorld', 'Hello!!\n\nWorld'), null);
 });
 
 test('pasting 3 paragraphs creates 3 chunks, in order, in one op', async () => {

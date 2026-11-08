@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button, Screen, useStoneTheme } from '../../design-theme/src/primitives';
 import type { Room } from '../data/models';
 import type { RoomStats } from '../data/roomStats';
+import { roomRowPress } from '../navigation/room-row';
 import { Icon } from '../ui/Icon';
 import { StageGlyph, stageName } from '../ui/StageGlyph';
 import { EmptyState, Field, Notice, RoundAction } from '../ui/kit';
@@ -181,7 +182,11 @@ export function RoomsPhone({ rooms, stats, loading, error, busy, onCreate, onRen
                       closeManage(); setManagingId(item.id);
                       if (e.nativeEvent.actionName === 'rename') { setEditName(item.name); setEditingId(item.id); } else setDeletingId(item.id);
                     }}
-                    onPress={() => { if (swipedId) setSwipedId(null); else router.push(`/rooms/${item.id}`); }}
+                    onPress={() => {
+                      if (roomRowPress(swipedId, item.id) === 'close') { setSwipedId(null); return; }
+                      setSwipedId(null);
+                      router.push(`/rooms/${item.id}`);
+                    }}
                     style={({ pressed }) => ({ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: theme.space.xl, minHeight: 72, paddingHorizontal: theme.space.base, backgroundColor: pressed ? theme.color.bg.alt : theme.color.bg.surface })}>
                     <StageGlyph stage={item.stage} size={52} />
                     <View style={{ flex: 1, minWidth: 0, gap: theme.space.xxs }}>

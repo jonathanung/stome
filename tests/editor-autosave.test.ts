@@ -236,6 +236,46 @@ test('a successful delete drops the draft and does not save text typed while it 
   clearDrafts();
 });
 
+test('a pending delete keeps a failed draft so undo can still show it', async () => {
+  clearDrafts();
+  const clock = fakeTimers();
+  const ctl = new AutosaveController({
+    delayMs: 800,
+    schedule: clock.schedule,
+    onChange: (state) => syncChunkDraft('chunk-pending', state, { baseRevision: 2, writtenRevision: 2 }),
+    save: async () => ({ ok: false, message: 'database is locked' }),
+  });
+  ctl.edit('keep me');
+  await clock.advance(800);
+  assert.equal(ctl.current.status, 'error');
+
+  const result = await deleteAfterFlush(ctl, () => 2, async () => ({ ok: true as const, pending: true }));
+  assert.equal(result.pending, true);
+  assert.equal(ctl.current.text, 'keep me');
+  assert.equal(ctl.current.status, 'error');
+  assert.equal(readDraft('chunk-pending')?.text, 'keep me');
+  assert.equal(readDraft('chunk-pending')?.status, 'error');
+  clearDrafts();
+});
+
+test('a pending delete of an emptied note drops the blank draft', async () => {
+  clearDrafts();
+  const clock = fakeTimers();
+  const ctl = new AutosaveController({
+    delayMs: 800,
+    schedule: clock.schedule,
+    onChange: (state) => syncChunkDraft('chunk-empty', state, { baseRevision: 2, writtenRevision: 2 }),
+    save: async () => ({ ok: false, message: 'database is locked' }),
+  });
+  ctl.edit('   ');
+  await clock.advance(800);
+  const result = await deleteAfterFlush(ctl, () => 2, async () => ({ ok: true as const, pending: true }));
+  assert.equal(result.pending, true);
+  assert.equal(ctl.current.text, null);
+  assert.equal(readDraft('chunk-empty'), null);
+  clearDrafts();
+});
+
 test('a failed save survives unmount and is not retried when the editor returns', async () => {
   clearDrafts();
   const clock = fakeTimers();

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { isSubmitShortcut, matchesQuery, mergeNotes, splitAt } from '../src/features/notes/note-ops.ts';
+import { consumeCommaList, isSubmitShortcut, matchesQuery, mergeNotes, splitAt } from '../src/features/notes/note-ops.ts';
 import { PendingDeletes, type PendingDelete } from '../src/features/notes/pending-delete.ts';
 
 /* ---------------------------------------------------------------- search */
@@ -43,6 +43,13 @@ test('merge refuses results the save boundary would reject', () => {
 });
 
 /* -------------------------------------------------------------- shortcut */
+
+test('a subject field is consumed once when Enter also blurs it', () => {
+  const holder = { current: 'cells, energy' };
+  assert.deepEqual(consumeCommaList(holder), ['cells', 'energy']);
+  assert.equal(holder.current, '');
+  assert.deepEqual(consumeCommaList(holder), []);
+});
 
 test('Ctrl+Enter and Cmd+Enter are the submit shortcut; plain Enter is not', () => {
   assert.equal(isSubmitShortcut({ key: 'Enter', ctrlKey: true }), true);

@@ -6,7 +6,7 @@ import type { Chunk } from '../../data/models';
 import Svg, { Path } from 'react-native-svg';
 
 import { Icon } from '../../ui/Icon';
-import { isSubmitShortcut, splitAt } from '../notes/note-ops';
+import { consumeCommaList, isSubmitShortcut, splitAt } from '../notes/note-ops';
 import { formatNote, type NoteFormat, type NoteSelection } from '../notes/formatting';
 import { NotePreview } from '../notes/NotePreview';
 import { LIMITS } from '../../data/operations';
@@ -16,7 +16,7 @@ import { readDraft, syncChunkDraft } from './draft-store';
 import { useAutosave } from './use-autosave';
 
 /** What a parent returns after trying a change: the chunk's new revision, or why it failed. */
-export type EditResult = { ok: true; revision?: number } | { ok: false; message: string };
+export type EditResult = { ok: true; revision?: number; pending?: boolean } | { ok: false; message: string };
 
 export interface ChunkEditorProps {
   chunk: Chunk;
@@ -74,6 +74,8 @@ export function ChunkEditor({
   const [details, setDetails] = useState(false);
   const input = useRef<ComponentRef<typeof TextInput>>(null);
   const selectionRef = useRef<NoteSelection>({ start: 0, end: 0 });
+  // Set only to place the caret after a format command. Keeping it controlled
+  // on every keystroke jumps the cursor back on web.
   const [selection, setSelection] = useState<NoteSelection | undefined>();
 
   // Draft base is frozen on the first keystroke. Render reads `view`, which
@@ -188,6 +190,7 @@ export function ChunkEditor({
   };
 
   const [subjectDraft, setSubjectDraft] = useState('');
+  const subjectDraftRef = useRef('');
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const confirmingDelete = confirmingId === chunk.id;
   const [deleting, setDeleting] = useState(false);
@@ -206,9 +209,9 @@ export function ChunkEditor({
     });
   };
   const addSubjects = () => {
-    const added = subjectDraft.split(',').map((s) => s.trim()).filter(Boolean);
-    if (!added.length) return;
+    const added = consumeCommaList(subjectDraftRef);
     setSubjectDraft('');
+    if (!added.length) return;
     void run((rev) => onSetSubjects([...chunk.subjects, ...added], rev));
   };
 
@@ -280,7 +283,7 @@ export function ChunkEditor({
         onSelectionChange={(event) => {
           caret.current = event.nativeEvent.selection.start;
           selectionRef.current = event.nativeEvent.selection;
-          setSelection(event.nativeEvent.selection);
+          if (selection) setSelection(undefined);
         }}
         onKeyPress={(event) => {
           if (!isSubmitShortcut(event as unknown as Parameters<typeof isSubmitShortcut>[0])) return;
@@ -328,7 +331,7 @@ export function ChunkEditor({
           autoCapitalize="none"
           returnKeyType="done"
           value={subjectDraft}
-          onChangeText={setSubjectDraft}
+          onChangeText={(text) => { subjectDraftRef.current = text; setSubjectDraft(text); }}
           onSubmitEditing={addSubjects}
           onBlur={addSubjects}
           style={[theme.text('label'), {

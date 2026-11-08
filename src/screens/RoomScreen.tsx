@@ -21,8 +21,9 @@ import { reviewMarkController } from '../features/review/mark-attempt';
 import { AnchoredChunkText, PinnedAnswer } from '../features/ask/AnchoredChunkText';
 import type { ChunkFocus } from '../features/ask/citations';
 import { ChunkEditor, type EditResult } from '../features/chunks/ChunkEditor';
-import { readDraft } from '../features/chunks/draft-store';
+import { forgetDraft, readDraft } from '../features/chunks/draft-store';
 import { pastedParagraphs } from '../features/chunks/paste';
+import { commitDeferredDelete, restoreDeferredBody } from '../features/notes/deferred-delete';
 import { isSubmitShortcut, matchesQuery, mergeNotes } from '../features/notes/note-ops';
 import { PendingDeletes, type PendingDelete } from '../features/notes/pending-delete';
 import { InkLassoActions } from '../features/ask/InkLassoActions';
@@ -265,12 +266,14 @@ export function RoomScreen() {
   useEffect(() => {
     chunksRef.current = chunks;
     deletes.setCommit(async (entry) => {
-      const latest = chunksRef.current.find((chunk) => chunk.id === entry.chunkId);
-      if (!latest) return { ok: true };
-      const result = await commit({ opId: randomUUID(), kind: 'chunk.delete', source: 'human', confirmed: false,
-        expectedRevision: latest.revision, payload: { chunkId: latest.id } });
+      const result = await commitDeferredDelete(entry.chunkId, (id) => getChunk(db, id), async (revision) => {
+        const committed = await commit({ opId: randomUUID(), kind: 'chunk.delete', source: 'human', confirmed: false,
+          expectedRevision: revision, payload: { chunkId: entry.chunkId } });
+        return committed.ok ? { ok: true } : { ok: false, message: readable(committed.error) };
+      });
+      if (result.ok) forgetDraft(entry.chunkId);
       await refresh().catch(() => undefined);
-      return result.ok ? { ok: true } : { ok: false, message: readable(result.error) };
+      return result;
     });
   });
 
@@ -355,19 +358,21 @@ export function RoomScreen() {
   }
 
   async function removeLater(entry: PendingDelete): Promise<EditResult> {
-    if (deletes.isHidden(entry.chunkId)) return { ok: true };
+    if (deletes.isHidden(entry.chunkId)) return { ok: true, pending: true };
     await deletes.remove(entry);
-    return { ok: true };
+    return { ok: true, pending: true };
   }
 
   async function undoDelete() {
     const entry = deletes.undo();
     if (!entry?.restoreBody) return;
-    const latest = chunksRef.current.find((chunk) => chunk.id === entry.chunkId);
-    if (!latest) return;
-    const result = await commit({ opId: randomUUID(), kind: 'chunk.update', ...human, expectedRevision: latest.revision,
-      payload: { chunkId: latest.id, body: entry.restoreBody } });
-    if (!result.ok) setError(readable(result.error));
+    const body = entry.restoreBody;
+    const result = await restoreDeferredBody(entry.chunkId, (id) => getChunk(db, id), async (revision) => {
+      const committed = await commit({ opId: randomUUID(), kind: 'chunk.update', ...human, expectedRevision: revision,
+        payload: { chunkId: entry.chunkId, body } });
+      return committed.ok ? { ok: true } : { ok: false, message: readable(committed.error) };
+    });
+    if (!result.ok) setError(result.message);
     await refresh().catch(() => undefined);
   }
 
@@ -384,8 +389,9 @@ export function RoomScreen() {
 
   const roomList = <Screen><SafeAreaView style={{ flex: 1 }}>
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-      <FlatList ref={listRef} data={shown} extraData={[focus, belowId, belowText, pendingDelete]} keyExtractor={(chunk) => chunk.id} keyboardShouldPersistTaps="handled" testID="chunk-list"
-        initialNumToRender={1} maxToRenderPerBatch={1} windowSize={1}
+        <FlatList ref={listRef} data={shown} extraData={[focus, belowId, belowText, pendingDelete]} keyExtractor={(chunk) => chunk.id} keyboardShouldPersistTaps="handled" testID="chunk-list"
+        style={{ flex: 1 }}
+        initialNumToRender={12} maxToRenderPerBatch={12} windowSize={21}
         onScroll={(event) => { scrollY.current = event.nativeEvent.contentOffset.y; }}
         scrollEventThrottle={16}
         onScrollToIndexFailed={({ index, highestMeasuredFrameIndex }) => {

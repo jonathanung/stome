@@ -236,10 +236,14 @@ export function settleOnUnmount(controller: AutosaveController): Promise<void> {
 
 /**
  * Flush pending text, then delete at the revision that flush produced.
- * The draft is discarded only when the delete succeeds. While the delete
- * runs, unmount will not start another save against the old revision.
+ * The draft is discarded only when the delete has really finished. A
+ * `pending` result only hides the note for undo: a non-empty draft stays so
+ * Undo, or a delete that fails when the window closes, can still show it.
+ * An emptied note has no text of its own; that draft is dropped so Undo can
+ * put the previous text back from the database. While the delete runs,
+ * unmount will not start another save against the old revision.
  */
-export async function deleteAfterFlush<T extends { ok: boolean }>(
+export async function deleteAfterFlush<T extends { ok: boolean; pending?: boolean }>(
   controller: AutosaveController,
   expectedRevision: () => number,
   onDelete: (revision: number) => Promise<T>,
@@ -248,7 +252,8 @@ export async function deleteAfterFlush<T extends { ok: boolean }>(
   controller.holdSaves();
   try {
     const result = await onDelete(expectedRevision());
-    if (result.ok) controller.discard();
+    const emptied = !(controller.current.text ?? '').trim();
+    if (result.ok && (!result.pending || emptied)) controller.discard();
     return result;
   } finally {
     controller.releaseSaves();

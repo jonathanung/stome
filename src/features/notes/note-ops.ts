@@ -42,6 +42,17 @@ export function mergeNotes(first: SearchableNote, second: SearchableNote): { bod
   return { body, subjects };
 }
 
+/**
+ * Subjects typed into one field. Clears the holder immediately so a second
+ * call in the same turn (Enter blurs the field, and both events add) cannot
+ * submit the same text again.
+ */
+export function consumeCommaList(holder: { current: string }): string[] {
+  const raw = holder.current;
+  holder.current = '';
+  return raw.split(',').map((part) => part.trim()).filter((part) => part.length > 0);
+}
+
 /** Ctrl+Enter or Cmd+Enter. On devices without modifier keys this never matches. */
 export function isSubmitShortcut(event: { key?: string; ctrlKey?: boolean; metaKey?: boolean; nativeEvent?: { key?: string; ctrlKey?: boolean; metaKey?: boolean } }): boolean {
   const key = event.key ?? event.nativeEvent?.key;

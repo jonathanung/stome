@@ -6,6 +6,7 @@ import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useStoneTheme } from '../../../design-theme/src/primitives';
 import { requestCaptureOpen } from '../../features/capture/openSignal';
 import { CAPTURE_SHORTCUT_LABEL } from '../../features/capture/shortcut';
+import { subscribeLocalChanges } from '../../data/local-change';
 import type { Room } from '../../data/models';
 import { listDueChunks, listRooms } from '../../data/queries';
 import { expoDriver } from '../../db/expo-driver';
@@ -31,10 +32,14 @@ function useShellData(pathname: string) {
   const [due, setDue] = useState(0);
   useEffect(() => {
     let live = true;
-    Promise.all([listRooms(db), listDueChunks(db, Date.now())]).then(([r, d]) => {
-      if (live) { setRooms(r); setDue(d.length); }
-    }).catch(() => undefined);
-    return () => { live = false; };
+    const load = () => {
+      Promise.all([listRooms(db), listDueChunks(db, Date.now())]).then(([r, d]) => {
+        if (live) { setRooms(r); setDue(d.length); }
+      }).catch(() => undefined);
+    };
+    load();
+    const unsubscribe = subscribeLocalChanges(() => { if (live) load(); });
+    return () => { live = false; unsubscribe(); };
   }, [db, pathname]);
   return { rooms, due };
 }

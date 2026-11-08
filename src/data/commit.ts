@@ -10,6 +10,7 @@
  */
 
 import type { Db, SqlValue } from '../db/driver.ts';
+import { notifyLocalChanges } from './local-change.ts';
 import { ANNOTATION_TYPES, REVIEW_STATES, STUDY_QUESTION_KINDS, type ReviewState } from '../db/schema.ts';
 import {
   LIMITS,
@@ -884,7 +885,7 @@ export function createCommit(db: Db, deps: CommitDeps): Commit {
     }
 
     try {
-      return await db.transaction(async () => {
+      const result = await db.transaction(async () => {
         const prior = await db.get<{ kind: string; result: string }>('SELECT kind, result FROM applied_ops WHERE op_id = ?', [op.opId]);
         if (prior) {
           if (prior.kind !== op.kind) reject('conflict', `op ${op.opId} was already used for ${prior.kind}`);
@@ -900,6 +901,8 @@ export function createCommit(db: Db, deps: CommitDeps): Commit {
         ]);
         return { ok: true as const, duplicate: false, value };
       });
+      notifyLocalChanges();
+      return result;
     } catch (error) {
       return failure(error);
     }
