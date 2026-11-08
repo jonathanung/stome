@@ -293,16 +293,19 @@ function normalize(op: Operation): Normalized {
     }
     case 'annotation.delete':
       return { kind: op.kind, payload: { annotationId: requireId(p.annotationId, 'annotationId') } };
-    case 'review.mark':
+    case 'review.mark': {
       if (!(REVIEW_STATES as readonly string[]).includes(String(p.state))) reject('invalid', 'review state must be missed, unclear, or got_it');
+      const annotationId = p.annotationId === undefined ? undefined : requireId(p.annotationId, 'annotationId');
       return {
         kind: op.kind,
         payload: {
           chunkId: requireId(p.chunkId, 'chunkId'),
+          ...(annotationId === undefined ? {} : { annotationId }),
           state: p.state as ReviewState,
           timeZone: timeZone(p.timeZone),
         },
       };
+    }
     case 'study.deck.create':
       return {
         kind: op.kind,
@@ -460,6 +463,88 @@ function checkAnchor(type: string, anchor: Record<string, unknown>, body: string
 
 interface RevisionRow {
   revision: number;
+}
+
+/**
+ * One brick credit per reviewed day in the room, from chunk marks and pinned
+ * answer marks alike (#127). A same-day re-mark replaces its row, so it adds
+ * no second credit. Answer marks credit the room of their anchor chunk.
+ */
+async function creditRoom(
+  db: Db,
+  run: (sql: string, params: SqlValue[]) => Promise<{ changes: number }>,
+  roomId: string,
+  now: number,
+): Promise<'stonehenge' | 'brick'> {
+  const credits = await db.get<{ n: number }>(
+    `SELECT (
+       SELECT COUNT(*) FROM review_marks
+        JOIN chunks ON chunks.id = review_marks.chunk_id
+        WHERE chunks.room_id = ?
+     ) + (
+       SELECT COUNT(*) FROM answer_marks
+        JOIN annotations ON annotations.id = answer_marks.annotation_id
+        JOIN chunks ON chunks.id = annotations.chunk_id
+        WHERE chunks.room_id = ?
+     ) AS n`,
+    [roomId, roomId],
+  );
+  const room = await db.get<{ stage: string }>('SELECT stage FROM rooms WHERE id = ?', [roomId]);
+  if (!room) reject('not_found', 'room does not exist');
+  if (room!.stage !== 'stonehenge' && room!.stage !== 'brick') reject('not_found', 'room does not exist');
+  let stage: 'stonehenge' | 'brick' = room!.stage === 'brick' ? 'brick' : 'stonehenge';
+  if ((credits?.n ?? 0) >= BRICK_CREDIT_COUNT && stage === 'stonehenge') {
+    await run(`UPDATE rooms SET stage = 'brick', updated_at = ? WHERE id = ? AND stage = 'stonehenge'`, [now, roomId]);
+    stage = 'brick';
+  }
+  return stage;
+}
+
+/**
+ * Grounding gate for marking a pinned answer (#127). The annotation must be
+ * an `ai_answer` on the marked chunk, its anchor must still sit inside the
+ * current body, and the saved passage (when the pin stored one) must still
+ * match that spot. Anything else rejects and the caller writes nothing.
+ */
+async function markPinnedAnswer(
+  db: Db,
+  input: { annotationId: string; chunkId: string; body: string; revision: number },
+): Promise<void> {
+  const found = await db.get<{ chunk_id: string; type: string; anchor: string; payload: string }>(
+    'SELECT chunk_id, type, anchor, payload FROM annotations WHERE id = ?',
+    [input.annotationId],
+  );
+  if (!found) reject('not_found', 'that pinned answer does not exist');
+  if (found!.type !== 'ai_answer') reject('invalid', 'only pinned AI answers can be marked for review');
+  if (found!.chunk_id !== input.chunkId) reject('invalid', 'that answer does not belong to this note');
+  let anchor: unknown;
+  try {
+    anchor = JSON.parse(found!.anchor);
+  } catch {
+    reject('invalid', 'ai_answer anchor must be a range inside the chunk');
+  }
+  const range = anchor as { start?: unknown; end?: unknown };
+  if (
+    !range ||
+    typeof range !== 'object' ||
+    !isInt(range.start) ||
+    !isInt(range.end) ||
+    range.start < 0 ||
+    range.end <= range.start ||
+    range.end > input.body.length
+  ) {
+    reject('invalid', `ai_answer anchor must be a range inside the chunk (0–${input.body.length})`);
+  }
+  let quote: string | null = null;
+  try {
+    const payload = JSON.parse(found!.payload) as { quote?: unknown };
+    quote = typeof payload.quote === 'string' && payload.quote.length > 0 ? payload.quote : null;
+  } catch {
+    quote = null;
+  }
+  if (quote !== null && input.body.slice(range.start as number, range.end as number) !== quote) {
+    reject('stale_revision', 'the saved passage no longer matches this spot in the note. Ask again before marking.');
+  }
 }
 
 async function expectRevision(found: RevisionRow | null, expected: number | undefined, what: string): Promise<void> {
@@ -633,10 +718,29 @@ async function apply(db: Db, op: Operation, n: Normalized, deps: CommitDeps): Pr
     }
     case 'review.mark': {
       const { chunkId, state, timeZone: zone } = n.payload;
-      const chunk = await db.get<RevisionRow & { room_id: string }>('SELECT revision, room_id FROM chunks WHERE id = ?', [chunkId]);
+      const annotationId = 'annotationId' in n.payload ? n.payload.annotationId : undefined;
+      const chunk = await db.get<RevisionRow & { room_id: string; body: string }>(
+        'SELECT revision, room_id, content AS body FROM chunks WHERE id = ?',
+        [chunkId],
+      );
       await expectRevision(chunk, op.expectedRevision, 'chunk');
       const day = localDay(now, zone);
       const dueAt = now + REVIEW_DUE_MS[state];
+      if (annotationId !== undefined) {
+        await markPinnedAnswer(db, { annotationId, chunkId, body: chunk!.body, revision: chunk!.revision });
+        await run(
+          `INSERT INTO answer_marks (annotation_id, local_day, state, marked_at, due_at, time_zone)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT (annotation_id, local_day) DO UPDATE SET
+             state = excluded.state,
+             marked_at = excluded.marked_at,
+             due_at = excluded.due_at,
+             time_zone = excluded.time_zone`,
+          [annotationId, day, state, now, dueAt, zone],
+        );
+        const stage = await creditRoom(db, run, chunk!.room_id, now);
+        return { chunkId, annotationId, state, localDay: day, markedAt: now, dueAt, timeZone: zone, stage };
+      }
       await run(
         `INSERT INTO review_marks (chunk_id, local_day, state, marked_at, due_at, time_zone)
          VALUES (?, ?, ?, ?, ?, ?)
@@ -647,21 +751,8 @@ async function apply(db: Db, op: Operation, n: Normalized, deps: CommitDeps): Pr
            time_zone = excluded.time_zone`,
         [chunkId, day, state, now, dueAt, zone],
       );
-      const credits = await db.get<{ n: number }>(
-        `SELECT COUNT(*) AS n FROM review_marks
-         JOIN chunks ON chunks.id = review_marks.chunk_id
-         WHERE chunks.room_id = ?`,
-        [chunk!.room_id],
-      );
-      const room = await db.get<{ stage: string }>('SELECT stage FROM rooms WHERE id = ?', [chunk!.room_id]);
-      if (!room) reject('not_found', 'room does not exist');
-      if (room!.stage !== 'stonehenge' && room!.stage !== 'brick') reject('not_found', 'room does not exist');
-      let stage: 'stonehenge' | 'brick' = room!.stage === 'brick' ? 'brick' : 'stonehenge';
-      if ((credits?.n ?? 0) >= BRICK_CREDIT_COUNT && stage === 'stonehenge') {
-        await run(`UPDATE rooms SET stage = 'brick', updated_at = ? WHERE id = ? AND stage = 'stonehenge'`, [now, chunk!.room_id]);
-        stage = 'brick';
-      }
-      return { chunkId, state, localDay: day, markedAt: now, dueAt, timeZone: zone, stage };
+      const stage = await creditRoom(db, run, chunk!.room_id, now);
+      return { chunkId, annotationId: null, state, localDay: day, markedAt: now, dueAt, timeZone: zone, stage };
     }
     case 'study.deck.create': {
       const { roomId, title, sourceChunkIds, sourceRevision } = n.payload;

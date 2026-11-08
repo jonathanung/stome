@@ -123,8 +123,14 @@ operation → existing validate-and-commit boundary → SQLite. The parser takes
 `{path, text}` and returns ordered `bodies`, inferred `subjects`, and warnings.
 Other parsers can implement this same interface later; binary formats are
 currently rejected by extension instead of guessed. The expanded binary/asset
-contract above is planned, not present in this Markdown interface. No imported text is executed or
-sent to an AI provider. #31 remains a separate, unimplemented prototype.
+contract above is planned, not present in this Markdown interface. No imported
+text is executed. The parser never sends text to an AI provider. Only when a
+paired person presses **Suggest rooms** on the room-mapping step does the app
+send each note's title and an excerpt of at most 500 characters to the
+companion (`import.suggestRooms`). In live mode the companion forwards that to
+Anthropic. Suggestions change nothing until the person applies them, and the
+import confirm stays the only writer. The full LLM-orchestrated import (#31) is
+still a separate, unimplemented prototype.
 
 ATX headings outside fenced code start chunks. Long sections split at the
 Foundation body limit, without splitting UTF-16 surrogate pairs. Empty chunks

@@ -31,7 +31,7 @@ export type BoardItem = ShapeNode | StickyNode | LabelNode | StrokeNode;
 export type ProposalItem = {
   id: string;
   title: string;
-  kind: 'shape' | 'strokes' | 'image';
+  kind: 'shape' | 'strokes' | 'image' | 'sticky';
   /** Items applied on accept. Images stay proposals until image storage exists (HAR.5). */
   items: BoardItem[];
   checked: boolean;
@@ -93,31 +93,3 @@ export const SAMPLE_BOARD: BoardItem[] = [
   { kind: 'label', id: 'l1', x: 360, y: 440, text: 'krebs cycle', size: 'title' },
   { kind: 'sticky', id: 'k1', x: 860, y: 250, w: 170, text: 'where does the cycle start over?', tilt: 2 },
 ];
-
-export const SAMPLE_PROPOSAL: Proposal = {
-  prompt: 'finish my cycle',
-  summary: 'you asked "finish my cycle". it suggests the missing step and a picture.',
-  items: [
-    {
-      id: 'p-node',
-      title: 'oxaloacetate node',
-      kind: 'shape',
-      checked: true,
-      items: [
-        { kind: 'shape', id: 'n5', x: 160, y: 430, w: 150, h: 100, radius: 48, title: 'oxaloacetate', caption: 'proposed', proposed: true },
-      ],
-    },
-    {
-      id: 'p-strokes',
-      title: '2 arrows + label',
-      kind: 'strokes',
-      checked: true,
-      items: [
-        { kind: 'stroke', id: 's4', arrow: true, proposed: true, points: [[380, 664], [300, 650], [250, 600], [236, 540]] },
-        { kind: 'stroke', id: 's5', arrow: true, proposed: true, points: [[210, 420], [210, 380], [220, 350], [236, 334]] },
-        { kind: 'label', id: 'l2', x: 214, y: 606, text: 'closes the cycle', size: 'caption' },
-      ],
-    },
-    { id: 'p-image', title: 'mitochondrion image', kind: 'image', checked: false, items: [] },
-  ],
-};
