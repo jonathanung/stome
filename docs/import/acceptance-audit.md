@@ -23,8 +23,9 @@ not a reason to design a second model or a second pipeline.
 
 The stages and ownership are:
 
-1. The file picker selects up to 20 files and reads at most 1 MiB per accepted
-   `.md` file. Cancellation returns no new batch. A bad file produces a named
+1. The file picker adds files to one batch of up to 200 notes (`MAX_IMPORT_BATCH`),
+   across repeated picks. It reads at most 1 MiB per accepted `.md` file.
+   Cancellation leaves the batch unchanged. A bad file produces a named
    error and does not stop the other files.
 2. The pure format parser accepts `{ path: string, text: string }`. It returns
    `{ path, title, bodies: string[], subjects: string[], warnings: string[] }`.

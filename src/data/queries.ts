@@ -2,9 +2,12 @@
 
 import type { Db } from '../db/driver.ts';
 import type { ReviewState } from '../db/schema.ts';
+import { isStudyStale } from '../features/study/scheduling.ts';
 import type {
   Annotation,
+  AnswerMark,
   Chunk,
+  DueAnswer,
   DueChunk,
   RecentChunk,
   ReviewMark,
@@ -122,6 +125,11 @@ export async function listAnnotations(db: Db, chunkId: string): Promise<Annotati
   return rows.map(toAnnotation);
 }
 
+export async function getAnnotation(db: Db, annotationId: string): Promise<Annotation | null> {
+  const row = await db.get<AnnotationRow>('SELECT * FROM annotations WHERE id = ?', [annotationId]);
+  return row ? toAnnotation(row) : null;
+}
+
 interface ReviewRow {
   chunk_id: string;
   state: ReviewState;
@@ -186,6 +194,142 @@ export async function listRoomAnnotations(db: Db, roomId: string): Promise<Annot
     [roomId],
   );
   return rows.map(toAnnotation);
+}
+
+interface AnswerMarkRow {
+  annotation_id: string;
+  chunk_id: string;
+  state: ReviewState;
+  local_day: string;
+  marked_at: number;
+  due_at: number;
+  time_zone: string;
+}
+
+const toAnswerMark = (row: AnswerMarkRow): AnswerMark => ({
+  annotationId: row.annotation_id,
+  chunkId: row.chunk_id,
+  state: row.state,
+  localDay: row.local_day,
+  markedAt: row.marked_at,
+  dueAt: row.due_at,
+  timeZone: row.time_zone,
+});
+
+/** The answer mark that currently sets this pin's due time, if it has been marked. */
+export async function latestAnswerMark(db: Db, annotationId: string): Promise<AnswerMark | null> {
+  const row = await db.get<AnswerMarkRow>(
+    `SELECT m.annotation_id, a.chunk_id AS chunk_id, m.state, m.local_day, m.marked_at, m.due_at, m.time_zone
+       FROM answer_marks m
+       JOIN annotations a ON a.id = m.annotation_id
+      WHERE m.annotation_id = ?
+      ORDER BY m.marked_at DESC, m.local_day DESC
+      LIMIT 1`,
+    [annotationId],
+  );
+  return row ? toAnswerMark(row) : null;
+}
+
+type DueAnswerRow = ChunkRow & {
+  annotation_id: string;
+  annotation_chunk_id: string;
+  annotation_type: Annotation['type'];
+  annotation_anchor: string;
+  annotation_payload: string;
+  annotation_created: number;
+  annotation_updated: number;
+  mark_state: ReviewState | null;
+  mark_day: string | null;
+  mark_marked: number | null;
+  mark_due: number | null;
+  mark_zone: string | null;
+};
+
+const ANSWER_COLUMNS = `
+  a.id AS annotation_id, a.chunk_id AS annotation_chunk_id, a.type AS annotation_type,
+  a.anchor AS annotation_anchor, a.payload AS annotation_payload,
+  a.created_at AS annotation_created, a.updated_at AS annotation_updated`;
+
+function toDueAnswer(row: DueAnswerRow): DueAnswer {
+  const mark =
+    row.mark_state === null || row.mark_day === null || row.mark_marked === null || row.mark_due === null || row.mark_zone === null
+      ? null
+      : {
+          annotationId: row.annotation_id,
+          chunkId: row.annotation_chunk_id,
+          state: row.mark_state,
+          localDay: row.mark_day,
+          markedAt: row.mark_marked,
+          dueAt: row.mark_due,
+          timeZone: row.mark_zone,
+        };
+  return {
+    chunk: toChunk(row),
+    annotation: {
+      id: row.annotation_id,
+      chunkId: row.annotation_chunk_id,
+      type: row.annotation_type,
+      anchor: JSON.parse(row.annotation_anchor),
+      payload: JSON.parse(row.annotation_payload),
+      createdAt: row.annotation_created,
+      updatedAt: row.annotation_updated,
+    },
+    mark,
+  };
+}
+
+/**
+ * Pinned `ai_answer` annotations that are due at `now` (#127). An answer with
+ * no mark is due as soon as it is pinned; a marked answer is due when its
+ * latest answer mark is due. Staleness is not filtered here — marking rejects
+ * a stale anchor or passage with a message and writes nothing.
+ */
+export async function listDueAnswers(db: Db, now: number): Promise<DueAnswer[]> {
+  return dueAnswers(db, now);
+}
+
+/** Due pinned answers in one room, for the review session. */
+export async function listRoomDueAnswers(db: Db, roomId: string, now: number): Promise<DueAnswer[]> {
+  return dueAnswers(db, now, roomId);
+}
+
+async function dueAnswers(db: Db, now: number, roomId?: string): Promise<DueAnswer[]> {
+  const roomFilter = roomId === undefined ? '' : 'AND c.room_id = ?';
+  const roomParams = roomId === undefined ? [] : [roomId];
+  const marked = await db.all<DueAnswerRow>(
+    `SELECT ${CHUNK_COLUMNS}, ${ANSWER_COLUMNS},
+            m.state AS mark_state, m.local_day AS mark_day, m.marked_at AS mark_marked,
+            m.due_at AS mark_due, m.time_zone AS mark_zone
+       FROM answer_marks m
+       JOIN annotations a ON a.id = m.annotation_id
+       JOIN chunks c ON c.id = a.chunk_id
+      WHERE a.type = 'ai_answer'
+        AND m.due_at <= ?
+        AND NOT EXISTS (
+          SELECT 1 FROM answer_marks newer
+           WHERE newer.annotation_id = m.annotation_id
+             AND (newer.marked_at > m.marked_at
+                  OR (newer.marked_at = m.marked_at AND newer.local_day > m.local_day))
+        )
+        ${roomFilter}
+      ORDER BY m.due_at, a.id`,
+    [now, ...roomParams],
+  );
+  const fresh = await db.all<DueAnswerRow>(
+    `SELECT ${CHUNK_COLUMNS}, ${ANSWER_COLUMNS},
+            NULL AS mark_state, NULL AS mark_day, NULL AS mark_marked,
+            NULL AS mark_due, NULL AS mark_zone
+       FROM annotations a
+       JOIN chunks c ON c.id = a.chunk_id
+      WHERE a.type = 'ai_answer'
+        AND NOT EXISTS (
+          SELECT 1 FROM answer_marks m WHERE m.annotation_id = a.id
+        )
+        ${roomFilter}
+      ORDER BY a.created_at, a.id`,
+    [...roomParams],
+  );
+  return [...fresh.map(toDueAnswer), ...marked.map(toDueAnswer)];
 }
 
 /* ------------------------------------------------ study materials (#130) */
@@ -390,4 +534,166 @@ export async function listSlideOutlines(db: Db, roomId: string): Promise<SlideOu
 export async function getSlideOutline(db: Db, outlineId: string): Promise<SlideOutline | null> {
   const row = await db.get<SlideOutlineRow>('SELECT * FROM slide_outlines WHERE id = ?', [outlineId]);
   return row ? toSlideOutline(row) : null;
+}
+
+/* ------------------------------------------------ study scheduling (#136) */
+
+export interface DueStudyCard {
+  card: StudyCard;
+  /**
+   * The source mark that makes this card due, or null when the card is due
+   * because a source was never rated. Stale cards never appear here.
+   */
+  mark: ReviewMark | null;
+}
+
+export interface DueStudyQuestion {
+  question: StudyQuestion;
+  /**
+   * The source mark that makes this question due, or null when the question
+   * is due because a source was never rated. Stale questions never appear here.
+   */
+  mark: ReviewMark | null;
+}
+
+export interface StaleStudyAttempt {
+  attempt: StudyAttempt;
+  /** True when the quiz's sources have drifted since generation. */
+  stale: boolean;
+}
+
+/** One saved quiz run by id. */
+export async function getStudyAttempt(db: Db, attemptId: string): Promise<StudyAttempt | null> {
+  const row = await db.get<StudyAttemptRow>('SELECT * FROM study_attempts WHERE id = ?', [attemptId]);
+  return row ? toStudyAttempt(row) : null;
+}
+
+/**
+ * Read-time staleness for one generated row: true when any grounding chunk
+ * is gone (deleted) or its revision no longer equals the snapshot taken at
+ * generation. The row itself is untouched, so the original quote is
+ * preserved; callers exclude stale rows from due lists and flag (never
+ * delete or recompute) history built on them.
+ */
+export async function isStudySourcesStale(
+  db: Db,
+  sourceChunkIds: string[],
+  sourceRevision: number,
+): Promise<boolean> {
+  if (sourceChunkIds.length === 0) return true;
+  const placeholders = sourceChunkIds.map(() => '?').join(', ');
+  const rows = await db.all<{ id: string; revision: number }>(
+    `SELECT id, revision FROM chunks WHERE id IN (${placeholders})`,
+    sourceChunkIds,
+  );
+  const revisionByChunk = new Map(rows.map((row) => [row.id, row.revision]));
+  for (const id of sourceChunkIds) {
+    if (revisionByChunk.get(id) !== sourceRevision) return true;
+  }
+  return false;
+}
+
+async function latestMarksByChunk(db: Db, chunkIds: string[]): Promise<Map<string, ReviewMark>> {
+  const byChunk = new Map<string, ReviewMark>();
+  if (chunkIds.length === 0) return byChunk;
+  const placeholders = chunkIds.map(() => '?').join(', ');
+  const rows = await db.all<ReviewRow>(
+    `SELECT chunk_id, state, local_day, marked_at, due_at, time_zone
+       FROM review_marks m
+      WHERE m.chunk_id IN (${placeholders})
+        AND NOT EXISTS (
+          SELECT 1 FROM review_marks newer
+           WHERE newer.chunk_id = m.chunk_id
+             AND (newer.marked_at > m.marked_at
+                  OR (newer.marked_at = m.marked_at AND newer.local_day > m.local_day))
+        )`,
+    chunkIds,
+  );
+  for (const row of rows) {
+    byChunk.set(row.chunk_id, toReview(row));
+  }
+  return byChunk;
+}
+
+interface DueStudyItem {
+  sourceChunkIds: string[];
+  sourceRevision: number;
+  position: number;
+  id: string;
+}
+
+/**
+ * Shared due rule for cards and questions. A rating is saved as a
+ * `review.mark` on the rated item's source chunk(s) with the REV.1 interval,
+ * so an item is due when it is fresh and any source is unrated or its latest
+ * mark is due. Stale items are excluded (never verified); sources whose
+ * latest mark is still in the future do not trigger due, and superseded
+ * (older) marks are ignored via the latest-mark anti-join.
+ */
+async function dueStudyItems<T extends DueStudyItem>(
+  db: Db,
+  items: T[],
+  now: number,
+): Promise<{ item: T; mark: ReviewMark | null }[]> {
+  const chunkIds = [...new Set(items.flatMap((item) => item.sourceChunkIds))];
+  const placeholders = chunkIds.map(() => '?').join(', ');
+  const revisions = new Map<string, number>();
+  if (chunkIds.length > 0) {
+    const rows = await db.all<{ id: string; revision: number }>(
+      `SELECT id, revision FROM chunks WHERE id IN (${placeholders})`,
+      chunkIds,
+    );
+    for (const row of rows) revisions.set(row.id, row.revision);
+  }
+  const marks = await latestMarksByChunk(db, chunkIds);
+  const fresh: { item: T; mark: ReviewMark | null }[] = [];
+  const scheduled: { item: T; mark: ReviewMark; dueAt: number }[] = [];
+  for (const item of items) {
+    if (isStudyStale(item.sourceRevision, item.sourceChunkIds, revisions)) continue;
+    const dueMarks = item.sourceChunkIds.flatMap((id) => {
+      const mark = marks.get(id);
+      return mark && mark.dueAt <= now ? [mark] : [];
+    });
+    const hasUnratedSource = item.sourceChunkIds.some((id) => !marks.has(id));
+    if (dueMarks.length === 0 && !hasUnratedSource) continue;
+    dueMarks.sort((a, b) => a.dueAt - b.dueAt);
+    const mark = dueMarks[0] ?? null;
+    if (mark === null) fresh.push({ item, mark });
+    else scheduled.push({ item, mark, dueAt: mark.dueAt });
+  }
+  scheduled.sort((a, b) => a.dueAt - b.dueAt || a.item.position - b.item.position || (a.item.id < b.item.id ? -1 : 1));
+  return [...fresh, ...scheduled.map(({ item, mark }) => ({ item, mark }))];
+}
+
+/**
+ * Cards of one deck that are due at `now`: unrated-or-due sources, fresh
+ * first, then earliest due. Stale cards and cards whose sources are all
+ * still in the future are excluded.
+ */
+export async function listDueStudyCards(db: Db, deckId: string, now: number): Promise<DueStudyCard[]> {
+  const cards = await listStudyCards(db, deckId);
+  return (await dueStudyItems(db, cards, now)).map(({ item, mark }) => ({ card: item, mark }));
+}
+
+/**
+ * Questions of one quiz that are due at `now`: unrated-or-due sources,
+ * fresh first, then earliest due. Stale questions and questions whose
+ * sources are all still in the future are excluded.
+ */
+export async function listDueStudyQuestions(db: Db, quizId: string, now: number): Promise<DueStudyQuestion[]> {
+  const questions = await listStudyQuestions(db, quizId);
+  return (await dueStudyItems(db, questions, now)).map(({ item, mark }) => ({ question: item, mark }));
+}
+
+/**
+ * Attempts for one quiz, oldest first, each flagged when the quiz's sources
+ * have drifted since generation. Flagged rows keep their saved scores; the
+ * flag tells the UI the run was on since-edited material. A missing quiz
+ * cannot prove provenance, so its attempts read stale.
+ */
+export async function listStudyAttemptsWithStaleness(db: Db, quizId: string): Promise<StaleStudyAttempt[]> {
+  const [quiz, attempts] = await Promise.all([getStudyQuiz(db, quizId), listStudyAttempts(db, quizId)]);
+  if (!quiz) return attempts.map((attempt) => ({ attempt, stale: true }));
+  const stale = await isStudySourcesStale(db, quiz.sourceChunkIds, quiz.sourceRevision);
+  return attempts.map((attempt) => ({ attempt, stale }));
 }
