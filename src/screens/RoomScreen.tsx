@@ -529,7 +529,7 @@ export function RoomScreen() {
 
   // iPad: the room beside an ask column, with a floating pencil tool bar.
   // The ask backend is not wired to this panel yet; questions stay local.
-  if (wide) return <View style={{ flex: 1, flexDirection: 'row' }} testID="room-wide-view">
+  if (wide) return <View style={{ flex: 1, flexDirection: 'row', backgroundColor: theme.color.bg.canvas }} testID="room-wide-view">
     <View style={{ flex: 1, minWidth: 0 }}>{roomList}</View>
     <View style={{ paddingTop: theme.space.page, paddingRight: theme.space.page }}>
       <RoomSidePanel roomId={room.id} subjects={subjects} chunks={chunks} dueToday={dueToday}
@@ -537,7 +537,7 @@ export function RoomScreen() {
     </View>
   </View>;
   if (!splitView) return roomList;
-  return <View style={{ flex: 1, flexDirection: 'row' }} testID="room-split-view">
+  return <View style={{ flex: 1, flexDirection: 'row', backgroundColor: theme.color.bg.canvas }} testID="room-split-view">
     <View style={{ flex: 1, minWidth: 0 }}>
       {roomList}
       {penTool === 'lasso' && inkSelected ? <InkLassoActions

@@ -147,7 +147,7 @@ export function CompanionScreen() {
                       <Text key={name} accessibilityRole="button" accessibilityState={{ selected: on }} testID={`companion-scenario-${name}`}
                         onPress={() => updateCompanionSettings({ scenario: name })}
                         style={[theme.text('label'), {
-                          paddingVertical: 2, paddingHorizontal: 10, borderRadius: theme.radius.pill, overflow: 'hidden',
+                          paddingVertical: 10, paddingHorizontal: 14, borderRadius: theme.radius.pill, overflow: 'hidden',
                           backgroundColor: on ? theme.color.accent.bg : theme.color.bg.inset,
                           color: on ? theme.color.accent.fg : theme.color.text.secondary,
                         }]}>
