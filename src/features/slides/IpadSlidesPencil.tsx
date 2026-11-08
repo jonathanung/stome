@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { PanResponder, Pressable, ScrollView, Text, View, type LayoutChangeEvent } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
@@ -74,10 +74,9 @@ export function IpadSlidesPencil({ deck = SAMPLE_DECK }: { deck?: SlideDeck }) {
   };
 
   // The responder is created once; it reads the latest tool state through a ref.
+  // Sync during render so the next pointer event sees the tool the person just picked.
   const [gs] = useState(() => new GestureState());
-  useEffect(() => {
-    gs.sync(tool, ink, current);
-  }, [gs, tool, ink, current]);
+  gs.sync(tool, ink, current);
 
   const [responder] = useState(() => {
     const at = (e: { nativeEvent: { locationX: number; locationY: number } }): Point => [e.nativeEvent.locationX, e.nativeEvent.locationY];
@@ -85,9 +84,25 @@ export function IpadSlidesPencil({ deck = SAMPLE_DECK }: { deck?: SlideDeck }) {
       const t = gs.tool;
       return t === 'pen' || t === 'highlighter' ? { id: 'live', page: gs.current, tool: t, ink: gs.ink, points } : null;
     };
+    let open = false;
+    const finish = () => {
+      if (!open) return;
+      open = false;
+      const points = gs.points;
+      const t = gs.tool;
+      setLive(null);
+      setLasso(null);
+      if (t === 'lasso') {
+        if (points.length > 6) setRegion(points);
+      } else if ((t === 'pen' || t === 'highlighter') && points.length > 0) {
+        const id = `s${gs.id++}`;
+        setStrokes((all) => [...all, { id, page: gs.current, tool: t, ink: gs.ink, points }]);
+      }
+    };
     return PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onPanResponderGrant: (e) => {
+        open = true;
         gs.points = [at(e)];
         const t = gs.tool;
         if (t === 'lasso') {
@@ -99,6 +114,7 @@ export function IpadSlidesPencil({ deck = SAMPLE_DECK }: { deck?: SlideDeck }) {
         } else setLive(mkLive(gs.points));
       },
       onPanResponderMove: (e) => {
+        if (!open) return;
         const p = at(e);
         gs.points = [...gs.points, p];
         const t = gs.tool;
@@ -106,22 +122,9 @@ export function IpadSlidesPencil({ deck = SAMPLE_DECK }: { deck?: SlideDeck }) {
         else if (t === 'eraser') setStrokes((all) => all.filter((s) => s.page !== gs.current || !hitsStroke(s, p)));
         else setLive(mkLive(gs.points));
       },
-      onPanResponderRelease: () => {
-        const points = gs.points;
-        const t = gs.tool;
-        setLive(null);
-        setLasso(null);
-        if (t === 'lasso') {
-          if (points.length > 6) setRegion(points);
-        } else if (t === 'pen' || t === 'highlighter') {
-          const id = `s${gs.id++}`;
-          setStrokes((all) => [...all, { id, page: gs.current, tool: t, ink: gs.ink, points }]);
-        }
-      },
-      onPanResponderTerminate: () => {
-        setLive(null);
-        setLasso(null);
-      },
+      onPanResponderRelease: finish,
+      // A parent or the browser can take the gesture. Keep the ink that was already drawn.
+      onPanResponderTerminate: finish,
     });
   });
 
