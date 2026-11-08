@@ -65,6 +65,19 @@ export function RoomHeader({ room, chunkCount, onBack, onNewNote, onImport }: {
           justifyContent: 'center', borderWidth: 1, borderColor: theme.color.border.strong, opacity: pressed ? 0.7 : 1 })}>
         <Text style={[theme.text('buttonCompact'), { color: theme.color.text.primary }]}>study</Text>
       </Pressable>
+      <Pressable accessibilityRole="link" accessibilityLabel="Open the whiteboard" testID="open-whiteboard"
+        onPress={() => router.push(`/rooms/${room.id}/whiteboard`)}
+        style={({ pressed }) => ({ minHeight: theme.layout.control, paddingHorizontal: theme.space.xxl + 2, borderRadius: theme.radius.lg,
+          justifyContent: 'center', borderWidth: 1, borderColor: theme.color.border.strong, opacity: pressed ? 0.7 : 1 })}>
+        <Text style={[theme.text('buttonCompact'), { color: theme.color.text.primary }]}>whiteboard</Text>
+      </Pressable>
+      {/* Plain Pressable, not <Link asChild>: on web the slot drops the style function, so the row loses its border. */}
+      <Pressable accessibilityRole="link" accessibilityLabel="Study session for this room" testID="open-study-session"
+        onPress={() => router.push(`/rooms/${room.id}/study`)}
+        style={({ pressed }) => ({ minHeight: theme.layout.control, paddingHorizontal: theme.space.xxl + 2, borderRadius: theme.radius.lg,
+          justifyContent: 'center', borderWidth: 1, borderColor: theme.color.border.strong, opacity: pressed ? 0.7 : 1 })}>
+        <Text style={[theme.text('buttonCompact'), { color: theme.color.text.primary }]}>study session</Text>
+      </Pressable>
       <Action label="import notes" accessibilityLabel="Import notes into this room" onPress={onImport} />
       <Action label="new note" accessibilityLabel="Jump to new note" icon="plus" primary onPress={onNewNote} />
     </View>
