@@ -6,11 +6,14 @@
 import {
   EDIT_TOOL_NAME,
   PROVIDER_LIMITS,
+  STROKE_TOOL_NAME,
   TOOL_NAME,
   HarnessError,
+  isRecord,
   parseEditOutput,
   parseProposeInput,
   parseProposeOutput,
+  parseStrokeOutput,
   requestCharCount,
   type ProposeInput,
 } from '../../src/harness/contract.ts';
@@ -100,6 +103,11 @@ export const SYSTEM: Record<ToolName, string> = {
     'Return a summary (under 700 characters) and at most 6 stickies, each under 150 characters and useful on its own.',
     UNTRUSTED,
   ].join('\n'),
+  [STROKE_TOOL_NAME]: [
+    'You draw one freehand stroke on a whiteboard for a note-taking app, following the user request. Ground the stroke in the selected note chunks supplied by the user.',
+    'Return the chunkId you were given and points: a polyline of 1 to 5000 {x, y} points in the 1440x900 board space, tracing the requested stroke. Keep it simple: a short underline, arrow, or circle.',
+    UNTRUSTED,
+  ].join('\n'),
   [IMPORT_TOOL_NAME]: [
     'You help file imported notes into rooms. For each note, either pick exactly one existing room by its id from the supplied list, or propose a short new room name (under 60 characters). Never invent a room id.',
     'Set roomId to the existing id and newRoomName to null, or roomId to null and newRoomName to the new name. Add up to 6 short subjects (under 40 characters each). Return one entry per note, using the note ids supplied.',
@@ -141,6 +149,21 @@ function editUser(input: ProposeInput): string {
   ].join('\n');
 }
 
+function strokeUser(input: ProposeInput): string {
+  const chunks = input.chunks.map((chunk) => block(`chunk ${chunk.id}`, chunk.text)).join('\n');
+  const history = input.priorMessages.length
+    ? input.priorMessages.map((message, index) => block(`${message.role} message ${index + 1}`, message.body)).join('\n')
+    : '(no earlier messages)';
+  return [
+    `Selected chunks (ids: ${input.chunks.map((chunk) => chunk.id).join(', ')}):`,
+    chunks,
+    'Earlier messages:',
+    history,
+    'Stroke request:',
+    block('request', input.prompt),
+  ].join('\n');
+}
+
 function reviewUser(input: ReviewQuestionInput): string {
   return [`Chunk id: ${input.chunk.id}`, block('chunk', input.chunk.text)].join('\n');
 }
@@ -164,6 +187,7 @@ function importUser(input: ImportSuggestInput): string {
 type Schema = Record<string, unknown>;
 
 const str: Schema = { type: 'string' };
+const num: Schema = { type: 'number' };
 
 function objectSchema(properties: Record<string, Schema>): Schema {
   return { type: 'object', properties, required: Object.keys(properties), additionalProperties: false };
@@ -172,6 +196,10 @@ function objectSchema(properties: Record<string, Schema>): Schema {
 export const SCHEMAS: Record<ToolName, Schema> = {
   [TOOL_NAME]: objectSchema({ chunkId: str, body: str, quote: str }),
   [EDIT_TOOL_NAME]: objectSchema({ body: str }),
+  [STROKE_TOOL_NAME]: objectSchema({
+    chunkId: str,
+    points: { type: 'array', items: objectSchema({ x: num, y: num }) },
+  }),
   [REVIEW_TOOL_NAME]: objectSchema({ chunkId: str, question: str, answer: str }),
   [BOARD_TOOL_NAME]: objectSchema({
     summary: str,
@@ -224,7 +252,7 @@ export function anchorFor(chunkText: string, quote: unknown): { anchorStart: num
 
 // ---------------------------------------------------------------------------
 
-/** A Provider for all five tools on top of one vendor's structured-output call. */
+/** A Provider for all six tools on top of one vendor's structured-output call. */
 export function createStructuredProvider(ask: AskJson): Provider {
   async function annotation(input: ProposeInput, signal: AbortSignal): Promise<unknown> {
     const raw = await ask(TOOL_NAME, SYSTEM[TOOL_NAME], annotationUser(input), SCHEMAS[TOOL_NAME], signal);
@@ -251,6 +279,21 @@ export function createStructuredProvider(ask: AskJson): Provider {
     return parseEditOutput({ roomId: chunk.roomId, chunkId: chunk.id, type: 'chunk_edit', body: raw.body });
   }
 
+  async function stroke(input: ProposeInput, signal: AbortSignal): Promise<unknown> {
+    const raw = await ask(STROKE_TOOL_NAME, SYSTEM[STROKE_TOOL_NAME], strokeUser(input), SCHEMAS[STROKE_TOOL_NAME], signal);
+    const chunk = input.chunks.find((item) => item.id === raw.chunkId);
+    if (!chunk) {
+      throw new HarnessError('scope_rejected', 'The stroke targets a chunk that was not selected');
+    }
+    const points = Array.isArray(raw.points) ? raw.points : [];
+    return parseStrokeOutput({
+      roomId: input.roomId,
+      chunkId: chunk.id,
+      type: 'stroke',
+      points: points.map((point) => (isRecord(point) ? [point.x, point.y] : point)),
+    });
+  }
+
   return {
     async complete(request, signal) {
       if (isReadTool(request.tool)) {
@@ -272,14 +315,17 @@ export function createStructuredProvider(ask: AskJson): Provider {
           }
         }
       }
-      if (request.tool !== TOOL_NAME && request.tool !== EDIT_TOOL_NAME) {
+      if (request.tool !== TOOL_NAME && request.tool !== EDIT_TOOL_NAME && request.tool !== STROKE_TOOL_NAME) {
         throw new HarnessError('invalid_shape', 'The provider only runs the allowed tools');
       }
       const input = parseProposeInput(request.input);
       if (requestCharCount(input) > PROVIDER_LIMITS.maxRequestChars) {
         throw new HarnessError('request_limit', 'The question and selected notes are over the request limit');
       }
-      return request.tool === EDIT_TOOL_NAME ? edit(input, signal) : annotation(input, signal);
+      if (request.tool === EDIT_TOOL_NAME) {
+        return edit(input, signal);
+      }
+      return request.tool === STROKE_TOOL_NAME ? stroke(input, signal) : annotation(input, signal);
     },
   };
 }

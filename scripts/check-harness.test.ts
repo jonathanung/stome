@@ -23,6 +23,7 @@ import {
   TOOL_REGISTRY,
   chunkViewFromFoundation,
   noteToChunk,
+  proposalMessage,
   type ChunkView,
 } from '../src/harness/contract.ts';
 import { createProvider, mockEditOutput, mockProvider, mockSuccessOutput } from '../src/harness/provider.ts';
@@ -111,8 +112,11 @@ function chunk(id: number, text = 'photosynthesis makes sugar', revision = 100, 
   };
 }
 
-test('registry is only the notes tools and rejects a foreign room', async () => {
-  assert.deepEqual(Object.keys(TOOL_REGISTRY).sort(), ['notes.proposeAnnotation', 'notes.proposeChunkEdit'].sort());
+test('registry is only the write tools and rejects a foreign room', async () => {
+  assert.deepEqual(
+    Object.keys(TOOL_REGISTRY).sort(),
+    ['notes.proposeAnnotation', 'notes.proposeChunkEdit', 'whiteboard.proposeStroke'].sort(),
+  );
   const harness = readFileSync(new URL('../src/harness/contract.ts', import.meta.url), 'utf8');
   assert.equal(harness.includes('child_process'), false);
   assert.equal(harness.includes('node:fs'), false);
@@ -261,7 +265,7 @@ test('restart fails a running session, continuation uses saved context, and late
   });
   assert.equal(outcome.status, 'proposal');
   assert.ok(seen >= 1);
-  assert.match(outcome.proposal?.body ?? '', /messages=1/);
+  assert.match(proposalMessage(outcome.proposal), /messages=1/);
   db.close();
 });
 
@@ -486,7 +490,7 @@ test('operation id dedupe returns the first annotation and a failed commit rolls
   assert.equal(replay.annotationId, first.annotationId);
   const rows = await listAnnotations(app, savedChunk.id);
   assert.equal(rows.length, 1);
-  assert.equal(rows[0]?.payload.answer, proposed.proposal?.body);
+  assert.equal(rows[0]?.payload.answer, proposalMessage(proposed.proposal));
   assert.equal((await getSession(db, prepared.sessionId))?.confirmedOperationId, operationId);
 
   await assert.rejects(
@@ -707,7 +711,7 @@ test('a second confirmed turn survives reopen and the first operation id still r
   });
   assert.equal(second.status, 'proposal');
   assert.notEqual(second.proposal?.id, proposed.proposal?.id);
-  assert.match(second.proposal?.body ?? '', /Second question/);
+  assert.match(proposalMessage(second.proposal), /Second question/);
   const secondId = second.session?.pendingOperationId ?? '';
   const savedAgain = await confirmFoundationQuestion(reopened, reopenedApp, {
     sessionId: continued.sessionId,
@@ -720,7 +724,7 @@ test('a second confirmed turn survives reopen and the first operation id still r
   assert.equal(rows.length, 2);
   assert.deepEqual(
     rows.map((row) => row.payload.answer),
-    [proposed.proposal?.body, second.proposal?.body],
+    [proposalMessage(proposed.proposal), proposalMessage(second.proposal)],
   );
   const replay = await confirmFoundationQuestion(reopened, reopenedApp, {
     sessionId: continued.sessionId,
@@ -1339,7 +1343,7 @@ test('a confirmed chunk answer is one ai annotation and the same operation id ad
   assert.equal(pins.length, 1);
   assert.equal(pins[0]?.type, 'ai_answer');
   assert.deepEqual(pins[0]?.anchor, { start: 0, end: 12 });
-  assert.equal(pins[0]?.payload.answer, outcome.proposal?.body);
+  assert.equal(pins[0]?.payload.answer, proposalMessage(outcome.proposal));
   assert.equal(pins[0]?.payload.quote, 'photosynthes');
   assert.equal(pins[0]?.payload.chunkRevision, savedChunk.revision);
   const after = await getChunk(app, savedChunk.id);
@@ -1882,7 +1886,7 @@ test('a confirmed note edit replaces the chunk once and stays source ai', async 
   assert.equal(saved.replayed, false);
   assert.equal(saved.revision, savedChunk.revision + 1);
   const edited = await getChunk(app, savedChunk.id);
-  assert.equal(edited?.body, againOutcome.proposal?.body);
+  assert.equal(edited?.body, proposalMessage(againOutcome.proposal));
   assert.equal(edited?.revision, savedChunk.revision + 1);
   const applied = await app.get<{ source: string; kind: string }>('SELECT source, kind FROM applied_ops WHERE op_id = ?', [
     againId,
@@ -1897,7 +1901,7 @@ test('a confirmed note edit replaces the chunk once and stays source ai', async 
   });
   assert.equal(replayed.replayed, true);
   assert.equal((await getChunk(app, savedChunk.id))?.revision, savedChunk.revision + 1);
-  assert.equal((await getChunk(app, savedChunk.id))?.body, againOutcome.proposal?.body);
+  assert.equal((await getChunk(app, savedChunk.id))?.body, proposalMessage(againOutcome.proposal));
 
   const both = await beginQuestion(harness, {
     chunks: [view, chunkViewFromFoundation(other)],
@@ -1932,7 +1936,7 @@ test('a confirmed note edit replaces the chunk once and stays source ai', async 
       }),
     /demo note/,
   );
-  assert.equal((await getChunk(app, savedChunk.id))?.body, againOutcome.proposal?.body);
+  assert.equal((await getChunk(app, savedChunk.id))?.body, proposalMessage(againOutcome.proposal));
   app.close();
   harness.close();
 });
@@ -2065,7 +2069,7 @@ test('a committed note edit repairs its session after a later human edit', async
   });
   assert.equal(outcome.status, 'proposal');
   const operationId = outcome.session?.pendingOperationId ?? '';
-  const proposedBody = outcome.proposal?.body ?? '';
+  const proposedBody = proposalMessage(outcome.proposal);
   let failRecord = false;
   const failing: SqlExecutor = {
     exec: (sql) => harness.exec(sql),

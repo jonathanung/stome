@@ -1,6 +1,7 @@
 import {
   HARNESS_DATABASE_NAME,
   HarnessError,
+  proposalMessage,
   type PriorMessage,
   type SessionState,
   type StoredProposal,
@@ -310,7 +311,7 @@ export async function completeRun(
     }
     await tx.run(
       'INSERT INTO harness_messages (id, session_id, role, body, created_at) VALUES (?, ?, ?, ?, ?)',
-      [input.messageId, input.sessionId, 'assistant', input.proposal.body, input.now],
+      [input.messageId, input.sessionId, 'assistant', proposalMessage(input.proposal), input.now],
     );
     return 'stored';
   });
