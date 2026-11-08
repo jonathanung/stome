@@ -128,8 +128,16 @@ export function startCompanion(options: CompanionOptions): Promise<CompanionHand
 }
 
 async function handle(request: IncomingMessage, response: ServerResponse, options: CompanionOptions): Promise<void> {
-  const origin = request.headers.origin;
-  const cors = corsHeaders(typeof origin === 'string' ? origin : undefined, options.origin);
+  const rawOrigin = request.headers.origin;
+  const origin = typeof rawOrigin === 'string' && rawOrigin.length > 0 ? rawOrigin : undefined;
+  // Expo Go on Android does not send Origin. A loopback client with no Origin
+  // is not a foreign web page. A present Origin that does not match is still rejected.
+  const cors = origin === undefined
+    ? {
+        'access-control-allow-methods': 'POST, OPTIONS',
+        'access-control-allow-headers': 'content-type, x-stome-token',
+      }
+    : corsHeaders(origin, options.origin);
   const remote = request.socket.remoteAddress;
   if (!isLoopback(remote)) {
     sendJson(response, 403, { ok: false, error: { code: 'forbidden', message: 'The companion accepts loopback clients only' } }, {});
