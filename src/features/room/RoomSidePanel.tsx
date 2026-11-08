@@ -35,7 +35,7 @@ export function RoomSidePanel({ roomId, subjects, chunks, dueToday, activeSubjec
       <Text style={[theme.text('label'), { color: theme.color.text.tertiary }]}>{count}</Text>
     </Pressable>
   );
-  const attached = (label: string, kind: string, href: `/rooms/${string}/slides` | `/rooms/${string}/whiteboard`) => (
+  const attached = (label: string, kind: string, href: `/rooms/${string}/slides` | `/rooms/${string}/whiteboard` | `/rooms/${string}/study`) => (
     // Not <Link asChild>: on web the slot drops this style function, so the row lost its border.
     <Pressable key={label} accessibilityRole="link" accessibilityLabel={`${label}, ${kind}`} onPress={() => router.push(href)}
       style={({ pressed }) => ({
@@ -67,6 +67,7 @@ export function RoomSidePanel({ roomId, subjects, chunks, dueToday, activeSubjec
       <View style={{ gap: theme.space.sm }}>
         {heading('attached')}
         {attached('slides', 'deck', `/rooms/${roomId}/slides`)}
+        {attached('study session', 'session', `/rooms/${roomId}/study`)}
         {attached('whiteboard', 'board', `/rooms/${roomId}/whiteboard`)}
       </View>
     </View>
