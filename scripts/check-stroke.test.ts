@@ -13,7 +13,7 @@ import {
   isStrokeProposal,
   parseStrokeOutput,
   parseStrokePoints,
-  proposalMessage,
+  proposalMessageBody,
   type ChunkView,
 } from '../src/harness/contract.ts';
 import { mockProvider, mockStrokeOutput } from '../src/harness/provider.ts';
@@ -197,7 +197,7 @@ test('a stroke proposal confirms into one AI stroke annotation', async () => {
   const messages = await harness.all<{ body: string }>('SELECT body FROM harness_messages WHERE session_id = ? AND role = ?', [prepared.sessionId, 'assistant']);
   assert.equal(messages.length, 1);
   assert.equal(messages[0]?.body, 'Stroke proposal (3 points)');
-  assert.equal(proposalMessage(outcome.proposal), 'Stroke proposal (3 points)');
+  assert.equal(proposalMessageBody(outcome.proposal), 'Stroke proposal (3 points)');
   app.db.close();
   harness.close();
 });

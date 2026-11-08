@@ -1,10 +1,11 @@
 import {
   HARNESS_DATABASE_NAME,
   HarnessError,
-  proposalMessage,
+  proposalMessageBody,
   type PriorMessage,
   type SessionState,
   type StoredProposal,
+  type StudyKind,
 } from './contract';
 
 export { HARNESS_DATABASE_NAME };
@@ -311,7 +312,7 @@ export async function completeRun(
     }
     await tx.run(
       'INSERT INTO harness_messages (id, session_id, role, body, created_at) VALUES (?, ?, ?, ?, ?)',
-      [input.messageId, input.sessionId, 'assistant', proposalMessage(input.proposal), input.now],
+      [input.messageId, input.sessionId, 'assistant', proposalMessageBody(input.proposal), input.now],
     );
     return 'stored';
   });
@@ -487,6 +488,65 @@ export async function recordFoundationEdit(
  * A confirmed answer is written by createCommit in stome.db. The harness only
  * records that the operation landed so a replay can repair the session flag.
  */
+
+export type StudyConfirmation = {
+  operationId: string;
+  kind: StudyKind;
+  deckId?: string;
+  quizId?: string;
+  outlineId?: string;
+  cardIds?: string[];
+  questionIds?: string[];
+};
+
+export type StudyOperationResult = StudyConfirmation & {
+  replayed: boolean;
+};
+
+/**
+ * Harness-side record of a study commit that already landed in stome.db, so
+ * a replay of the same operation id returns the same deck/quiz/outline ids
+ * instead of writing again. This is session bookkeeping, never the rows.
+ */
+export async function readStudyOperation(
+  db: SqlExecutor,
+  operationId: string,
+): Promise<StudyOperationResult | null> {
+  const existing = await db.get<OperationRow>('SELECT result_json FROM harness_operations WHERE id = ?', [operationId]);
+  if (!existing) {
+    return null;
+  }
+  const parsed = JSON.parse(existing.result_json) as StudyConfirmation;
+  if (typeof parsed.operationId !== 'string' || typeof parsed.kind !== 'string') {
+    throw new HarnessError('invalid_shape', 'The saved study operation is unreadable');
+  }
+  return { ...parsed, replayed: true };
+}
+
+/** Session bookkeeping after createCommit accepts a study draft. Does not write study rows. */
+export async function recordStudyConfirmation(
+  db: SqlExecutor,
+  input: { sessionId: string; result: StudyConfirmation; now: number },
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    const existing = await tx.get<OperationRow>('SELECT result_json FROM harness_operations WHERE id = ?', [
+      input.result.operationId,
+    ]);
+    if (!existing) {
+      await tx.run('INSERT INTO harness_operations (id, result_json, created_at) VALUES (?, ?, ?)', [
+        input.result.operationId,
+        JSON.stringify({ ...input.result, replayed: false }),
+        input.now,
+      ]);
+    }
+    await tx.run(
+      `UPDATE harness_sessions
+       SET confirmed_operation_id = ?, pending_operation_id = NULL, updated_at = ?
+       WHERE id = ?`,
+      [input.result.operationId, input.now, input.sessionId],
+    );
+  });
+}
 
 export type HarnessSessionSummary = {
   id: string;

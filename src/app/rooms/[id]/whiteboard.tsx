@@ -1,17 +1,15 @@
-import { Stack } from 'expo-router';
-import { useWindowDimensions } from 'react-native';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 
-import { IpadWhiteboardScreen } from '../../../features/whiteboard/IpadWhiteboardScreen';
-import { WhiteboardScreen } from '../../../features/whiteboard/WhiteboardScreen';
+import { WhiteboardScreen } from '../../../whiteboard/WhiteboardScreen';
 
 export default function WhiteboardRoute() {
-  const { width } = useWindowDimensions();
-  // iPad widths get the pencil-first layout; desktop keeps the tool rail.
-  const tablet = width >= 900 && width < 1300;
+  const router = useRouter();
+  // Keep the room id available for future persistence — the screen shows ← Notes to go back
+  useLocalSearchParams<{ id?: string }>();
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
-      {tablet ? <IpadWhiteboardScreen /> : <WhiteboardScreen />}
+      <WhiteboardScreen onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
     </>
   );
 }

@@ -17,6 +17,7 @@ import {
 import {
   MOCK_SCENARIOS,
   chunkViewFromFoundation,
+  isAnnotationProposal,
   isEditProposal,
   isStrokeProposal,
   type MockScenario,
@@ -285,8 +286,10 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
     busy || !database || !session || pending || (session.state !== 'failed' && session.state !== 'cancelled' && session.state !== 'completed');
   const confirmDisabled = busy || !session?.pendingOperationId;
 
+  // Study drafts are confirmed through the study path, never this panel;
+  // the annotation guard keeps the answer-only components well-typed.
   const sheetCitations =
-    proposal && !isEditProposal(proposal) && !isStrokeProposal(proposal)
+    proposal && isAnnotationProposal(proposal)
       ? citationsForProposal(session?.selectedChunkIds ?? [], chunks, proposal)
       : null;
   const includedLabels = (session?.selectedChunkIds?.length ? session.selectedChunkIds : selectedIds)
@@ -320,14 +323,16 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
             proposal
               ? isEditProposal(proposal)
                 ? { kind: 'edit', body: proposal.body, previousBody: proposal.previousBody }
-                : isStrokeProposal(proposal)
-                  ? {
-                      kind: 'stroke',
-                      pointCount: proposal.points.length,
-                      chunkLabel: chunks.find((chunk) => chunk.id === proposal.chunkId)?.body.split('\n')[0]?.slice(0, 60) || 'Chunk',
-                      revision: proposal.chunkRevision,
-                    }
-                  : { kind: 'answer', body: proposal.body }
+                : isAnnotationProposal(proposal)
+                    ? { kind: 'answer', body: proposal.body }
+                    : isStrokeProposal(proposal)
+                      ? {
+                          kind: 'stroke',
+                          pointCount: proposal.points.length,
+                          chunkLabel: chunks.find((chunk) => chunk.id === proposal.chunkId)?.body.split('\n')[0]?.slice(0, 60) || 'Chunk',
+                          revision: proposal.chunkRevision,
+                        }
+                      : null
               : null
           }
           question={askedPrompt}
@@ -509,7 +514,7 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
           <Text style={styles.secondaryText}>Continue</Text>
         </Pressable>
       </View>
-      {proposal && !isEditProposal(proposal) && !isStrokeProposal(proposal) ? (
+      {proposal && isAnnotationProposal(proposal) ? (
         <AskProposalCard
           body={proposal.body}
           busy={busy}
@@ -524,6 +529,17 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
           onOpen={onOpenCitation}
           proposal={proposal}
           selectedChunkIds={session?.selectedChunkIds ?? []}
+        />
+      ) : null}
+      {proposal && isEditProposal(proposal) ? (
+        <EditProposalReview
+          proposal={proposal}
+          title={`${chunks.find((chunk) => chunk.id === proposal.chunkId)?.body.split('\n')[0]?.slice(0, 60) || 'Chunk'}`}
+          asked={askedPrompt || undefined}
+          confirmDisabled={confirmDisabled}
+          busy={busy}
+          onConfirm={() => { void onConfirm(); }}
+          onDiscard={() => { void onDiscard(); }}
         />
       ) : null}
       {proposal && isStrokeProposal(proposal) ? (
@@ -561,17 +577,6 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
           </View>
           <Text style={styles.help}>Decline writes nothing. A confirmed stroke is saved as a chunk annotation.</Text>
         </View>
-      ) : null}
-      {proposal && isEditProposal(proposal) ? (
-        <EditProposalReview
-          proposal={proposal}
-          title={`${chunks.find((chunk) => chunk.id === proposal.chunkId)?.body.split('\n')[0]?.slice(0, 60) || 'Chunk'}`}
-          asked={askedPrompt || undefined}
-          confirmDisabled={confirmDisabled}
-          busy={busy}
-          onConfirm={() => { void onConfirm(); }}
-          onDiscard={() => { void onDiscard(); }}
-        />
       ) : null}
       {error && !proposal && /timed out/i.test(error) ? (
         <AskTimeoutNotice disabled={continueDisabled} onContinue={() => { void onAsk(true); }} />

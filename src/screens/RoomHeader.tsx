@@ -66,6 +66,13 @@ export function RoomHeader({ room, chunkCount, onBack, onAsk, onNewNote, onImpor
           justifyContent: 'center', borderWidth: 1, borderColor: theme.color.border.strong, opacity: pressed ? 0.7 : 1 })}>
         <Text style={[theme.text('buttonCompact'), { color: theme.color.text.primary }]}>review room</Text>
       </Pressable>
+      {/* Plain Pressable for the same reason: Link asChild drops the style function on web. */}
+      <Pressable accessibilityRole="link" accessibilityLabel="Study materials from this room" testID="open-study"
+        onPress={() => router.push(`/study/pick?roomId=${room.id}`)}
+        style={({ pressed }) => ({ minHeight: theme.layout.control, paddingHorizontal: theme.space.xxl + 2, borderRadius: theme.radius.lg,
+          justifyContent: 'center', borderWidth: 1, borderColor: theme.color.border.strong, opacity: pressed ? 0.7 : 1 })}>
+        <Text style={[theme.text('buttonCompact'), { color: theme.color.text.primary }]}>study</Text>
+      </Pressable>
       <Action label="ask" accessibilityLabel="Ask about this room" icon="ask" onPress={onAsk} />
       <Action label="import notes" accessibilityLabel="Import notes into this room" onPress={onImport} />
       <Action label="new note" accessibilityLabel="Jump to new note" icon="plus" primary onPress={onNewNote} />
