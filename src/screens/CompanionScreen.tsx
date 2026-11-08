@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Badge, Button, Card, Screen, useStoneTheme } from '../../design-theme/src/primitives';
 import { listRooms } from '../data/queries';
 import { expoDriver } from '../db/expo-driver';
+import { companionSetup, readCompanionContext } from '../harness/companionAddress';
 import { DEFAULT_COMPANION_URL, PROVIDER_NAMES, companionLabel, isLiveCompanion, refreshCompanionStatus, updateCompanionSettings, useCompanionSettings } from '../harness/companionSettings';
 import { MOCK_SCENARIOS, PROVIDER_LIMITS, type SessionState } from '../harness/contract';
 import { harnessExecutor, openHarnessDatabase } from '../harness/expoDb';
@@ -89,6 +90,7 @@ export function CompanionScreen() {
 
   const live = isLiveCompanion(settings);
   const statusLabel = companionLabel(settings.status);
+  const setup = companionSetup(readCompanionContext());
 
   const pairing = (
     <Card>
@@ -98,10 +100,12 @@ export function CompanionScreen() {
           {connection === 'paired' ? <Badge tone="success" label="paired" /> : null}
           {connection === 'rejected' ? <Badge tone="danger" label="not paired" /> : null}
         </View>
-        <View style={{ gap: 2 }}>
-          <Text style={[theme.text('bodySmall'), { color: theme.color.text.secondary }]}>1. On your laptop run <Text style={{ fontFamily: 'Menlo' }}>npm run companion</Text></Text>
-          <Text style={[theme.text('bodySmall'), { color: theme.color.text.secondary }]}>2. Paste the token it prints below</Text>
+        <View testID="companion-setup" style={{ gap: 2 }}>
+          {setup.steps.map((step, index) => (
+            <Text key={step} style={[theme.text('bodySmall'), { color: theme.color.text.secondary }]}>{`${index + 1}. ${step}`}</Text>
+          ))}
         </View>
+        <Text testID="companion-address-hint" style={meta}>{setup.addressHint}</Text>
         <View style={{ gap: 6 }}>
           <Text style={eyebrow}>Companion address</Text>
           <TextInput accessibilityLabel="Companion address" autoCapitalize="none" autoCorrect={false} keyboardType="url"
@@ -115,7 +119,7 @@ export function CompanionScreen() {
             placeholderTextColor={theme.color.text.disabled} style={input} testID="companion-token" />
         </View>
         <Text style={meta}>The token lives in memory only. Reload the app and you&apos;ll paste it again.</Text>
-        {message ? <Notice tone={connection === 'rejected' ? 'danger' : 'neutral'}>{message}</Notice> : null}
+        {message ? <Notice testID="companion-connection-message" tone={connection === 'rejected' ? 'danger' : 'neutral'}>{message}</Notice> : null}
         <View style={{ flexDirection: 'row', gap: theme.space.md }}>
           <Button label={connection === 'testing' ? 'Testing…' : 'Test connection'} disabled={connection === 'testing'} onPress={() => void testConnection()} />
           <Button label="Unpair" variant="outline" disabled={!settings.token} onPress={unpair} />

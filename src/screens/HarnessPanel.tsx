@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } fro
 import { createStyles } from '../../design-theme/src/primitives';
 
 import { expoDriver } from '../db/expo-driver';
+import { companionSetup, readCompanionContext } from '../harness/companionAddress';
 import { companionProvider } from '../harness/companionClient';
 import {
   PROVIDER_NAMES,
@@ -380,6 +381,7 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
         );
       })}
       <Text style={styles.label}>Companion</Text>
+      <Text style={styles.help} testID="companion-address-hint">{companionSetup(readCompanionContext()).addressHint}</Text>
       {providerLabel ? <Text style={styles.help} testID="companion-provider-label">{providerLabel}</Text> : null}
       <TextInput
         accessibilityLabel="Companion URL"
