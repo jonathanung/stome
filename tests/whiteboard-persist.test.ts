@@ -3,9 +3,9 @@ import { test } from 'node:test';
 
 import { createCommit } from '../src/data/commit.ts';
 import type { OpKind, Operation, Payloads } from '../src/data/operations.ts';
-import { getAnnotation, getRoomWhiteboard } from '../src/data/queries.ts';
+import { getAnnotation, getRoomWhiteboard, parseRoomWhiteboardElements, RoomWhiteboardError } from '../src/data/queries.ts';
 import { migrateDb } from '../src/db/migrate.ts';
-import { createBoardSaver, mergeBoardElements, type BoardWrite } from '../src/whiteboard/persist.ts';
+import { backAfterFlush, createBoardSaver, gateLoadedBoard, mergeBoardElements, type BoardWrite } from '../src/whiteboard/persist.ts';
 import { nodeDb } from './support/node-db.ts';
 
 const rect = (id: string, x = 0) => ({ id, type: 'rectangle', x, y: 0, width: 10, height: 10 });
@@ -117,20 +117,66 @@ test('the next save uses the revision returned by the save already in flight', a
 test('a failed save stays queued and the next flush writes it', async () => {
   let fail = true;
   const calls: BoardWrite[] = [];
+  const seen: string[] = [];
   const saver = createBoardSaver(async (save) => {
     calls.push(save);
     if (fail) throw new Error('disk');
     return { revision: 1 };
-  });
+  }, (status) => seen.push(status));
   saver.load(null);
   saver.edit([rect('a')]);
-  await saver.flush();
+  const blocked = await saver.flush();
+  assert.equal(blocked, 'unsaved');
   assert.equal(saver.dirty, true);
-  assert.ok(calls.length >= 1);
-  const tried = calls.length;
+  assert.deepEqual(saver.elements, [rect('a')]);
+  assert.equal(backAfterFlush(blocked, false), 'stay');
+  assert.equal(backAfterFlush(blocked, true), 'leave');
   fail = false;
-  await saver.flush();
+  const saved = await saver.flush();
+  assert.equal(saved, 'saved');
+  assert.equal(backAfterFlush(saved, false), 'leave');
   assert.equal(saver.dirty, false);
-  assert.ok(calls.length > tried);
   assert.deepEqual(calls.at(-1)?.elements, [rect('a')]);
+  assert.equal(seen.at(-1), 'saved');
+  assert.ok(seen.includes('unsaved'));
+});
+
+test('drawing before a successful load is not written', async () => {
+  const calls: BoardWrite[] = [];
+  const saver = createBoardSaver(async (save) => {
+    calls.push(save);
+    return { revision: 1 };
+  });
+  saver.edit([rect('a')]);
+  assert.equal(await saver.flush(), 'unsaved');
+  assert.equal(calls.length, 0);
+  assert.equal(backAfterFlush('unsaved', false), 'stay');
+});
+
+test('a failed or corrupt read stays closed and does not describe a saved board', () => {
+  const missing = gateLoadedBoard({ ok: false, corrupt: false });
+  const corrupt = gateLoadedBoard({ ok: false, corrupt: true });
+  assert.equal(missing.open, false);
+  assert.equal(corrupt.open, false);
+  if (!missing.open) assert.match(missing.message, /Nothing was changed/);
+  if (!corrupt.open) assert.match(corrupt.message, /not replaced/);
+  const ready = gateLoadedBoard({ ok: true, board: { elements: [rect('a')], revision: 3 } });
+  assert.equal(ready.open, true);
+  if (ready.open) assert.equal(ready.revision, 3);
+});
+
+test('a corrupt whiteboard document is refused and an oversized save does not replace the row', async () => {
+  assert.throws(() => parseRoomWhiteboardElements('{"not":"a list"}'), RoomWhiteboardError);
+  assert.throws(() => parseRoomWhiteboardElements('{'), RoomWhiteboardError);
+  const s = await setup();
+  const roomId = await room(s, 'cells');
+  const saved = await s.commit(s.op('whiteboard.save', { roomId, elements: [rect('kept')] }));
+  assert.ok(saved.ok);
+  const tooBig = await s.commit(s.op('whiteboard.save', {
+    roomId,
+    elements: Array.from({ length: 501 }, (_, i) => rect(`e${i}`)),
+  }, { expectedRevision: saved.value.revision }));
+  assert.ok(!tooBig.ok);
+  assert.equal(tooBig.error.code, 'invalid');
+  assert.deepEqual((await getRoomWhiteboard(s.db, roomId))?.elements, [rect('kept')]);
 });

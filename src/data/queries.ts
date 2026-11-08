@@ -539,6 +539,26 @@ export interface RoomWhiteboard {
   updatedAt: number;
 }
 
+/** The stored document is not a shape list. Callers must not replace the row. */
+export class RoomWhiteboardError extends Error {
+  readonly code = 'corrupt' as const;
+  constructor(message: string) {
+    super(message);
+    this.name = 'RoomWhiteboardError';
+  }
+}
+
+export function parseRoomWhiteboardElements(raw: string): unknown[] {
+  let elements: unknown;
+  try {
+    elements = JSON.parse(raw);
+  } catch {
+    throw new RoomWhiteboardError('whiteboard document is not valid JSON');
+  }
+  if (!Array.isArray(elements)) throw new RoomWhiteboardError('whiteboard document is not a list');
+  return elements;
+}
+
 /** The one saved canvas for a room, or null when the room has never saved a board. */
 export async function getRoomWhiteboard(db: Db, roomId: string): Promise<RoomWhiteboard | null> {
   const row = await db.get<{ id: string; room_id: string; elements: string; revision: number; updated_at: number }>(
@@ -546,14 +566,13 @@ export async function getRoomWhiteboard(db: Db, roomId: string): Promise<RoomWhi
     [roomId],
   );
   if (!row) return null;
-  let elements: unknown;
-  try {
-    elements = JSON.parse(row.elements);
-  } catch {
-    throw new Error('whiteboard document is not valid JSON');
-  }
-  if (!Array.isArray(elements)) throw new Error('whiteboard document is not a list');
-  return { boardId: row.id, roomId: row.room_id, elements, revision: row.revision, updatedAt: row.updated_at };
+  return {
+    boardId: row.id,
+    roomId: row.room_id,
+    elements: parseRoomWhiteboardElements(row.elements),
+    revision: row.revision,
+    updatedAt: row.updated_at,
+  };
 }
 
 export async function getSlideOutline(db: Db, outlineId: string): Promise<SlideOutline | null> {

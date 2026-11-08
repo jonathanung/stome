@@ -14,7 +14,7 @@ import Svg, { Circle, Defs, G, Pattern, Rect } from 'react-native-svg';
 
 import { useStoneTheme } from '../../design-theme/src/primitives';
 import { createCommit } from '../data/commit';
-import { getRoomWhiteboard } from '../data/queries';
+import { getRoomWhiteboard, RoomWhiteboardError } from '../data/queries';
 import { expoDriver } from '../db/expo-driver';
 import { Icon } from '../ui/Icon';
 import { ElementRenderer } from './ElementRenderer';
@@ -30,7 +30,7 @@ import {
 } from './types';
 import { pointerOnCanvas, zoomTransform } from './geometry';
 import { appendBoardHistory } from './history';
-import { createBoardSaver, type BoardSaver } from './persist';
+import { backAfterFlush, createBoardSaver, gateLoadedBoard, type BoardSaver } from './persist';
 import { createWhiteboardPanResponder, type TextEditState } from './useWhiteboardInput';
 
 const MIN_SCALE = 0.1;
@@ -54,6 +54,10 @@ export function WhiteboardScreen({ onBack, roomId }: { onBack?: () => void; room
   const acceptInputRef = useRef(!roomId);
   const saverRef = useRef<BoardSaver | null>(null);
   const [boardReady, setBoardReady] = useState(!roomId);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveLabel, setSaveLabel] = useState<'saving' | 'saved' | 'unsaved' | null>(null);
+  const [confirmLeave, setConfirmLeave] = useState(false);
   const [elements, setElements] = useState<WhiteboardElement[]>([]);
   const [history, setHistory] = useState<WhiteboardElement[][]>([[]]);
   const [historyIndex, setHistoryIndex] = useState(0);
@@ -141,12 +145,16 @@ export function WhiteboardScreen({ onBack, roomId }: { onBack?: () => void; room
       }
       if (!result.ok) throw new Error(result.error.message);
       return { revision: result.value.revision };
+    }, (status) => {
+      if (!cancelled) setSaveLabel(status);
     });
     saverRef.current = saver;
     acceptInputRef.current = false;
     void getRoomWhiteboard(db, roomId).then((loaded) => {
       if (cancelled) return;
-      saver.load(loaded ? { elements: loaded.elements, revision: loaded.revision } : null);
+      const gate = gateLoadedBoard({ ok: true, board: loaded ? { elements: loaded.elements, revision: loaded.revision } : null });
+      if (!gate.open) return;
+      saver.load({ elements: gate.elements, revision: gate.revision });
       const next = saver.elements as WhiteboardElement[];
       elementsRef.current = next;
       historyRef.current = [next];
@@ -154,23 +162,30 @@ export function WhiteboardScreen({ onBack, roomId }: { onBack?: () => void; room
       setElements(next);
       setHistory([next]);
       setHistoryIndex(0);
+      setLoadError(null);
       acceptInputRef.current = true;
       setBoardReady(true);
-    }).catch(() => {
-      if (!cancelled) {
-        acceptInputRef.current = true;
-        setBoardReady(true);
-      }
+    }).catch((error: unknown) => {
+      if (cancelled) return;
+      const gate = gateLoadedBoard({ ok: false, corrupt: error instanceof RoomWhiteboardError });
+      acceptInputRef.current = false;
+      setBoardReady(false);
+      setLoadError(gate.open ? null : gate.message);
     });
     return () => {
       cancelled = true;
       void saver.flush();
     };
-  }, [db, roomId]);
+  }, [db, roomId, loadAttempt]);
 
   const leave = useCallback(() => {
     void (async () => {
-      await saverRef.current?.flush();
+      const result = await saverRef.current?.flush() ?? 'saved';
+      if (backAfterFlush(result, false) === 'stay') {
+        setSaveLabel('unsaved');
+        setConfirmLeave(true);
+        return;
+      }
       onBack?.();
     })();
   }, [onBack]);
@@ -464,6 +479,38 @@ export function WhiteboardScreen({ onBack, roomId }: { onBack?: () => void; room
         </View>
       ) : null}
 
+      {loadError ? (
+        <View testID="whiteboard-load-error" style={[styles.notice, { backgroundColor: theme.color.status.danger.wash, borderColor: theme.color.status.danger.fill }]}>
+          <Text style={[styles.noticeText, { color: theme.color.status.danger.text }]}>{loadError}</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel="Retry opening the whiteboard" onPress={() => setLoadAttempt((n) => n + 1)}
+            style={[styles.noticeButton, { borderColor: theme.color.status.danger.fill }]}>
+            <Text style={[styles.noticeText, { color: theme.color.status.danger.text }]}>Retry</Text>
+          </Pressable>
+        </View>
+      ) : null}
+      {saveLabel && !loadError && !confirmLeave ? (
+        <View testID="whiteboard-save-state" accessibilityLiveRegion="polite" style={[styles.saveState, { backgroundColor: theme.color.bg.surface }]}>
+          <Text style={[styles.noticeText, { color: saveLabel === 'unsaved' ? theme.color.status.danger.text : theme.color.text.secondary }]}>
+            {saveLabel === 'saved' ? 'Saved on this device' : saveLabel === 'saving' ? 'Saving…' : 'Not saved'}
+          </Text>
+        </View>
+      ) : null}
+      {confirmLeave ? (
+        <View testID="whiteboard-leave-unsaved" style={[styles.notice, styles.leaveNotice, { backgroundColor: theme.color.bg.surface, borderColor: theme.color.border.strong }]}>
+          <Text style={[styles.noticeText, { color: theme.color.text.primary }]}>These strokes are not saved. Stay to retry, or leave them behind.</Text>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <Pressable accessibilityRole="button" accessibilityLabel="Stay on the whiteboard" onPress={() => setConfirmLeave(false)}
+              style={[styles.noticeButton, { borderColor: theme.color.border.strong }]}>
+              <Text style={[styles.noticeText, { color: theme.color.text.primary }]}>Stay</Text>
+            </Pressable>
+            <Pressable accessibilityRole="button" accessibilityLabel="Leave without saving" onPress={() => onBack?.()}
+              style={[styles.noticeButton, { borderColor: theme.color.status.danger.fill }]}>
+              <Text style={[styles.noticeText, { color: theme.color.status.danger.text }]}>Leave without saving</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+
       {/* Back to Notes button */}
       {onBack ? (
         <Pressable
@@ -518,6 +565,28 @@ const styles = StyleSheet.create({
   },
   stylePanelWrapper: { left: 16, position: 'absolute', top: 70 },
   stylePanelWrapperWithBack: { left: 16, position: 'absolute', top: 120 },
+  notice: {
+    borderRadius: 10,
+    borderWidth: 1,
+    gap: 8,
+    left: 16,
+    maxWidth: 360,
+    padding: 12,
+    position: 'absolute',
+    right: 16,
+    top: 68,
+  },
+  leaveNotice: { top: 68 },
+  noticeText: { fontSize: 14, fontWeight: '500' },
+  noticeButton: { alignSelf: 'flex-start', borderRadius: 8, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 6 },
+  saveState: {
+    borderRadius: 10,
+    left: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    position: 'absolute',
+    top: 64,
+  },
   backButton: {
     alignItems: 'center',
     borderRadius: 10,

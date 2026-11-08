@@ -5,6 +5,8 @@ export type BoardWrite = {
   expectedRevision?: number;
 };
 
+export type BoardSaveStatus = 'saving' | 'saved' | 'unsaved';
+
 export type BoardSaver = {
   readonly ready: boolean;
   readonly dirty: boolean;
@@ -12,8 +14,33 @@ export type BoardSaver = {
   readonly elements: unknown[];
   load(loaded: LoadedBoard): void;
   edit(elements: readonly unknown[]): void;
-  flush(): Promise<void>;
+  flush(): Promise<'saved' | 'unsaved'>;
 };
+
+export type LoadGate =
+  | { open: false; message: string }
+  | { open: true; elements: readonly unknown[]; revision: number };
+
+/** A failed read keeps the stored row. Drawing stays closed until a later read succeeds. */
+export function gateLoadedBoard(
+  result: { ok: true; board: LoadedBoard } | { ok: false; corrupt: boolean },
+): LoadGate {
+  if (!result.ok) {
+    return {
+      open: false,
+      message: result.corrupt
+        ? 'This whiteboard could not be read. It was not replaced.'
+        : 'Could not open this whiteboard. Nothing was changed.',
+    };
+  }
+  return { open: true, elements: result.board?.elements ?? [], revision: result.board?.revision ?? 0 };
+}
+
+/** Notes leaves only after a successful flush, or after the user confirms the unsaved strokes. */
+export function backAfterFlush(result: 'saved' | 'unsaved', confirmedLeave: boolean): 'stay' | 'leave' {
+  if (result === 'saved') return 'leave';
+  return confirmedLeave ? 'leave' : 'stay';
+}
 
 function elementId(value: unknown): string | null {
   if (!value || typeof value !== 'object' || !('id' in value)) return null;
@@ -53,7 +80,10 @@ export function mergeBoardElements(saved: readonly unknown[], local: readonly un
  * save is in flight is written next, using the revision that save returned.
  * A failed write stays queued for the next edit or flush.
  */
-export function createBoardSaver(write: (save: BoardWrite) => Promise<{ revision: number }>): BoardSaver {
+export function createBoardSaver(
+  write: (save: BoardWrite) => Promise<{ revision: number }>,
+  onStatus?: (status: BoardSaveStatus) => void,
+): BoardSaver {
   let ready = false;
   let dirty = false;
   let revision = 0;
@@ -67,17 +97,22 @@ export function createBoardSaver(write: (save: BoardWrite) => Promise<{ revision
     const snapshot = queued;
     queued = null;
     writing = true;
+    onStatus?.('saving');
     const expectedRevision = revision > 0 ? revision : undefined;
     tail = tail.then(async () => {
       let failed = false;
       try {
         const saved = await write({ elements: snapshot, expectedRevision });
         revision = saved.revision;
-        if (queued === null) dirty = false;
+        if (queued === null) {
+          dirty = false;
+          onStatus?.('saved');
+        }
       } catch {
         failed = true;
         if (queued === null) queued = snapshot;
         dirty = true;
+        onStatus?.('unsaved');
       } finally {
         writing = false;
       }
@@ -118,8 +153,10 @@ export function createBoardSaver(write: (save: BoardWrite) => Promise<{ revision
         pump();
         await pending;
         await tail;
-        if (!writing && queued === null) return;
+        if (!writing && queued === null && !dirty) return 'saved';
       }
+      onStatus?.('unsaved');
+      return 'unsaved';
     },
   };
 }
