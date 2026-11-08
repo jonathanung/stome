@@ -43,6 +43,41 @@ test('compressed content streams are read', async () => {
   assert.deepEqual(note.bodies, ['## Page 1\nCompressed text survives.']);
 });
 
+test('compressed PDF text is readable when browser DecompressionStream is absent', async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'DecompressionStream');
+  Reflect.deleteProperty(globalThis, 'DecompressionStream');
+  try {
+    const note = await parse(simplePdf([lines('Mobile compression works.')], { compress: true }));
+    assert.deepEqual(note.bodies, ['## Page 1\nMobile compression works.']);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, 'DecompressionStream', previous);
+  }
+});
+
+test('a single long PDF text line retains its tail across chunks', async () => {
+  const text = 'x'.repeat(60_000) + 'TAIL_SENTINEL';
+  const note = await parse(simplePdf([lines(text)]));
+  assert.equal(note.bodies.length, 2);
+  assert.equal(note.bodies.map((body) => body.slice('## Page 1\n'.length)).join(''), text);
+  assert.deepEqual(note.pages, [1, 1]);
+  assert.ok(note.bodies.every((body) => body.length <= 50_000));
+});
+
+test('long PDF text does not split a Unicode surrogate pair at a chunk boundary', async () => {
+  const b = new PdfBuilder();
+  const cmap = b.stream('', '1 begincodespacerange <0000> <FFFF> endcodespacerange 1 beginbfchar <0001> <D83DDE00> endbfchar');
+  const font = b.add(`<< /Type /Font /Subtype /Type0 /Encoding /Identity-H /DescendantFonts [] /ToUnicode ${cmap} 0 R >>`);
+  const pagesId = b.reserve();
+  const content = b.stream('', `BT /F1 12 Tf <${'0001'.repeat(30_000)}> Tj ET`);
+  const page = b.add(`<< /Type /Page /Parent ${pagesId} 0 R /Contents ${content} 0 R /Resources << /Font << /F1 ${font} 0 R >> >> >>`);
+  b.set(pagesId, `<< /Type /Pages /Kids [${page} 0 R] /Count 1 >>`);
+  const catalog = b.add(`<< /Type /Catalog /Pages ${pagesId} 0 R >>`);
+  const note = await parse(b.build(`/Root ${catalog} 0 R`));
+  const parts = note.bodies.map((body) => body.slice('## Page 1\n'.length));
+  assert.equal(parts.join(''), '😀'.repeat(30_000));
+  assert.ok(parts.every((part) => part.length % 2 === 0));
+});
+
 test('the file name is the title when the PDF has none', async () => {
   const note = await parse(simplePdf([lines('x')]), 'Stats/Lecture 9.pdf');
   assert.equal(note.title, 'Lecture 9');
