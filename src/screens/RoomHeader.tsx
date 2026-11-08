@@ -34,8 +34,8 @@ const Action = ({ label, accessibilityLabel, onPress, primary, icon }: ActionPro
 };
 
 /** Room header from the design: back link, name, stage badge, save status, and the three room actions. */
-export function RoomHeader({ room, chunkCount, onBack, onAsk, onNewNote }: {
-  room: Room; chunkCount: number; onBack(): void; onAsk(): void; onNewNote(): void;
+export function RoomHeader({ room, chunkCount, onBack, onAsk, onNewNote, onImport }: {
+  room: Room; chunkCount: number; onBack(): void; onAsk(): void; onNewNote(): void; onImport(): void;
 }) {
   const theme = useStoneTheme();
   const { width } = useWindowDimensions();
@@ -67,6 +67,7 @@ export function RoomHeader({ room, chunkCount, onBack, onAsk, onNewNote }: {
         </Pressable>
       </Link>
       <Action label="ask" accessibilityLabel="Ask about this room" icon="ask" onPress={onAsk} />
+      <Action label="import notes" accessibilityLabel="Import notes into this room" onPress={onImport} />
       <Action label="new note" accessibilityLabel="Jump to new note" icon="plus" primary onPress={onNewNote} />
     </View>
   </View>;

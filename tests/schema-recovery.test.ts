@@ -26,9 +26,9 @@ async function applyBase(db: ReturnType<typeof nodeDb>): Promise<void> {
   for (const migration of MIGRATIONS.filter((item) => item.version < 5)) await db.exec(migration.sql);
 }
 
-test('version 5 and 6 stay as shipped on main, and version 7 adds the missing table', async () => {
-  assert.equal(MIGRATIONS.map((item) => item.version).join(','), '1,2,3,4,5,6,7');
-  assert.equal(SUPPORTED_VERSION, 7);
+test('versions 5 through 7 stay as shipped on main, and version 8 adds the missing table', async () => {
+  assert.equal(MIGRATIONS.map((item) => item.version).join(','), '1,2,3,4,5,6,7,8');
+  assert.equal(SUPPORTED_VERSION, 8);
   const review = MIGRATIONS.find((item) => item.version === 5);
   assert.equal(review?.name, 'human review marks');
   assert.match(review?.sql ?? '', /CREATE TABLE review_marks/);
@@ -38,7 +38,11 @@ test('version 5 and 6 stay as shipped on main, and version 7 adds the missing ta
   assert.equal(study?.name, 'study materials grounded in room notes');
   assert.match(study?.sql ?? '', /CREATE TABLE study_decks/);
   assert.equal((study?.sql ?? '').includes('whiteboards'), false);
-  const repair = MIGRATIONS.find((item) => item.version === 7);
+  const answers = MIGRATIONS.find((item) => item.version === 7);
+  assert.equal(answers?.name, 'pinned answer review marks (REV.3 #127, annotation-keyed)');
+  assert.match(answers?.sql ?? '', /CREATE TABLE answer_marks/);
+  assert.equal((answers?.sql ?? '').includes('whiteboards'), false);
+  const repair = MIGRATIONS.find((item) => item.version === 8);
   assert.match(repair?.sql ?? '', /CREATE TABLE IF NOT EXISTS review_marks/);
   assert.match(repair?.sql ?? '', /CREATE TABLE IF NOT EXISTS whiteboards/);
 
@@ -56,7 +60,7 @@ test('version 5 and 6 stay as shipped on main, and version 7 adds the missing ta
     "INSERT INTO review_marks (chunk_id, local_day, state, marked_at, due_at, time_zone) VALUES ('c1', '2026-11-07', 'missed', 10, 20, 'UTC')",
   );
   await migrateDb(reviewed);
-  assert.equal((await reviewed.get<{ user_version: number }>('PRAGMA user_version'))?.user_version, 7);
+  assert.equal((await reviewed.get<{ user_version: number }>('PRAGMA user_version'))?.user_version, 8);
   const kept = await reviewed.get<{ local_day: string; state: string; marked_at: number; due_at: number; time_zone: string }>(
     'SELECT local_day, state, marked_at, due_at, time_zone FROM review_marks WHERE chunk_id = ?',
     ['c1'],
@@ -81,7 +85,7 @@ test('version 5 and 6 stay as shipped on main, and version 7 adds the missing ta
     ['[{"id":"t1","kind":"text","x":1,"y":2,"text":"keep"}]'],
   );
   await migrateDb(boarded);
-  assert.equal((await boarded.get<{ user_version: number }>('PRAGMA user_version'))?.user_version, 7);
+  assert.equal((await boarded.get<{ user_version: number }>('PRAGMA user_version'))?.user_version, 8);
   const board = await boarded.get<{ revision: number; items: string; updated_at: number }>(
     'SELECT revision, items, updated_at FROM whiteboards WHERE room_id = ?',
     ['r1'],
@@ -108,7 +112,7 @@ test('version 5 and 6 stay as shipped on main, and version 7 adds the missing ta
     "INSERT INTO study_decks (id, room_id, title, source_chunk_ids, source_revision, created_at, updated_at) VALUES ('d1', 'r1', 'deck', '[]', 1, 3, 3)",
   );
   await migrateDb(studied);
-  assert.equal((await studied.get<{ user_version: number }>('PRAGMA user_version'))?.user_version, 7);
+  assert.equal((await studied.get<{ user_version: number }>('PRAGMA user_version'))?.user_version, 8);
   assert.equal((await studied.get<{ revision: number }>('SELECT revision FROM whiteboards WHERE room_id = ?', ['r1']))?.revision, 2);
   assert.equal((await studied.get<{ title: string }>('SELECT title FROM study_decks WHERE id = ?', ['d1']))?.title, 'deck');
   assert.equal((await studied.get<{ n: number }>('SELECT COUNT(*) AS n FROM review_marks'))?.n, 0);
