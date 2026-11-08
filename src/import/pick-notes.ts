@@ -3,6 +3,7 @@ import { getDocumentAsync } from 'expo-document-picker';
 import { File } from 'expo-file-system';
 import { Platform } from 'react-native';
 
+import { MAX_IMPORT_BATCH, batchLimitMessage } from './batch';
 import { MAX_FREEFORM_IMAGE_BYTES, isFreeformImagePath, parseFreeformImage } from './freeform/parse';
 import { MAX_IMPORT_BYTES, parseMarkdown, type ParsedNote } from './markdown';
 import { parseOneNoteBytes, parseOneNoteText } from './onenote/parse';
@@ -30,14 +31,17 @@ function ownedBytes(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
   return copy;
 }
 
-/** Native picker URIs are temporary; callers review a stable source path. */
-export async function pickNotes(): Promise<{ notes: PickedNote[]; errors: string[] } | null> {
+/**
+ * Native picker URIs are temporary; callers review a stable source path.
+ * `limit` is how many more notes the current batch can take.
+ */
+export async function pickNotes(limit = MAX_IMPORT_BATCH): Promise<{ notes: PickedNote[]; errors: string[] } | null> {
   const result = await getDocumentAsync({ type: '*/*', multiple: true, copyToCacheDirectory: true, base64: false });
   if (result.canceled) return null;
   const errors: string[] = [];
   const notes: PickedNote[] = [];
-  if (result.assets.length > 20) errors.push('Only the first 20 files were read. Import the remaining files in another batch.');
-  for (const asset of result.assets.slice(0, 20)) {
+  if (result.assets.length > limit) errors.push(batchLimitMessage(result.assets.length - limit));
+  for (const asset of result.assets.slice(0, limit)) {
     try {
       if (/\.pdf$/i.test(asset.name)) {
         if (asset.size !== undefined && asset.size > MAX_PDF_BYTES) throw new Error('Each PDF must be at most 8 MiB.');
