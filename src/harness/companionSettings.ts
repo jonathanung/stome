@@ -1,8 +1,11 @@
 import { useSyncExternalStore } from 'react';
 
+import { DEFAULT_COMPANION_URL, defaultCompanionUrl, readCompanionContext } from './companionAddress.ts';
 import { fetchCompanionStatus } from './companionClient';
 import type { MockScenario } from './contract';
 import type { CompanionStatus } from './tools';
+
+export { DEFAULT_COMPANION_URL };
 
 export type CompanionSettings = {
   url: string;
@@ -15,10 +18,8 @@ export type CompanionSettings = {
   limits: { timeoutSec: string; maxChunks: string; maxAnswerChars: string };
 };
 
-export const DEFAULT_COMPANION_URL = 'http://127.0.0.1:8787';
-
 let settings: CompanionSettings = {
-  url: DEFAULT_COMPANION_URL,
+  url: defaultCompanionUrl(readCompanionContext()),
   token: '',
   scenario: 'success',
   status: null,

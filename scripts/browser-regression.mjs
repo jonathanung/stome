@@ -656,7 +656,7 @@ async function main() {
         STOME_COMPANION_PORT: String(companionPort),
       },
     );
-    const webChild = startProcess('web', ['node', 'scripts/serve-web.mjs'], 'serve-web.mjs', {
+    const webChild = startProcess('web', ['node', '--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', 'scripts/serve-web.mjs'], 'serve-web.mjs', {
       STOME_WEB_PORT: String(webPort),
       EXPO_INTERNAL_PORT: String(expoPort),
     });
@@ -928,7 +928,7 @@ async function main() {
       consoleTail,
       commands: [
         'node --experimental-strip-types --import ./scripts/register-harness.mjs companion/server.ts',
-        'node scripts/serve-web.mjs',
+        'node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/serve-web.mjs',
         'node scripts/browser-regression.mjs',
       ],
     });

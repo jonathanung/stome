@@ -11,6 +11,7 @@ import { Field, Notice } from '../../ui/kit';
 import { getRoom, listChunks, listRooms } from '../../data/queries';
 import { expoDriver } from '../../db/expo-driver';
 import { LAST_ROOM_KEY, canSubmit } from './draft';
+import { commitCapture } from './commitSignal';
 import { captureLayerGeometry } from './geometry';
 import { CAPTURE_SHORTCUT_LABEL, isCaptureShortcut } from './shortcut';
 import { onCaptureOpenRequest } from './openSignal';
@@ -66,15 +67,12 @@ export function QuickCapture() {
 
   useEffect(() => {
     controller.setLive({
-      commit: async (operation) => {
-        try {
-          const result = await commit(operation);
-          if (!result.ok) return { ok: false, message: result.error.message };
-          return { ok: true, duplicate: result.duplicate };
-        } catch (reason) {
-          return { ok: false, message: reason instanceof Error ? reason.message : 'Could not save' };
-        }
-      },
+      commit: (operation) => commitCapture(operation, async (capture) => {
+        const result = await commit(capture);
+        return result.ok
+          ? { ok: true, duplicate: result.duplicate }
+          : { ok: false, message: result.error.message };
+      }),
       destination: async () => {
         const rooms = await listRooms(db);
         const last = readStorageItem(browserStorage('local'), LAST_ROOM_KEY);
