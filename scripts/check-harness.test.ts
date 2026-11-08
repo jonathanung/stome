@@ -10,8 +10,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { startBoardService } from '../companion/board-service.ts';
 import { mockBoardProvider } from '../companion/board-provider.ts';
+import { startBoardService } from '../companion/board-service.ts';
 import { pairingTtlMs, startCompanion } from '../companion/server.ts';
 import { parseBoardReply, parseBoardRequest } from '../src/whiteboard/assistant.ts';
 import { createCommit } from '../src/data/commit.ts';

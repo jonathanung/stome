@@ -11,6 +11,11 @@ export const REVIEW_STATES = ['missed', 'unclear', 'got_it'] as const;
 
 export type ReviewState = (typeof REVIEW_STATES)[number];
 
+/** Shapes a generated study question can take (STUDY.1 #130). */
+export const STUDY_QUESTION_KINDS = ['mcq', 'true_false', 'fill'] as const;
+
+export type StudyQuestionKind = (typeof STUDY_QUESTION_KINDS)[number];
+
 export type AnnotationPayload = Record<string, unknown>;
 
 export type Room = {

@@ -3,6 +3,7 @@ import { getDocumentAsync } from 'expo-document-picker';
 import { File } from 'expo-file-system';
 import { Platform } from 'react-native';
 
+import { MAX_FREEFORM_IMAGE_BYTES, isFreeformImagePath, parseFreeformImage } from './freeform/parse';
 import { MAX_IMPORT_BYTES, parseMarkdown, type ParsedNote } from './markdown';
 import { parseOneNoteBytes, parseOneNoteText } from './onenote/parse';
 import { MAX_PDF_BYTES, parsePdf } from './pdf/parse';
@@ -10,7 +11,7 @@ import { MAX_PDF_BYTES, parsePdf } from './pdf/parse';
 export interface PickedNote extends ParsedNote {
   fingerprint: string;
   /** Present for every file read here. Markdown stays on the Markdown parser. */
-  exportFormat?: 'markdown' | 'onenote-html' | 'onenote-mhtml' | 'onenote-docx' | 'pdf';
+  exportFormat?: 'markdown' | 'onenote-html' | 'onenote-mhtml' | 'onenote-docx' | 'pdf' | 'freeform-image';
   /** PDF only: the page number of each body, in order. */
   pages?: number[];
 }
@@ -45,9 +46,16 @@ export async function pickNotes(): Promise<{ notes: PickedNote[]; errors: string
         notes.push({ ...note, fingerprint: hexDigest(await digest(CryptoDigestAlgorithm.SHA256, bytes)) });
         continue;
       }
+      if (isFreeformImagePath(asset.name)) {
+        if (asset.size !== undefined && asset.size > MAX_FREEFORM_IMAGE_BYTES) throw new Error('Each image must be at most 8 MiB.');
+        const bytes = ownedBytes(await readBoundedBytes(asset, MAX_FREEFORM_IMAGE_BYTES));
+        const note = parseFreeformImage({ path: asset.name, bytes });
+        notes.push({ ...note, fingerprint: hexDigest(await digest(CryptoDigestAlgorithm.SHA256, bytes)) });
+        continue;
+      }
       if (asset.size !== undefined && asset.size > MAX_IMPORT_BYTES) throw new Error('Each note must be at most 1 MiB.');
       const docx = /\.docx$/i.test(asset.name);
-      if (!docx && !TEXT_EXPORT.test(asset.name)) throw new Error('Only UTF-8 Markdown, OneNote HTML, MHTML and DOCX exports, and PDF files are supported.');
+      if (!docx && !TEXT_EXPORT.test(asset.name)) throw new Error('Only UTF-8 Markdown, OneNote HTML, MHTML and DOCX exports, PDF files, and PNG or JPEG board images are supported.');
       if (docx) {
         const bytes = ownedBytes(await readBoundedBytes(asset));
         const note = await parseOneNoteBytes({ path: asset.name, bytes });

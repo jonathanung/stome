@@ -22,6 +22,7 @@ import { QuickCapture } from '../features/capture/QuickCapture';
 import { installHarnessRandomBytes } from '../harness/ids';
 import { StorageOpening, StorageStartupScreen } from '../screens/StorageStartup';
 import { stackHeaderOptions } from '../theme/stack-header';
+import { AppShell } from '../ui/shell/AppShell';
 
 installHarnessRandomBytes((size) => getRandomBytes(size));
 
@@ -108,6 +109,7 @@ export default function RootLayout() {
     Outfit_800ExtraBold,
     Outfit_900Black,
   });
+  // A font that fails to load falls back to the system face rather than blocking the app.
   const ready = loaded || Boolean(error);
   if (!ready) {
     return (
@@ -123,7 +125,7 @@ export default function RootLayout() {
         <DatabaseBoundary>
           <Suspense fallback={<StorageOpening />}>
             <SQLiteProvider databaseName={DATABASE_NAME} onInit={prepareDatabase} useSuspense>
-              <AppStack />
+              <AppShell><AppStack /></AppShell>
               <QuickCapture />
             </SQLiteProvider>
           </Suspense>

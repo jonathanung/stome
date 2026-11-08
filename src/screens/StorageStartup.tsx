@@ -9,6 +9,7 @@ import {
   AUTO_RETRY_LIMIT,
   canAutoRetry,
   readAttempt,
+  readFirstAttemptAt,
   recordRetry,
   type StorageFailure,
 } from '../db/storage-startup';
@@ -32,6 +33,35 @@ function sessionStore() {
   } catch {
     return null;
   }
+}
+
+/** Asks any other stome tab to let go of the database. Best effort; absent where BroadcastChannel is. */
+function requestTakeover() {
+  try {
+    if (Platform.OS !== 'web' || typeof BroadcastChannel === 'undefined') return;
+    const channel = new BroadcastChannel('stome.storage');
+    channel.postMessage({ type: 'takeover' });
+    channel.close();
+  } catch {
+    // Nothing to tell: the retry that follows is the whole recovery.
+  }
+}
+
+function copyText(text: string) {
+  try {
+    if (Platform.OS === 'web' && typeof navigator !== 'undefined') void navigator.clipboard?.writeText(text);
+  } catch {
+    // The details are also selectable text.
+  }
+}
+
+function pad2(value: number) {
+  return String(value).padStart(2, '0');
+}
+
+function clockTime(at: number) {
+  const date = new Date(at);
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
 }
 
 function StoneMark({ color, accent }: { color: string; accent: string }) {
@@ -67,6 +97,8 @@ export function StorageStartupScreen({
   const busy = failure.kind === 'busy';
   const showRetry = failure.canRetry && onRetry != null;
   const [attempt] = useState(() => readAttempt(sessionStore()));
+  const [firstAt] = useState(() => readFirstAttemptAt(sessionStore()));
+  const [copied, setCopied] = useState(false);
   const auto = busy && showRetry && canAutoRetry(failure, attempt);
   const [seconds, setSeconds] = useState(AUTO_RETRY_DELAY_SECONDS);
   const [opened, setOpened] = useState(false);
@@ -86,6 +118,13 @@ export function StorageStartupScreen({
     const id = setTimeout(() => setSeconds((value) => value - 1), 1000);
     return () => clearTimeout(id);
   }, [auto, retrying, seconds, onRetry]);
+
+  const takeOver = () => {
+    requestTakeover();
+    retryNow();
+  };
+  const isolated = typeof crossOriginIsolated === 'boolean' ? (crossOriginIsolated ? 'yes' : 'no') : 'unknown';
+  const details = `${failure.diagnostic}\ncross-origin isolated: ${isolated}\nattempts: ${attempt} · first at ${clockTime(firstAt)}`;
 
   const secondary = { color: theme.color.text.secondary };
   const warning = theme.color.status.warning;
@@ -140,7 +179,7 @@ export function StorageStartupScreen({
                 ) : null}
                 {busy ? (
                   <View style={{ gap: 10 }}>
-                    {['close other stome tabs or windows on this device', 'then try again here'].map((step, index) => (
+                    {['close other stome tabs or windows on this device', 'or open stome here and the other tab will pause'].map((step, index) => (
                       <View key={step} style={{ flexDirection: 'row', gap: 12, alignItems: 'flex-start' }}>
                         <View
                           style={{
@@ -166,6 +205,7 @@ export function StorageStartupScreen({
                       disabled={retrying}
                       onPress={retryNow}
                     />
+                    {busy ? <Button label="use this tab" variant="outline" disabled={retrying} onPress={takeOver} /> : null}
                   </View>
                 ) : null}
                 <View>
@@ -195,8 +235,18 @@ export function StorageStartupScreen({
                           { color: theme.color.text.secondary, fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }) },
                         ]}
                       >
-                        {`${failure.diagnostic}\nattempt ${attempt}`}
+                        {details}
                       </Text>
+                      <Pressable
+                        accessibilityRole="button"
+                        onPress={() => {
+                          copyText(details);
+                          setCopied(true);
+                        }}
+                        style={{ minHeight: 32, justifyContent: 'center' }}
+                      >
+                        <Text style={[theme.text('bodySmall'), secondary]}>{copied ? 'copied' : 'copy'}</Text>
+                      </Pressable>
                     </View>
                   ) : null}
                 </View>

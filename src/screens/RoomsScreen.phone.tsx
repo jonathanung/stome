@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { ActivityIndicator, Animated, FlatList, KeyboardAvoidingView, PanResponder, Platform, Pressable, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button, Screen, useStoneTheme } from '../../design-theme/src/primitives';
@@ -21,11 +21,59 @@ export interface RoomsPhoneProps {
   onDelete: (room: Room) => Promise<boolean>;
 }
 
+const ACTION_WIDTH = 66;
+
+interface SwipeAction { label: string; tone: 'strong' | 'danger'; onPress: () => void }
+
+/** A row that slides left to reveal action buttons. Only one row is open at a time (parent owns `open`). */
+function SwipeActions({ open, onOpenChange, actions, borderBottom, children }: {
+  open: boolean; onOpenChange: (open: boolean) => void; actions: SwipeAction[]; borderBottom: boolean; children: ReactNode;
+}) {
+  const theme = useStoneTheme();
+  const reveal = ACTION_WIDTH * actions.length;
+  const [x] = useState(() => new Animated.Value(0));
+  const live = useRef({ base: 0, open, reveal, notify: onOpenChange });
+  const [pan, setPan] = useState<ReturnType<typeof PanResponder.create> | null>(null);
+  // `live` carries the latest props into the gesture callbacks; it is only touched in effects and handlers.
+  useEffect(() => {
+    const m = live.current;
+    m.open = open; m.reveal = reveal; m.notify = onOpenChange; m.base = open ? -reveal : 0;
+    Animated.timing(x, { toValue: m.base, duration: 160, useNativeDriver: true }).start();
+  }, [x, open, reveal, onOpenChange]);
+  useEffect(() => {
+    const m = live.current;
+    setPan(PanResponder.create({
+      onMoveShouldSetPanResponder: (_e, s) => Math.abs(s.dx) > 8 && Math.abs(s.dx) > Math.abs(s.dy) * 1.5,
+      onPanResponderMove: (_e, s) => x.setValue(Math.max(-m.reveal, Math.min(0, m.base + s.dx))),
+      onPanResponderRelease: (_e, s) => {
+        const next = m.base + s.dx < -m.reveal / 2 || s.vx < -0.5;
+        if (next === m.open) Animated.timing(x, { toValue: next ? -m.reveal : 0, duration: 120, useNativeDriver: true }).start();
+        else m.notify(next);
+      },
+      onPanResponderTerminate: () => Animated.timing(x, { toValue: m.open ? -m.reveal : 0, duration: 120, useNativeDriver: true }).start(),
+    }));
+  }, [x]);
+
+  return (
+    <View style={{ flexDirection: 'row', overflow: 'hidden', borderBottomWidth: borderBottom ? 1 : 0, borderBottomColor: theme.color.border.hairline }}>
+      <View style={{ position: 'absolute', right: 0, top: 0, bottom: 0, flexDirection: 'row' }}>
+        {actions.map((a) => (
+          <Pressable key={a.label} accessibilityRole="button" accessibilityLabel={a.label} disabled={!open} onPress={a.onPress}
+            style={{ width: ACTION_WIDTH, alignItems: 'center', justifyContent: 'center', backgroundColor: a.tone === 'danger' ? theme.color.status.danger.fill : theme.color.border.strong }}>
+            <Text style={[theme.text('bodySmall'), { color: theme.color.text.onFill, fontWeight: '600' }]}>{a.label}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <Animated.View {...pan?.panHandlers} style={{ flex: 1, flexDirection: 'row', transform: [{ translateX: x }] }}>{children}</Animated.View>
+    </View>
+  );
+}
+
 function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? '' : 's'}`;
 }
 
-/** Phone rooms list: lowercase title, round add, search, one rounded card of rooms. */
+/** Phone rooms list: lowercase title, round add, search, one rounded card of rooms; swipe a row left for rename and delete. */
 export function RoomsPhone({ rooms, stats, loading, error, busy, onCreate, onRename, onDelete }: RoomsPhoneProps) {
   const theme = useStoneTheme();
   const [adding, setAdding] = useState(false);
@@ -35,6 +83,7 @@ export function RoomsPhone({ rooms, stats, loading, error, busy, onCreate, onRen
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [swipedId, setSwipedId] = useState<string | null>(null);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -42,6 +91,7 @@ export function RoomsPhone({ rooms, stats, loading, error, busy, onCreate, onRen
   }, [rooms, query]);
 
   function closeManage() {
+    setSwipedId(null);
     setManagingId(null);
     setEditingId(null);
     setDeletingId(null);
@@ -117,21 +167,30 @@ export function RoomsPhone({ rooms, stats, loading, error, busy, onCreate, onRen
                 overflow: 'hidden',
                 ...(first ? theme.shadow.card : {}),
               }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', borderBottomWidth: last || managing ? 0 : 1, borderBottomColor: theme.color.border.hairline }}>
-                  <Pressable accessibilityRole="button" accessibilityLabel={`Open ${item.name}`} onPress={() => router.push(`/rooms/${item.id}`)}
-                    style={({ pressed }) => ({ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: theme.space.xl, minHeight: 64, paddingVertical: theme.space.lg, paddingLeft: theme.space.base, backgroundColor: pressed ? theme.color.bg.alt : 'transparent' })}>
-                    <StageGlyph stage={item.stage} size={48} />
+                <SwipeActions
+                  open={swipedId === item.id}
+                  onOpenChange={(open) => setSwipedId(open ? item.id : null)}
+                  borderBottom={!(last || managing)}
+                  actions={[
+                    { label: 'rename', tone: 'strong', onPress: () => { closeManage(); setManagingId(item.id); setEditName(item.name); setEditingId(item.id); } },
+                    { label: 'delete', tone: 'danger', onPress: () => { closeManage(); setManagingId(item.id); setDeletingId(item.id); } },
+                  ]}>
+                  <Pressable accessibilityRole="button" accessibilityLabel={`Open ${item.name}`}
+                    accessibilityActions={[{ name: 'rename', label: `Rename ${item.name}` }, { name: 'delete', label: `Delete ${item.name}` }]}
+                    onAccessibilityAction={(e) => {
+                      closeManage(); setManagingId(item.id);
+                      if (e.nativeEvent.actionName === 'rename') { setEditName(item.name); setEditingId(item.id); } else setDeletingId(item.id);
+                    }}
+                    onPress={() => { if (swipedId) setSwipedId(null); else router.push(`/rooms/${item.id}`); }}
+                    style={({ pressed }) => ({ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: theme.space.xl, minHeight: 72, paddingHorizontal: theme.space.base, backgroundColor: pressed ? theme.color.bg.alt : theme.color.bg.surface })}>
+                    <StageGlyph stage={item.stage} size={52} />
                     <View style={{ flex: 1, minWidth: 0, gap: theme.space.xxs }}>
                       <Text numberOfLines={1} style={[theme.text('button'), { color: theme.color.text.primary }]}>{item.name}</Text>
                       <Text numberOfLines={1} style={[theme.text('bodySmall'), { color: theme.color.text.tertiary }]}>{sub}</Text>
                     </View>
+                    <Icon name="chevronRight" size={16} color={theme.color.text.tertiary} />
                   </Pressable>
-                  <Pressable accessibilityRole="button" accessibilityLabel={`Manage ${item.name}`} accessibilityState={{ expanded: managing }}
-                    onPress={() => { if (managing) closeManage(); else { closeManage(); setManagingId(item.id); } }}
-                    style={({ pressed }) => ({ width: theme.layout.control, height: theme.layout.control, marginHorizontal: theme.space.sm, borderRadius: theme.radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: managing || pressed ? theme.color.bg.inset : 'transparent' })}>
-                    <Icon name="more" size={22} strokeWidth={2.5} color={theme.color.text.secondary} />
-                  </Pressable>
-                </View>
+                </SwipeActions>
                 {managing ? <View style={{ paddingHorizontal: theme.space.base, paddingBottom: theme.space.base, gap: theme.space.md }}>
                   {editingId === item.id ? <>
                     <Field accessibilityLabel="Rename room" value={editName} onChangeText={setEditName} autoFocus />

@@ -2,9 +2,18 @@ import { REVIEW_STATES } from './models.ts';
 
 export const DATABASE_NAME = 'stome.db';
 
-export const SUPPORTED_VERSION = 6;
+export const SUPPORTED_VERSION = 7;
 
-export { ROOM_STAGES, ANNOTATION_TYPES, REVIEW_STATES, type RoomStage, type AnnotationType, type ReviewState } from './models.ts';
+export {
+  ROOM_STAGES,
+  ANNOTATION_TYPES,
+  REVIEW_STATES,
+  STUDY_QUESTION_KINDS,
+  type RoomStage,
+  type AnnotationType,
+  type ReviewState,
+  type StudyQuestionKind,
+} from './models.ts';
 
 export const CONNECTION_PRAGMAS = 'PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;';
 
@@ -135,23 +144,115 @@ export const MIGRATIONS: readonly Migration[] = [
   },
   {
     version: 5,
-    name: 'room whiteboards',
+    name: 'human review marks',
     sql: `
-      CREATE TABLE whiteboards (
-        room_id TEXT PRIMARY KEY NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
-        revision INTEGER NOT NULL DEFAULT 1,
-        items TEXT NOT NULL CHECK (json_valid(items)),
-        updated_at INTEGER NOT NULL
+      CREATE TABLE review_marks (
+        chunk_id TEXT NOT NULL REFERENCES chunks (id) ON DELETE CASCADE,
+        local_day TEXT NOT NULL CHECK (local_day GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+        state TEXT NOT NULL CHECK (state IN (${REVIEW_STATES.map((state) => `'${state}'`).join(', ')})),
+        marked_at INTEGER NOT NULL,
+        due_at INTEGER NOT NULL,
+        time_zone TEXT NOT NULL CHECK (length(time_zone) BETWEEN 1 AND 64),
+        PRIMARY KEY (chunk_id, local_day)
       );
     `,
   },
   {
     version: 6,
+    name: 'study materials grounded in room notes',
+    sql: `
+      CREATE TABLE study_decks (
+        id TEXT PRIMARY KEY NOT NULL,
+        room_id TEXT NOT NULL REFERENCES rooms (id) ON DELETE CASCADE,
+        title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 120),
+        source_chunk_ids TEXT NOT NULL CHECK (json_valid(source_chunk_ids)),
+        source_revision INTEGER NOT NULL CHECK (source_revision >= 1),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS study_decks_room ON study_decks (room_id);
+
+      CREATE TABLE study_cards (
+        id TEXT PRIMARY KEY NOT NULL,
+        deck_id TEXT NOT NULL REFERENCES study_decks (id) ON DELETE CASCADE,
+        room_id TEXT NOT NULL REFERENCES rooms (id) ON DELETE CASCADE,
+        position INTEGER NOT NULL CHECK (position >= 0),
+        front TEXT NOT NULL CHECK (length(front) BETWEEN 1 AND 10000),
+        back TEXT NOT NULL CHECK (length(back) BETWEEN 1 AND 10000),
+        source_chunk_ids TEXT NOT NULL CHECK (json_valid(source_chunk_ids)),
+        source_revision INTEGER NOT NULL CHECK (source_revision >= 1),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS study_cards_deck ON study_cards (deck_id, position);
+      CREATE INDEX IF NOT EXISTS study_cards_room ON study_cards (room_id);
+
+      CREATE TABLE study_quizzes (
+        id TEXT PRIMARY KEY NOT NULL,
+        room_id TEXT NOT NULL REFERENCES rooms (id) ON DELETE CASCADE,
+        title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 120),
+        source_chunk_ids TEXT NOT NULL CHECK (json_valid(source_chunk_ids)),
+        source_revision INTEGER NOT NULL CHECK (source_revision >= 1),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS study_quizzes_room ON study_quizzes (room_id);
+
+      CREATE TABLE study_questions (
+        id TEXT PRIMARY KEY NOT NULL,
+        quiz_id TEXT NOT NULL REFERENCES study_quizzes (id) ON DELETE CASCADE,
+        room_id TEXT NOT NULL REFERENCES rooms (id) ON DELETE CASCADE,
+        position INTEGER NOT NULL CHECK (position >= 0),
+        kind TEXT NOT NULL CHECK (kind IN ('mcq', 'true_false', 'fill')),
+        stem TEXT NOT NULL CHECK (length(stem) BETWEEN 1 AND 10000),
+        choices TEXT NOT NULL CHECK (json_valid(choices)),
+        answer TEXT NOT NULL CHECK (length(answer) BETWEEN 1 AND 500),
+        explanation TEXT NOT NULL DEFAULT '' CHECK (length(explanation) <= 10000),
+        source_chunk_ids TEXT NOT NULL CHECK (json_valid(source_chunk_ids)),
+        source_revision INTEGER NOT NULL CHECK (source_revision >= 1),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS study_questions_quiz ON study_questions (quiz_id, position);
+      CREATE INDEX IF NOT EXISTS study_questions_room ON study_questions (room_id);
+
+      CREATE TABLE study_attempts (
+        id TEXT PRIMARY KEY NOT NULL,
+        quiz_id TEXT NOT NULL REFERENCES study_quizzes (id) ON DELETE CASCADE,
+        room_id TEXT NOT NULL REFERENCES rooms (id) ON DELETE CASCADE,
+        score_pct REAL NOT NULL CHECK (score_pct BETWEEN 0 AND 100),
+        correct INTEGER NOT NULL CHECK (correct >= 0),
+        total INTEGER NOT NULL CHECK (total >= 1),
+        results TEXT NOT NULL CHECK (json_valid(results)),
+        duration_ms INTEGER NOT NULL CHECK (duration_ms >= 0),
+        created_at INTEGER NOT NULL,
+        CHECK (correct <= total)
+      );
+      CREATE INDEX IF NOT EXISTS study_attempts_quiz ON study_attempts (quiz_id, created_at);
+      CREATE INDEX IF NOT EXISTS study_attempts_room ON study_attempts (room_id);
+
+      CREATE TABLE slide_outlines (
+        id TEXT PRIMARY KEY NOT NULL,
+        room_id TEXT NOT NULL REFERENCES rooms (id) ON DELETE CASCADE,
+        title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 120),
+        slides TEXT NOT NULL CHECK (json_valid(slides)),
+        source_chunk_ids TEXT NOT NULL CHECK (json_valid(source_chunk_ids)),
+        source_revision INTEGER NOT NULL CHECK (source_revision >= 1),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS slide_outlines_room ON slide_outlines (room_id);
+    `,
+  },
+  {
+    version: 7,
     name: 'review marks and whiteboards both exist',
-    // Version 5 was published twice. #79 created review_marks. #123 replaced
-    // that same version with whiteboards. user_version cannot say which SQL
-    // ran, so this step does not renumber 5. It creates whichever table is
-    // absent and leaves an existing table, including its rows, alone.
+    // #79 published user_version 5 as review_marks. #123 replaced that same
+    // version with whiteboards, and #145 reverted the merge. A database that
+    // already applied the replaced SQL stays at 5 (or 6, once study ran) and
+    // will not run version 5 again. Version 6 is the study migration shipped
+    // on main and is not renumbered. This step creates whichever of the two
+    // tables is missing and does not rewrite rows or applied operation ids.
     sql: `
       CREATE TABLE IF NOT EXISTS review_marks (
         chunk_id TEXT NOT NULL REFERENCES chunks (id) ON DELETE CASCADE,

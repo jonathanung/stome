@@ -8,7 +8,7 @@ import { parseBoardReply, parseBoardRequest } from '../src/whiteboard/assistant.
 import { mockBoardProvider, openAiBoardProvider, type BoardProvider } from './board-provider.ts';
 
 const LOOPBACK_HOST = '127.0.0.1';
-const RAW_BODY_LIMIT = 40_000;
+const RAW_BODY_LIMIT = PROVIDER_LIMITS.maxRequestChars + 2_000;
 
 type CompanionOptions = {
   origin: string;

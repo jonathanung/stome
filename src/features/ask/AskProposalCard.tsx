@@ -2,6 +2,7 @@ import { Pressable, Text, View } from 'react-native';
 
 import { useStoneTheme } from '../../../design-theme/src/primitives';
 import { AnswerCitations } from './AnswerCitations';
+import { SourceBadge } from './RoomAskPanel';
 import {
   citationsForProposal,
   type ChunkFocus,
@@ -59,6 +60,7 @@ export function AskProposalCard({
       </View>
       <Text style={[theme.text('bodySmall'), { color: theme.color.text.primary }]} testID="proposal-body">
         {body}
+        {citations.map((citation, index) => <SourceBadge key={citation.chunkId} n={index + 1} />)}
       </Text>
       <AnswerCitations chunks={chunks} onOpen={onOpen} proposal={proposal} selectedChunkIds={selectedChunkIds} />
       {pin ? (
