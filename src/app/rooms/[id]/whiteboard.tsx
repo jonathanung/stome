@@ -10,7 +10,7 @@ export default function WhiteboardRoute() {
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
-      <WhiteboardScreen onBack={() => (router.canGoBack() ? router.back() : router.replace(whiteboardNotesTarget(roomId)))} />
+      <WhiteboardScreen key={roomId ?? 'board'} roomId={roomId} onBack={() => (router.canGoBack() ? router.back() : router.replace(whiteboardNotesTarget(roomId)))} />
     </>
   );
 }

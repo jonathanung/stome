@@ -2,7 +2,7 @@ import { REVIEW_STATES } from './models.ts';
 
 export const DATABASE_NAME = 'stome.db';
 
-export const SUPPORTED_VERSION = 7;
+export const SUPPORTED_VERSION = 8;
 
 export {
   ROOM_STAGES,
@@ -256,6 +256,20 @@ export const MIGRATIONS: readonly Migration[] = [
         due_at INTEGER NOT NULL,
         time_zone TEXT NOT NULL CHECK (length(time_zone) BETWEEN 1 AND 64),
         PRIMARY KEY (annotation_id, local_day)
+      );
+    `,
+  },
+  {
+    version: 8,
+    name: 'one whiteboard document per room',
+    sql: `
+      CREATE TABLE room_whiteboards (
+        id TEXT PRIMARY KEY NOT NULL,
+        room_id TEXT NOT NULL UNIQUE REFERENCES rooms (id) ON DELETE CASCADE,
+        elements TEXT NOT NULL CHECK (json_valid(elements) AND json_type(elements) = 'array'),
+        revision INTEGER NOT NULL CHECK (revision >= 1),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
       );
     `,
   },

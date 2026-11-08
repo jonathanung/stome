@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { randomUUID } from 'expo-crypto';
+import { useSQLiteContext } from 'expo-sqlite';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Platform,
   Pressable,
@@ -11,6 +13,9 @@ import {
 import Svg, { Circle, Defs, G, Pattern, Rect } from 'react-native-svg';
 
 import { useStoneTheme } from '../../design-theme/src/primitives';
+import { createCommit } from '../data/commit';
+import { getRoomWhiteboard } from '../data/queries';
+import { expoDriver } from '../db/expo-driver';
 import { Icon } from '../ui/Icon';
 import { ElementRenderer } from './ElementRenderer';
 import { StylePanel, type ElementStyle } from './StylePanel';
@@ -25,6 +30,7 @@ import {
 } from './types';
 import { pointerOnCanvas, zoomTransform } from './geometry';
 import { appendBoardHistory } from './history';
+import { createBoardSaver, type BoardSaver } from './persist';
 import { createWhiteboardPanResponder, type TextEditState } from './useWhiteboardInput';
 
 const MIN_SCALE = 0.1;
@@ -42,7 +48,12 @@ function hostElement(node: unknown): HTMLElement | null {
   return null;
 }
 
-export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
+export function WhiteboardScreen({ onBack, roomId }: { onBack?: () => void; roomId?: string } = {}) {
+  const sqlite = useSQLiteContext();
+  const db = useMemo(() => expoDriver(sqlite), [sqlite]);
+  const acceptInputRef = useRef(!roomId);
+  const saverRef = useRef<BoardSaver | null>(null);
+  const [boardReady, setBoardReady] = useState(!roomId);
   const [elements, setElements] = useState<WhiteboardElement[]>([]);
   const [history, setHistory] = useState<WhiteboardElement[][]>([[]]);
   const [historyIndex, setHistoryIndex] = useState(0);
@@ -98,12 +109,71 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
     setHistory(applied.history);
     setHistoryIndex(applied.index);
     setElements(newElements);
+    if (acceptInputRef.current) saverRef.current?.edit(newElements);
   }
 
   useEffect(() => {
     pushHistoryRef.current = pushHistory;
     setTextEditStable.current = (s: TextEditState) => setTextEdit(s);
   });
+
+  useEffect(() => {
+    if (!roomId) {
+      acceptInputRef.current = true;
+      saverRef.current = null;
+      return;
+    }
+    let cancelled = false;
+    const commit = createCommit(db, { now: () => Date.now(), newId: () => randomUUID() });
+    const saver = createBoardSaver(async (save) => {
+      const send = (expectedRevision: number | undefined) => commit({
+        opId: randomUUID(),
+        kind: 'whiteboard.save',
+        source: 'human',
+        confirmed: false,
+        expectedRevision,
+        payload: { roomId, elements: save.elements },
+      });
+      let result = await send(save.expectedRevision);
+      if (!result.ok && result.error.code === 'stale_revision') {
+        const current = await getRoomWhiteboard(db, roomId);
+        result = await send(current?.revision);
+      }
+      if (!result.ok) throw new Error(result.error.message);
+      return { revision: result.value.revision };
+    });
+    saverRef.current = saver;
+    acceptInputRef.current = false;
+    void getRoomWhiteboard(db, roomId).then((loaded) => {
+      if (cancelled) return;
+      saver.load(loaded ? { elements: loaded.elements, revision: loaded.revision } : null);
+      const next = saver.elements as WhiteboardElement[];
+      elementsRef.current = next;
+      historyRef.current = [next];
+      historyIndexRef.current = 0;
+      setElements(next);
+      setHistory([next]);
+      setHistoryIndex(0);
+      acceptInputRef.current = true;
+      setBoardReady(true);
+    }).catch(() => {
+      if (!cancelled) {
+        acceptInputRef.current = true;
+        setBoardReady(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+      void saver.flush();
+    };
+  }, [db, roomId]);
+
+  const leave = useCallback(() => {
+    void (async () => {
+      await saverRef.current?.flush();
+      onBack?.();
+    })();
+  }, [onBack]);
 
   function undo() {
     if (historyIndexRef.current === 0) return;
@@ -113,6 +183,7 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
     elementsRef.current = next;
     setHistoryIndex(idx);
     setElements(next);
+    if (acceptInputRef.current) saverRef.current?.edit(next);
   }
 
   function redo() {
@@ -123,6 +194,7 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
     elementsRef.current = next;
     setHistoryIndex(idx);
     setElements(next);
+    if (acceptInputRef.current) saverRef.current?.edit(next);
   }
 
   function clear() {
@@ -156,6 +228,7 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
       setTransform,
       setElements,
       canvasOriginRef,
+      acceptInputRef,
     }).panHandlers,
   );
   /* eslint-enable react-hooks/refs */
@@ -323,6 +396,7 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
           Platform.OS === 'web' && ({ cursor, userSelect: 'none', WebkitUserSelect: 'none' } as object),
         ]}
         onLayout={onLayout}
+        testID={boardReady ? 'whiteboard-ready' : 'whiteboard-loading'}
         {...panHandlers}
       >
         <Svg width={canvasSize.width} height={canvasSize.height}>
@@ -394,7 +468,7 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
       {onBack ? (
         <Pressable
           style={[styles.backButton, { backgroundColor: theme.color.bg.surface, shadowColor: theme.color.text.primary }]}
-          onPress={onBack}
+          onPress={leave}
           accessibilityLabel="Back to Notes"
         >
           <Icon name="chevronLeft" size={18} color={theme.color.text.secondary} />

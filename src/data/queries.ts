@@ -531,6 +531,31 @@ export async function listSlideOutlines(db: Db, roomId: string): Promise<SlideOu
   return rows.map(toSlideOutline);
 }
 
+export interface RoomWhiteboard {
+  boardId: string;
+  roomId: string;
+  elements: unknown[];
+  revision: number;
+  updatedAt: number;
+}
+
+/** The one saved canvas for a room, or null when the room has never saved a board. */
+export async function getRoomWhiteboard(db: Db, roomId: string): Promise<RoomWhiteboard | null> {
+  const row = await db.get<{ id: string; room_id: string; elements: string; revision: number; updated_at: number }>(
+    'SELECT id, room_id, elements, revision, updated_at FROM room_whiteboards WHERE room_id = ?',
+    [roomId],
+  );
+  if (!row) return null;
+  let elements: unknown;
+  try {
+    elements = JSON.parse(row.elements);
+  } catch {
+    throw new Error('whiteboard document is not valid JSON');
+  }
+  if (!Array.isArray(elements)) throw new Error('whiteboard document is not a list');
+  return { boardId: row.id, roomId: row.room_id, elements, revision: row.revision, updatedAt: row.updated_at };
+}
+
 export async function getSlideOutline(db: Db, outlineId: string): Promise<SlideOutline | null> {
   const row = await db.get<SlideOutlineRow>('SELECT * FROM slide_outlines WHERE id = ?', [outlineId]);
   return row ? toSlideOutline(row) : null;
