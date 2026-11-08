@@ -83,15 +83,16 @@ function RenderFreedraw({ el }: { el: FreedrawElement }) {
   return <Path d={getSvgPathFromStroke(stroke)} fill={el.strokeColor} opacity={el.opacity} />;
 }
 
-function RoughShape({ sets, el }: { sets: ReturnType<typeof gen.rectangle>['sets']; el: { strokeColor: string; strokeWidth: number; strokeStyle: string; opacity: number } }) {
+function RoughShape({ sets, el }: { sets: ReturnType<typeof gen.rectangle>['sets']; el: { strokeColor: string; backgroundColor: string; strokeWidth: number; strokeStyle: string; opacity: number } }) {
+  const fillColor = el.backgroundColor === 'transparent' ? undefined : el.backgroundColor;
   return (
     <G opacity={el.opacity}>
       {sets.map((set, i) => (
         <Path
           key={i}
           d={opsToPath(set.ops)}
-          fill={set.type === 'fillSketch' ? el.strokeColor : 'none'}
-          fillOpacity={set.type === 'fillSketch' ? 0.45 : 1}
+          fill={set.type === 'fillSketch' || set.type === 'fillPath' ? fillColor : 'none'}
+          fillOpacity={set.type === 'fillSketch' ? 0.6 : 1}
           stroke={set.type === 'path' ? el.strokeColor : 'none'}
           strokeWidth={el.strokeWidth}
           strokeLinecap="round"

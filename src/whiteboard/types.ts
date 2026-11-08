@@ -86,7 +86,6 @@ export type CanvasTransform = {
 };
 
 export const EXCALIDRAW_COLORS = {
-  background: '#f5f0e8',
   canvasBg: '#f5f0e8',
   stroke: [
     '#1e1e2e',
