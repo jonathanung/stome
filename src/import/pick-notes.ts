@@ -1,13 +1,15 @@
+import Constants from 'expo-constants';
 import { CryptoDigestAlgorithm, digest, digestStringAsync } from 'expo-crypto';
 import { getDocumentAsync } from 'expo-document-picker';
-import { File } from 'expo-file-system';
+import { File, FileMode } from 'expo-file-system';
 import { Platform } from 'react-native';
 
-import { MAX_IMPORT_BATCH, batchLimitMessage } from './batch';
-import { MAX_FREEFORM_IMAGE_BYTES, isFreeformImagePath, parseFreeformImage } from './freeform/parse';
-import { MAX_IMPORT_BYTES, parseMarkdown, type ParsedNote } from './markdown';
-import { parseOneNoteBytes, parseOneNoteText } from './onenote/parse';
-import { MAX_PDF_BYTES, parsePdf } from './pdf/parse';
+import { MAX_IMPORT_BATCH, batchLimitMessage } from './batch.ts';
+import { MAX_FREEFORM_IMAGE_BYTES, parseFreeformImage } from './freeform/parse.ts';
+import { documentPickerCopiesToCache, routeImportAsset, takeCappedBytes, type BoundedByteSource } from './import-bytes.ts';
+import { MAX_IMPORT_BYTES, parseMarkdown, type ParsedNote } from './markdown.ts';
+import { parseOneNoteBytes, parseOneNoteText } from './onenote/parse.ts';
+import { MAX_PDF_BYTES, parsePdf } from './pdf/parse.ts';
 
 export interface PickedNote extends ParsedNote {
   fingerprint: string;
@@ -17,7 +19,14 @@ export interface PickedNote extends ParsedNote {
   pages?: number[];
 }
 
-const TEXT_EXPORT = /\.(md|html?|mht|mhtml)$/i;
+type WebFile = {
+  size: number;
+  slice(start: number, end: number): { arrayBuffer(): Promise<ArrayBuffer> };
+};
+
+const NOTE_TOO_BIG = 'Each note must be at most 1 MiB.';
+const NOTE_MISSING = 'The file is missing or exceeds 1 MiB.';
+const BROWSER_MISSING = 'The browser did not provide a readable file. Try selecting it again.';
 
 function hexDigest(buffer: ArrayBuffer): string {
   let hex = '';
@@ -36,43 +45,47 @@ function ownedBytes(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
  * `limit` is how many more notes the current batch can take.
  */
 export async function pickNotes(limit = MAX_IMPORT_BATCH): Promise<{ notes: PickedNote[]; errors: string[] } | null> {
-  const result = await getDocumentAsync({ type: '*/*', multiple: true, copyToCacheDirectory: true, base64: false });
+  const expoGo = Constants.expoGoConfig != null;
+  const result = await getDocumentAsync({
+    type: '*/*',
+    multiple: true,
+    // Expo Go cannot read the host-cache copy. Keep the content URI there only.
+    copyToCacheDirectory: documentPickerCopiesToCache(Platform.OS, expoGo),
+    base64: false,
+  });
   if (result.canceled) return null;
   const errors: string[] = [];
   const notes: PickedNote[] = [];
   if (result.assets.length > limit) errors.push(batchLimitMessage(result.assets.length - limit));
   for (const asset of result.assets.slice(0, limit)) {
     try {
-      if (/\.pdf$/i.test(asset.name)) {
-        if (asset.size !== undefined && asset.size > MAX_PDF_BYTES) throw new Error('Each PDF must be at most 8 MiB.');
+      const route = routeImportAsset(asset.name, asset.size);
+      if (route.kind === 'reject') throw new Error(route.message);
+      if (route.kind === 'pdf') {
         const bytes = ownedBytes(await readBoundedBytes(asset, MAX_PDF_BYTES));
         const note = await parsePdf({ path: asset.name, bytes });
         notes.push({ ...note, fingerprint: hexDigest(await digest(CryptoDigestAlgorithm.SHA256, bytes)) });
         continue;
       }
-      if (isFreeformImagePath(asset.name)) {
-        if (asset.size !== undefined && asset.size > MAX_FREEFORM_IMAGE_BYTES) throw new Error('Each image must be at most 8 MiB.');
+      if (route.kind === 'freeform') {
         const bytes = ownedBytes(await readBoundedBytes(asset, MAX_FREEFORM_IMAGE_BYTES));
         const note = parseFreeformImage({ path: asset.name, bytes });
         notes.push({ ...note, fingerprint: hexDigest(await digest(CryptoDigestAlgorithm.SHA256, bytes)) });
         continue;
       }
-      if (asset.size !== undefined && asset.size > MAX_IMPORT_BYTES) throw new Error('Each note must be at most 1 MiB.');
-      const docx = /\.docx$/i.test(asset.name);
-      if (!docx && !TEXT_EXPORT.test(asset.name)) throw new Error('Only UTF-8 Markdown, OneNote HTML, MHTML and DOCX exports, PDF files, and PNG or JPEG board images are supported.');
-      if (docx) {
+      if (route.kind === 'docx') {
         const bytes = ownedBytes(await readBoundedBytes(asset));
         const note = await parseOneNoteBytes({ path: asset.name, bytes });
         notes.push({ ...note, fingerprint: hexDigest(await digest(CryptoDigestAlgorithm.SHA256, bytes)) });
+        continue;
+      }
+      const text = await readBoundedText(asset);
+      if (route.kind === 'markdown') {
+        const note = parseMarkdown({ path: asset.name, text });
+        notes.push({ ...note, fingerprint: await digestStringAsync(CryptoDigestAlgorithm.SHA256, text), exportFormat: 'markdown' });
       } else {
-        const text = await readBoundedText(asset);
-        if (/\.md$/i.test(asset.name)) {
-          const note = parseMarkdown({ path: asset.name, text });
-          notes.push({ ...note, fingerprint: await digestStringAsync(CryptoDigestAlgorithm.SHA256, text), exportFormat: 'markdown' });
-        } else {
-          const note = parseOneNoteText({ path: asset.name, text });
-          notes.push({ ...note, fingerprint: await digestStringAsync(CryptoDigestAlgorithm.SHA256, text) });
-        }
+        const note = parseOneNoteText({ path: asset.name, text });
+        notes.push({ ...note, fingerprint: await digestStringAsync(CryptoDigestAlgorithm.SHA256, text) });
       }
     } catch (error) {
       errors.push(`${asset.name}: ${error instanceof Error ? error.message : String(error)}`);
@@ -81,33 +94,68 @@ export async function pickNotes(limit = MAX_IMPORT_BATCH): Promise<{ notes: Pick
   return { notes, errors };
 }
 
-async function readBoundedText(asset: { uri: string; file?: { size: number; text(): Promise<string> } }): Promise<string> {
-  if (Platform.OS === 'web') {
-    if (!asset.file) throw new Error('The browser did not provide a readable file. Try selecting it again.');
-    if (asset.file.size > MAX_IMPORT_BYTES) throw new Error('Each note must be at most 1 MiB.');
-    return asset.file.text();
-  }
-  const file = new File(asset.uri);
-  if (!file.exists || file.size > MAX_IMPORT_BYTES) throw new Error('The file is missing or exceeds 1 MiB.');
-  return file.text();
+async function readBoundedText(asset: { uri: string; file?: WebFile }): Promise<string> {
+  const bytes = await readAtMost(asset, MAX_IMPORT_BYTES, NOTE_TOO_BIG, NOTE_MISSING);
+  return new TextDecoder().decode(bytes);
 }
 
-async function readBoundedBytes(
-  asset: { uri: string; file?: { size: number; arrayBuffer(): Promise<ArrayBuffer> } },
-  limit = MAX_IMPORT_BYTES,
-): Promise<Uint8Array> {
+async function readBoundedBytes(asset: { uri: string; file?: WebFile }, limit = MAX_IMPORT_BYTES): Promise<Uint8Array> {
   const mib = limit / 1024 / 1024;
-  const tooLarge = `Each file must be at most ${mib} MiB.`;
+  return readAtMost(asset, limit, `Each file must be at most ${mib} MiB.`, `The file is missing or exceeds ${mib} MiB.`);
+}
+
+async function readAtMost(asset: { uri: string; file?: WebFile }, limit: number, over: string, missing: string): Promise<Uint8Array> {
   if (Platform.OS === 'web') {
-    if (!asset.file) throw new Error('The browser did not provide a readable file. Try selecting it again.');
-    if (asset.file.size > limit) throw new Error(tooLarge);
-    const bytes = new Uint8Array(await asset.file.arrayBuffer());
-    if (bytes.byteLength > limit) throw new Error(tooLarge);
-    return bytes;
+    if (!asset.file) throw new Error(BROWSER_MISSING);
+    if (asset.file.size > limit) throw new Error(over);
+    return takeCappedBytes(webSource(asset.file), limit, over);
   }
-  const file = new File(asset.uri);
-  if (!file.exists || file.size > limit) throw new Error(`The file is missing or exceeds ${mib} MiB.`);
-  const bytes = await file.bytes();
-  if (bytes.byteLength > limit) throw new Error(tooLarge);
-  return bytes;
+  const expoGo = Platform.OS === 'android' && Constants.expoGoConfig != null;
+  if (!expoGo) {
+    const file = new File(asset.uri);
+    const size = file.size as number | null | undefined;
+    if (!file.exists || (typeof size === 'number' && Number.isFinite(size) && size > limit)) throw new Error(missing);
+  }
+  let source: BoundedByteSource;
+  try {
+    source = openHandle(asset.uri);
+  } catch (error) {
+    if (expoGo) throw new Error(missing);
+    throw error;
+  }
+  try {
+    return await takeCappedBytes(source, limit, over);
+  } catch (error) {
+    if (error instanceof Error && error.message === over) throw error;
+    if (expoGo) throw new Error(missing);
+    throw error;
+  }
+}
+
+function openHandle(uri: string): BoundedByteSource {
+  const handle = new File(uri).open(FileMode.ReadOnly);
+  let closed = false;
+  return {
+    read: (maxBytes) => handle.readBytes(maxBytes),
+    close() {
+      if (closed) return;
+      closed = true;
+      handle.close();
+    },
+  };
+}
+
+function webSource(file: WebFile): BoundedByteSource {
+  let closed = false;
+  return {
+    async read(maxBytes: number) {
+      if (closed) throw new Error('The browser file is already closed.');
+      const bytes = new Uint8Array(await file.slice(0, maxBytes).arrayBuffer());
+      if (bytes.byteLength > maxBytes) throw new Error('The browser returned more bytes than requested.');
+      return bytes;
+    },
+    close() {
+      closed = true;
+    },
+  };
 }
