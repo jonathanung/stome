@@ -6,8 +6,14 @@ import { connect } from 'node:net';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 
+import { proxyCompanion } from './companion-proxy.mjs';
+
 const expoPort = Number(process.env.EXPO_INTERNAL_PORT ?? 8082);
 const webPort = Number(process.env.STOME_WEB_PORT ?? 8081);
+const companionPort = Number(process.env.STOME_COMPANION_PORT ?? 8787);
+if (!Number.isInteger(companionPort) || companionPort < 1 || companionPort > 65535) {
+  throw new Error('STOME_COMPANION_PORT must be a TCP port');
+}
 
 // LAN mode serves other devices on the network (an iPad, a phone). Browsers only expose
 // navigator.storage, which browser SQLite needs, in a secure context: https, or http on localhost.
@@ -62,6 +68,7 @@ const expo = spawn('npx', ['expo', 'start', '--web', '--port', String(expoPort)]
 });
 
 const handler = (request, response) => {
+  if (proxyCompanion(request, response, { secure: Boolean(tls), companionPort })) return;
   const upstream = forward(
     {
       hostname: '127.0.0.1',
@@ -136,6 +143,7 @@ server.listen(webPort, host, () => {
   process.stdout.write(
     `LAN document host (Cross-Origin-Embedder-Policy: ${coep}) on:\n${urls}\n` +
       `Self-signed certificate: ${tls.certPath}\n` +
-      'Trust it on the device (AirDrop it, install the profile, then enable it under Settings > General > About > Certificate Trust Settings).\n',
+      'Trust it on the device (AirDrop it, install the profile, then enable it under Settings > General > About > Certificate Trust Settings).\n' +
+      `Companion proxy: /v1/status and /v1/tool on this https origin forward to http://127.0.0.1:${companionPort}. Run npm run companion on this computer. The iPad cannot run it. The pairing token is still required.\n`,
   );
 });
