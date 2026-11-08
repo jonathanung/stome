@@ -1,4 +1,5 @@
-import { Pressable, Text, View } from 'react-native';
+import { MotionPressable as Pressable, MotionView } from '../../design-theme/src/motion';
+import { Text, View } from 'react-native';
 import Svg, { G, Path, Rect } from 'react-native-svg';
 import type { ReactNode } from 'react';
 
@@ -49,11 +50,11 @@ function Cover({ stage }: { stage: RoomStage }) {
 export function GridCard({ children, tone, selected }: { children: ReactNode; tone?: 'danger'; selected?: boolean }) {
   const theme = useStoneTheme();
   return (
-    <View style={{
+    <MotionView style={{
       flex: 1, backgroundColor: theme.color.bg.surface, borderRadius: theme.radius.card, overflow: 'hidden',
       borderWidth: 1, borderColor: tone === 'danger' ? theme.color.status.danger.fill : theme.color.border.hairline,
       ...(selected ? { outlineStyle: 'solid', outlineWidth: 2, outlineColor: theme.color.text.primary, outlineOffset: 2 } : null),
-    } as object}>{children}</View>
+    } as object}>{children}</MotionView>
   );
 }
 

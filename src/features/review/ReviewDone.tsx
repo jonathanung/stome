@@ -1,4 +1,5 @@
-import { Pressable, Text, View } from 'react-native';
+import { MotionPressable as Pressable, MotionView } from '../../../design-theme/src/motion';
+import { Text, View } from 'react-native';
 
 import { Eyebrow, useStoneTheme } from '../../../design-theme/src/primitives';
 import { Icon } from '../../ui/Icon';
@@ -73,7 +74,7 @@ export function ReviewDone({
   ];
   return (
     <View style={{ gap: 14 }} testID="review-done">
-      <View style={[card, { overflow: 'hidden', ...theme.shadow.card }]}>
+      <MotionView distance={24} style={[card, { overflow: 'hidden', ...theme.shadow.card }]}>
         <View style={{ height: 150, backgroundColor: theme.color.bg.inset, alignItems: 'center', justifyContent: 'flex-end' }}>
           <StageGlyph stage={stage} size={112} />
         </View>
@@ -90,9 +91,9 @@ export function ReviewDone({
             {promoted ? `${CREDIT_WORDS[BRICK_CREDITS] ?? BRICK_CREDITS} reviews you did yourself. that's the ${ORDINALS[BRICK_CREDITS] ?? 'last'} credit.` : `${roomName.toLowerCase()} stays ${stage}.`}
           </Text>
         </View>
-      </View>
+      </MotionView>
 
-      <View style={[card, { paddingHorizontal: 20, paddingVertical: 18, gap: 12 }]}>
+      <MotionView delay={100} style={[card, { paddingHorizontal: 20, paddingVertical: 18, gap: 12 }]}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
           <Text testID="review-done-count" style={[theme.text('title'), { color: theme.color.text.primary }]}>{`${reviewed} reviewed`}</Text>
           <Text style={[theme.text('bodySmall'), { color: theme.color.text.tertiary }]}>{`${Math.max(1, minutes)} min`}</Text>
@@ -106,7 +107,7 @@ export function ReviewDone({
           ))}
         </View>
         {nextUp ? <Text style={[theme.text('bodySmall'), { color: theme.color.text.tertiary }]}>{nextUp}</Text> : null}
-      </View>
+      </MotionView>
 
       {unsaved ? (
         <View
