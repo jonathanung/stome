@@ -15,6 +15,7 @@ import type { CommitError, CommitResult, OpKind } from '../data/operations';
 import { getChunk, getRoom, listChunks, listDueChunks, listRoomAnnotations, listRoomDueAnswers } from '../data/queries';
 import { planDueItems } from '../data/today';
 import { expoDriver } from '../db/expo-driver';
+import { followRoomBack, roomBackStep } from '../navigation/room-back';
 import { MarkButtons } from '../features/review/MarkButtons';
 import { reviewMarkController } from '../features/review/mark-attempt';
 import { AnchoredChunkText, PinnedAnswer } from '../features/ask/AnchoredChunkText';
@@ -34,6 +35,10 @@ import { stageName } from '../ui/StageGlyph';
 import { EmptyState, Field, Notice, SectionTitle, useColumn } from '../ui/kit';
 import { HarnessPanel } from './HarnessPanel';
 import { RoomHeader } from './RoomHeader';
+
+function leaveRoom() {
+  followRoomBack(roomBackStep(router.canGoBack()), router);
+}
 
 function readable(error: CommitError): string {
   if (error.code === 'stale_revision') return 'This chunk was changed somewhere else. Reload to see the latest.';
@@ -373,7 +378,7 @@ export function RoomScreen() {
   if (loading) return <Screen><SafeAreaView style={{ flex: 1 }}><ActivityIndicator color={theme.color.accent.bg} style={{ marginTop: 40 }} /></SafeAreaView></Screen>;
   if (!room) return <Screen><SafeAreaView style={{ flex: 1 }}><View style={[column, { paddingTop: theme.space.page }]}>
     <EmptyState title="This room was not found." body="It may have been deleted on this device.">
-      <Button label="Back to rooms" size="compact" onPress={() => router.replace('/')} />
+      <Button label="Back to rooms" size="compact" onPress={leaveRoom} />
     </EmptyState>
   </View></SafeAreaView></Screen>;
 
@@ -393,7 +398,7 @@ export function RoomScreen() {
         ListHeaderComponent={<View style={{ gap: theme.space.section, marginBottom: theme.space.base }}>
           {phone ? <View style={{ gap: theme.space.lg }}>
             <PhoneRoomHeader name={room.name} status={`${stageName(room.stage)} · saved`}
-              onBack={() => router.replace('/')} onReview={() => router.push(`/rooms/${room.id}/review`)}
+              onBack={leaveRoom} onReview={() => router.push(`/rooms/${room.id}/review`)}
               onOptions={() => Alert.alert(room.name, undefined, [
                 { text: 'Review this room', onPress: () => router.push(`/rooms/${room.id}/review`) },
                 { text: 'Slides', onPress: () => router.push(`/rooms/${room.id}/slides`) },
@@ -405,7 +410,7 @@ export function RoomScreen() {
             {tab === 'notes' ? <SubjectChips subjects={subjects} value={activeSubject} onChange={setSubject} /> : null}
           </View> : <>
             <RoomHeader room={room} chunkCount={chunks.length}
-              onBack={() => router.replace('/')}
+              onBack={leaveRoom}
               onAsk={() => listRef.current?.scrollToEnd({ animated: true })}
               onImport={() => router.push({ pathname: '/import', params: { roomId: room.id } })}
               onNewNote={() => { listRef.current?.scrollToOffset({ offset: 0, animated: true }); composerRef.current?.focus(); }} />
