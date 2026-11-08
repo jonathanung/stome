@@ -1,4 +1,5 @@
 import { MAX_IMPORT_BYTES, decodeEntities } from './shared.ts';
+import { crc32, inflateBounded } from '../inflate.ts';
 
 const LOCAL_SIG = 0x04034b50;
 const MAX_ENTRIES = 64;
@@ -9,6 +10,7 @@ interface ZipEntry {
   method: number;
   compressed: Uint8Array;
   uncompressedSize: number;
+  crc: number;
 }
 
 export interface DocxPackage {
@@ -29,6 +31,7 @@ function readZipEntries(bytes: Uint8Array): ZipEntry[] {
     const flags = view.getUint16(offset + 6, true);
     const method = view.getUint16(offset + 8, true);
     const compressedSize = view.getUint32(offset + 18, true);
+    const crc = view.getUint32(offset + 14, true);
     const uncompressedSize = view.getUint32(offset + 22, true);
     const nameLength = view.getUint16(offset + 26, true);
     const extraLength = view.getUint16(offset + 28, true);
@@ -56,6 +59,7 @@ function readZipEntries(bytes: Uint8Array): ZipEntry[] {
       method,
       compressed: bytes.subarray(dataStart, dataStart + compressedSize),
       uncompressedSize,
+      crc,
     });
     offset = dataStart + compressedSize;
   }
@@ -67,32 +71,8 @@ function readZipEntries(bytes: Uint8Array): ZipEntry[] {
 }
 
 async function inflateRaw(compressed: Uint8Array, expected: number): Promise<Uint8Array> {
-  const Stream = globalThis.DecompressionStream;
-  if (typeof Stream !== 'function') throw new Error('DOCX compression cannot be read here. Import an HTML or MHTML export instead.');
-  const copy = new Uint8Array(compressed.byteLength);
-  copy.set(compressed);
-  const stream = new Blob([copy]).stream().pipeThrough(new Stream('deflate-raw'));
-  const reader = stream.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    while (true) {
-      const step = await reader.read();
-      if (step.done) break;
-      total += step.value.byteLength;
-      if (total > expected) throw new Error('A DOCX entry expands beyond the 1 MiB import limit.');
-      chunks.push(step.value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  if (total !== expected) throw new Error('This DOCX entry decompressed to an unexpected size.');
-  const out = new Uint8Array(total);
-  let cursor = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, cursor);
-    cursor += chunk.byteLength;
-  }
+  const out = inflateBounded(compressed, 'raw', expected);
+  if (out.byteLength !== expected) throw new Error('This DOCX entry decompressed to an unexpected size.');
   return out;
 }
 
@@ -248,6 +228,7 @@ export async function readDocxPackage(bytes: Uint8Array): Promise<DocxPackage> {
     throw new Error('This DOCX has no word/document.xml page to import.');
   }
   const xmlBytes = document.method === 0 ? document.compressed : await inflateRaw(document.compressed, document.uncompressedSize);
+  if (crc32(xmlBytes) !== document.crc) throw new Error('This DOCX document failed its ZIP checksum.');
   let documentXml: string;
   try {
     documentXml = new TextDecoder('utf-8', { fatal: true }).decode(xmlBytes);
