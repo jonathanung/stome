@@ -66,6 +66,13 @@ export function RoomHeader({ room, chunkCount, onBack, onAsk, onNewNote }: {
           <Text style={[theme.text('buttonCompact'), { color: theme.color.text.primary }]}>review room</Text>
         </Pressable>
       </Link>
+      <Link href={`/study/pick?roomId=${room.id}`} asChild>
+        <Pressable accessibilityRole="link" accessibilityLabel="Study materials from this room" testID="open-study"
+          style={({ pressed }) => ({ minHeight: theme.layout.control, paddingHorizontal: theme.space.xxl + 2, borderRadius: theme.radius.lg,
+            justifyContent: 'center', borderWidth: 1, borderColor: theme.color.border.strong, opacity: pressed ? 0.7 : 1 })}>
+          <Text style={[theme.text('buttonCompact'), { color: theme.color.text.primary }]}>study</Text>
+        </Pressable>
+      </Link>
       <Action label="ask" accessibilityLabel="Ask about this room" icon="ask" onPress={onAsk} />
       <Action label="new note" accessibilityLabel="Jump to new note" icon="plus" primary onPress={onNewNote} />
     </View>
