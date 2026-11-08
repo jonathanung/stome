@@ -22,6 +22,7 @@ import {
   SCAFFOLD_ROOM_ID,
   TOOL_REGISTRY,
   chunkViewFromFoundation,
+  isStrokeProposal,
   isStudyProposal,
   noteToChunk,
   type ChunkView,
@@ -60,7 +61,7 @@ const SECRET = 'sk-test-do-not-leak-stome';
 
 /** Notes-test helper: these sessions only ever propose notes answers or edits. */
 function notesBody(proposal: StoredProposal | null | undefined): string | undefined {
-  return proposal && !isStudyProposal(proposal) ? proposal.body : undefined;
+  return proposal && !isStudyProposal(proposal) && !isStrokeProposal(proposal) ? proposal.body : undefined;
 }
 
 /** Notes-test helper: the revision a notes proposal was grounded on. */
@@ -123,8 +124,11 @@ function chunk(id: number, text = 'photosynthesis makes sugar', revision = 100, 
   };
 }
 
-test('registry is only the notes tools and rejects a foreign room', async () => {
-  assert.deepEqual(Object.keys(TOOL_REGISTRY).sort(), ['notes.proposeAnnotation', 'notes.proposeChunkEdit'].sort());
+test('registry is only the write tools and rejects a foreign room', async () => {
+  assert.deepEqual(
+    Object.keys(TOOL_REGISTRY).sort(),
+    ['notes.proposeAnnotation', 'notes.proposeChunkEdit', 'whiteboard.proposeStroke'].sort(),
+  );
   const harness = readFileSync(new URL('../src/harness/contract.ts', import.meta.url), 'utf8');
   assert.equal(harness.includes('child_process'), false);
   assert.equal(harness.includes('node:fs'), false);

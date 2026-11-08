@@ -1,20 +1,30 @@
 import { randomUUID } from 'expo-crypto';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useSQLiteContext } from 'expo-sqlite';
+import { useSQLiteContext, type SQLiteDatabase } from 'expo-sqlite';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { PanResponder, Pressable, Text, TextInput, View, useWindowDimensions, type GestureResponderHandlers, type ViewStyle } from 'react-native';
 import Svg, { Circle, Defs, Marker, Path, Pattern, Rect } from 'react-native-svg';
 
 import { iconColor, useStoneTheme } from '../../../design-theme/src/primitives';
-import { getRoom } from '../../data/queries';
+import { getRoom, listChunks } from '../../data/queries';
+import type { Chunk } from '../../data/models';
 import { expoDriver } from '../../db/expo-driver';
 import { companionProvider } from '../../harness/companionClient';
 import { getCompanionSettings } from '../../harness/companionSettings';
-import { HarnessError } from '../../harness/contract';
+import { HarnessError, chunkViewFromFoundation, isStrokeProposal } from '../../harness/contract';
+import { harnessExecutor, openHarnessDatabase } from '../../harness/expoDb';
 import { completeReadTool } from '../../harness/provider';
+import {
+  beginQuestion,
+  confirmFoundationQuestion,
+  discardQuestion,
+  fulfillQuestion,
+  type PreparedRun,
+} from '../../harness/runTurn';
+import { cancelRun } from '../../harness/store';
 import { BOARD_TOOL_NAME, type BoardStickiesOutput } from '../../harness/tools';
 import { Icon } from '../../ui/Icon';
-import { stickiesToProposal, toBoardItemView } from './ask';
+import { stickiesToProposal, strokeToProposal, toBoardItemView } from './ask';
 import { ImageProposalGlyph, ToolGlyph } from './glyphs';
 import {
   SAMPLE_BOARD,
@@ -64,6 +74,13 @@ export function WhiteboardScreen() {
   const [promptText, setPromptText] = useState('');
   const [asking, setAsking] = useState(false);
   const askAbort = useRef<AbortController | null>(null);
+  // Room chunks anchor AI stroke proposals; the stroke session below commits
+  // through createCommit only when the person accepts the dashed proposal.
+  const [chunks, setChunks] = useState<Chunk[]>([]);
+  const [harness, setHarness] = useState<SQLiteDatabase | null>(null);
+  const [strokeMode, setStrokeMode] = useState(false);
+  const [strokeSession, setStrokeSession] = useState<{ sessionId: string; operationId: string } | null>(null);
+  const runRef = useRef<PreparedRun | null>(null);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -77,10 +94,25 @@ export function WhiteboardScreen() {
     if (!roomId) return;
     let live = true;
     void getRoom(db, roomId).then((room) => live && setRoomName(room?.name ?? null));
+    void listChunks(db, roomId).then((rows) => live && setChunks(rows));
     return () => {
       live = false;
     };
   }, [db, roomId]);
+
+  useEffect(() => {
+    let live = true;
+    openHarnessDatabase()
+      .then((opened) => {
+        if (live) setHarness(opened);
+      })
+      .catch((caught: unknown) => {
+        if (live) setNotice(caught instanceof Error ? caught.message : 'Could not open the harness database');
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
 
   // The board is laid out in a 1440x900 space; small screens scale it down but keep it legible.
   const scale = Math.min(1, Math.max(width / BOARD_W, 0.55));
@@ -171,13 +203,33 @@ export function WhiteboardScreen() {
     }
     if (!selectedItem) return;
     setNotice(null);
+    setStrokeMode(false);
+    setPromptOpen(true);
+  };
+
+  const startStrokeAsk = () => {
+    if (!getCompanionSettings().token) {
+      setNotice('pair the companion first, then ask for a stroke');
+      router.push('/companion');
+      return;
+    }
+    if (chunks.length === 0) {
+      setNotice('add a note in this room before asking for a stroke');
+      return;
+    }
+    if (proposal) {
+      setNotice('accept or discard the current proposal first');
+      return;
+    }
+    setNotice(null);
+    setStrokeMode(true);
     setPromptOpen(true);
   };
 
   const submitAsk = async () => {
     const prompt = promptText.trim();
     const { url, token, scenario } = getCompanionSettings();
-    if (!prompt || !selectedItem || asking) return;
+    if (!prompt || asking) return;
     if (!roomId) {
       setNotice('open this board from a room to ask about it');
       return;
@@ -186,12 +238,42 @@ export function WhiteboardScreen() {
       setNotice('pair the companion first, then ask about a selection');
       return;
     }
-    const selection = [selectedItem];
+    if (strokeMode && !harness) {
+      setNotice('the harness database is not open yet');
+      return;
+    }
+    if (!strokeMode && !selectedItem) return;
     const controller = new AbortController();
     askAbort.current = controller;
     setAsking(true);
     setNotice(null);
     try {
+      if (strokeMode && harness) {
+        const views = chunks.map(chunkViewFromFoundation);
+        const prepared = await beginQuestion(harnessExecutor(harness), { chunks: views, prompt });
+        runRef.current = prepared;
+        const outcome = await fulfillQuestion(harnessExecutor(harness), prepared, {
+          chunks: views,
+          scenario,
+          purpose: 'stroke',
+          provider: companionProvider({ baseUrl: url, token }),
+          signal: controller.signal,
+        });
+        if (!mounted.current || controller.signal.aborted) return;
+        const session = outcome.session;
+        if (outcome.status !== 'proposal' || !outcome.proposal || !isStrokeProposal(outcome.proposal) || !session?.pendingOperationId) {
+          setNotice(outcome.errorMessage ?? 'the companion could not propose a stroke');
+          return;
+        }
+        setStrokeSession({ sessionId: session.id, operationId: session.pendingOperationId });
+        setProposal(strokeToProposal(outcome.proposal, prompt, randomUUID));
+        setPromptOpen(false);
+        setPromptText('');
+        setStrokeMode(false);
+        return;
+      }
+      if (!selectedItem) return;
+      const selection = [selectedItem];
       const output = await completeReadTool<BoardStickiesOutput>(
         companionProvider({ baseUrl: url, token }),
         { tool: BOARD_TOOL_NAME, input: { roomId, prompt, items: selection.map(toBoardItemView) }, scenario },
@@ -213,13 +295,53 @@ export function WhiteboardScreen() {
 
   const cancelAsk = () => {
     askAbort.current?.abort();
+    const prepared = runRef.current;
+    runRef.current = null;
+    if (prepared && harness) {
+      void cancelRun(harnessExecutor(harness), {
+        sessionId: prepared.sessionId,
+        runToken: prepared.runToken,
+        now: Date.now(),
+      }).catch(() => undefined);
+    }
     setPromptOpen(false);
+    setStrokeMode(false);
   };
 
   const accept = () => {
     if (!proposal) return;
+    // A real stroke proposal commits through createCommit first: nothing is
+    // saved until the person accepts the dashed stroke. The shared gate
+    // refuses over-limit, non-finite, and stale proposals before any write.
+    if (strokeSession && harness) {
+      const { sessionId, operationId } = strokeSession;
+      setStrokeSession(null);
+      const pending = proposal;
+      void confirmFoundationQuestion(harnessExecutor(harness), db, { sessionId, operationId, confirmed: true })
+        .then(() => {
+          if (!mounted.current) return;
+          setItems((all) => [...all, ...acceptedItems(pending)]);
+          setProposal(null);
+        })
+        .catch((error: unknown) => {
+          if (!mounted.current) return;
+          setStrokeSession({ sessionId, operationId });
+          setNotice(error instanceof HarnessError ? `${error.code}: ${error.message}` : 'the stroke could not be saved');
+        });
+      return;
+    }
     const added = acceptedItems(proposal);
     setItems((all) => [...all, ...added]);
+    setProposal(null);
+  };
+
+  const discardProposalCard = () => {
+    // Declining a real stroke proposal discards the harness session: nothing
+    // was written and the operation id stays unused.
+    if (strokeSession && harness) {
+      void discardQuestion(harnessExecutor(harness), strokeSession.sessionId, Date.now()).catch(() => undefined);
+      setStrokeSession(null);
+    }
     setProposal(null);
   };
   const toggle = (id: string) =>
@@ -348,6 +470,7 @@ export function WhiteboardScreen() {
         </View>
         <View style={{ flexDirection: 'row', gap: 8 }}>
           {compact ? null : <BarButton label="ask about selection" variant="outline" disabled={!selected || asking} onPress={startAsk} />}
+          {compact ? null : <BarButton label="propose stroke" variant="outline" disabled={asking} onPress={startStrokeAsk} />}
           <BarButton label="done" variant="accent" onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
         </View>
       </View>
@@ -396,17 +519,17 @@ export function WhiteboardScreen() {
           accessibilityLabel="ask the companion"
           style={[barStyle, { right: 16, bottom: 24, width: compact ? undefined : 340, left: compact ? 16 : undefined, flexDirection: 'column', alignItems: 'stretch', gap: 10, padding: 16 }]}
         >
-          <Text style={[theme.text('eyebrow'), { color: theme.color.text.tertiary }]}>ask about selection</Text>
+          <Text style={[theme.text('eyebrow'), { color: theme.color.text.tertiary }]}>{strokeMode ? 'propose a stroke' : 'ask about selection'}</Text>
           {asking ? (
             <Text accessibilityLiveRegion="polite" style={[theme.text('bodySmall'), { color: ink }]}>asking…</Text>
           ) : (
             <TextInput
-              accessibilityLabel="question about the selection"
+              accessibilityLabel={strokeMode ? 'stroke request' : 'question about the selection'}
               autoFocus
               value={promptText}
               onChangeText={setPromptText}
               onSubmitEditing={() => void submitAsk()}
-              placeholder="what do you want to know?"
+              placeholder={strokeMode ? 'what should the stroke show?' : 'what do you want to know?'}
               placeholderTextColor={theme.color.text.tertiary}
               returnKeyType="send"
               style={[theme.text('bodySmall'), { color: ink, minHeight: theme.layout.control, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: theme.color.border.strong }]}
@@ -456,7 +579,7 @@ export function WhiteboardScreen() {
             <View style={{ flex: 1 }}>
               <BarButton label={`add ${accepting} to board`} variant="accent" disabled={accepting === 0} onPress={accept} fill />
             </View>
-            <BarButton label="discard" variant="outline" onPress={() => setProposal(null)} />
+            <BarButton label="discard" variant="outline" onPress={() => discardProposalCard()} />
           </View>
         </View>
       ) : null}

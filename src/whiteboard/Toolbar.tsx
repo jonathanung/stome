@@ -1,23 +1,25 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
+import { useStoneTheme } from '../../design-theme/src/primitives';
+import { Icon, type IconName } from '../ui/Icon';
 import type { Tool } from './types';
 
 type ToolConfig = {
   id: Tool;
   label: string;
-  icon: string;
+  icon: IconName;
 };
 
 const TOOLS: ToolConfig[] = [
-  { id: 'select', label: 'Select', icon: '↖' },
-  { id: 'hand', label: 'Hand', icon: '✋' },
-  { id: 'freedraw', label: 'Draw', icon: '✏️' },
-  { id: 'rectangle', label: 'Rectangle', icon: '▭' },
-  { id: 'diamond', label: 'Diamond', icon: '◇' },
-  { id: 'ellipse', label: 'Ellipse', icon: '○' },
-  { id: 'line', label: 'Line', icon: '╱' },
-  { id: 'arrow', label: 'Arrow', icon: '→' },
-  { id: 'text', label: 'Text', icon: 'T' },
+  { id: 'select', label: 'Select', icon: 'select' },
+  { id: 'hand', label: 'Hand', icon: 'hand' },
+  { id: 'freedraw', label: 'Draw', icon: 'draw' },
+  { id: 'rectangle', label: 'Rectangle', icon: 'rectangle' },
+  { id: 'diamond', label: 'Diamond', icon: 'diamond' },
+  { id: 'ellipse', label: 'Ellipse', icon: 'ellipse' },
+  { id: 'line', label: 'Line', icon: 'lineSegment' },
+  { id: 'arrow', label: 'Arrow', icon: 'arrowRight' },
+  { id: 'text', label: 'Text', icon: 'textT' },
 ];
 
 type Props = {
@@ -39,26 +41,33 @@ export function Toolbar({
   canUndo,
   canRedo,
 }: Props) {
+  const theme = useStoneTheme();
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: theme.color.bg.surface, shadowColor: theme.color.text.primary }]}>
       <View style={styles.toolGroup}>
-        {TOOLS.map((tool) => (
-          <Pressable
-            key={tool.id}
-            style={[styles.toolButton, activeTool === tool.id && styles.toolButtonActive]}
-            onPress={() => onToolChange(tool.id)}
-            accessibilityRole="button"
-            accessibilityLabel={tool.label}
-            accessibilityState={{ selected: activeTool === tool.id }}
-          >
-            <Text style={[styles.toolIcon, activeTool === tool.id && styles.toolIconActive]}>
-              {tool.icon}
-            </Text>
-          </Pressable>
-        ))}
+        {TOOLS.map((tool) => {
+          const active = activeTool === tool.id;
+          return (
+            <Pressable
+              key={tool.id}
+              style={[styles.toolButton, active && { backgroundColor: theme.color.bg.inset }]}
+              onPress={() => onToolChange(tool.id)}
+              accessibilityRole="button"
+              accessibilityLabel={tool.label}
+              accessibilityState={{ selected: active }}
+            >
+              <Icon
+                name={tool.icon}
+                size={20}
+                color={active ? theme.color.text.primary : theme.color.text.secondary}
+                strokeWidth={active ? 2.25 : 1.75}
+              />
+            </Pressable>
+          );
+        })}
       </View>
 
-      <View style={styles.divider} />
+      <View style={[styles.divider, { backgroundColor: theme.color.border.hairline }]} />
 
       <View style={styles.actionGroup}>
         <Pressable
@@ -67,7 +76,7 @@ export function Toolbar({
           disabled={!canUndo}
           accessibilityLabel="Undo"
         >
-          <Text style={[styles.actionIcon, !canUndo && styles.actionIconDisabled]}>↩</Text>
+          <Icon name="undo" size={20} color={canUndo ? theme.color.text.secondary : theme.color.text.disabled} />
         </Pressable>
         <Pressable
           style={[styles.actionButton, !canRedo && styles.actionButtonDisabled]}
@@ -75,14 +84,14 @@ export function Toolbar({
           disabled={!canRedo}
           accessibilityLabel="Redo"
         >
-          <Text style={[styles.actionIcon, !canRedo && styles.actionIconDisabled]}>↪</Text>
+          <Icon name="redo" size={20} color={canRedo ? theme.color.text.secondary : theme.color.text.disabled} />
         </Pressable>
         <Pressable
           style={styles.actionButton}
           onPress={onClear}
           accessibilityLabel="Clear canvas"
         >
-          <Text style={styles.actionIcon}>🗑</Text>
+          <Icon name="trash" size={20} color={theme.color.text.secondary} />
         </Pressable>
       </View>
     </View>
@@ -92,14 +101,12 @@ export function Toolbar({
 const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
-    backgroundColor: '#ffffff',
     borderRadius: 12,
     elevation: 8,
     flexDirection: 'row',
     gap: 2,
     paddingHorizontal: 8,
     paddingVertical: 6,
-    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.12,
     shadowRadius: 8,
@@ -116,18 +123,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 36,
   },
-  toolButtonActive: {
-    backgroundColor: '#e7f5ff',
-  },
-  toolIcon: {
-    color: '#495057',
-    fontSize: 18,
-  },
-  toolIconActive: {
-    color: '#1971c2',
-  },
   divider: {
-    backgroundColor: '#dee2e6',
     height: 24,
     marginHorizontal: 4,
     width: 1,
@@ -146,12 +142,5 @@ const styles = StyleSheet.create({
   },
   actionButtonDisabled: {
     opacity: 0.3,
-  },
-  actionIcon: {
-    color: '#495057',
-    fontSize: 18,
-  },
-  actionIconDisabled: {
-    color: '#adb5bd',
   },
 });

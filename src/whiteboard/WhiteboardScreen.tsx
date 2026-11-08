@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Platform,
   Pressable,
-
   StyleSheet,
   Text,
   TextInput,
@@ -11,6 +10,8 @@ import {
 } from 'react-native';
 import Svg, { Circle, Defs, G, Pattern, Rect } from 'react-native-svg';
 
+import { useStoneTheme } from '../../design-theme/src/primitives';
+import { Icon } from '../ui/Icon';
 import { ElementRenderer } from './ElementRenderer';
 import { StylePanel, type ElementStyle } from './StylePanel';
 import { Toolbar } from './Toolbar';
@@ -296,6 +297,7 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
     }
   }, []);
 
+  const theme = useStoneTheme();
   const canUndo = historyIndex > 0;
   const canRedo = historyIndex < history.length - 1;
   const cursor = tool === 'hand' ? 'grab' : tool === 'text' ? 'text' : 'crosshair';
@@ -359,11 +361,11 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
       {/* Delete button — shown when an element is selected */}
       {selectedId ? (
         <Pressable
-          style={styles.deleteButton}
+          style={[styles.deleteButton, { backgroundColor: theme.color.status.danger.wash, borderColor: theme.color.status.danger.fill, shadowColor: theme.color.text.primary }]}
           onPress={deleteSelected}
           accessibilityLabel="Delete selected element"
         >
-          <Text style={styles.deleteIcon}>🗑</Text>
+          <Icon name="trash" size={20} color={theme.color.status.danger.text} />
         </Pressable>
       ) : null}
 
@@ -380,27 +382,27 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
       {/* Back to Notes button */}
       {onBack ? (
         <Pressable
-          style={styles.backButton}
+          style={[styles.backButton, { backgroundColor: theme.color.bg.surface, shadowColor: theme.color.text.primary }]}
           onPress={onBack}
           accessibilityLabel="Back to Notes"
         >
-          <Text style={styles.backIcon}>←</Text>
-          <Text style={styles.backLabel}>Notes</Text>
+          <Icon name="chevronLeft" size={18} color={theme.color.text.secondary} />
+          <Text style={[styles.backLabel, { color: theme.color.text.secondary }]}>Notes</Text>
         </Pressable>
       ) : null}
 
       {/* Properties toggle */}
       <Pressable
-        style={[styles.propertiesButton, onBack && styles.propertiesButtonWithBack]}
+        style={[styles.propertiesButton, onBack && styles.propertiesButtonWithBack, { backgroundColor: theme.color.bg.surface, shadowColor: theme.color.text.primary }]}
         onPress={() => setShowStylePanel((v) => !v)}
         accessibilityLabel="Toggle style panel"
       >
-        <Text style={styles.propertiesIcon}>🎨</Text>
+        <Icon name="more" size={20} color={theme.color.text.secondary} />
       </Pressable>
 
       {/* Zoom indicator */}
-      <View style={styles.zoomBadge} pointerEvents="none">
-        <Text style={styles.zoomText}>{Math.round(transform.scale * 100)}%</Text>
+      <View style={[styles.zoomBadge, { backgroundColor: theme.color.bg.surface }]} pointerEvents="none">
+        <Text style={[styles.zoomText, { color: theme.color.text.secondary }]}>{Math.round(transform.scale * 100)}%</Text>
       </View>
 
       {/* Toolbar */}
@@ -433,7 +435,6 @@ const styles = StyleSheet.create({
   stylePanelWrapperWithBack: { left: 16, position: 'absolute', top: 120 },
   backButton: {
     alignItems: 'center',
-    backgroundColor: '#ffffff',
     borderRadius: 10,
     elevation: 4,
     flexDirection: 'row',
@@ -443,24 +444,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     position: 'absolute',
-    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     top: 20,
   },
-  backIcon: { color: '#495057', fontSize: 16 },
-  backLabel: { color: '#495057', fontSize: 14, fontWeight: '500' },
+  backLabel: { fontSize: 14, fontWeight: '500' },
   propertiesButton: {
     alignItems: 'center',
-    backgroundColor: '#ffffff',
     borderRadius: 10,
     elevation: 4,
     height: 40,
     justifyContent: 'center',
     left: 16,
     position: 'absolute',
-    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
@@ -468,28 +465,22 @@ const styles = StyleSheet.create({
     width: 40,
   },
   propertiesButtonWithBack: { top: 70 },
-  propertiesIcon: { fontSize: 20 },
   deleteButton: {
     alignItems: 'center',
-    backgroundColor: '#fff0f0',
     borderRadius: 10,
-    borderColor: '#ffc9c9',
     borderWidth: 1,
     elevation: 4,
     height: 40,
     justifyContent: 'center',
     position: 'absolute',
     right: 16,
-    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     top: 20,
     width: 40,
   },
-  deleteIcon: { fontSize: 18 },
   zoomBadge: {
-    backgroundColor: 'rgba(255,255,255,0.85)',
     borderRadius: 6,
     bottom: 24,
     paddingHorizontal: 8,
@@ -497,7 +488,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 16,
   },
-  zoomText: { color: '#495057', fontSize: 12, fontWeight: '600' },
+  zoomText: { fontSize: 12, fontWeight: '600' },
   textInput: {
     backgroundColor: 'transparent',
     fontFamily: 'System',
