@@ -26,6 +26,8 @@ export type AskSheetProps = {
   sources: readonly AskSheetSource[];
   problems: readonly string[];
   busy: boolean;
+  /** e.g. "Anthropic · claude-opus-5-5 · live". Null while the companion is unknown. */
+  providerLabel?: string | null;
   error: string | null;
   canConfirm: boolean;
   onClose: () => void;
@@ -69,7 +71,10 @@ export function AskSheetPhone(props: AskSheetProps) {
           <View accessibilityElementsHidden importantForAccessibility="no" style={styles.grabber} />
           <View style={styles.header}>
             <View style={styles.titleRow}>
-              <Text accessibilityRole="header" style={styles.title}>ask</Text>
+              <View>
+                <Text accessibilityRole="header" style={styles.title}>ask</Text>
+                {props.providerLabel ? <Text style={styles.providerLabel} testID="ask-sheet-provider">{props.providerLabel}</Text> : null}
+              </View>
               <Pressable accessibilityRole="button" onPress={props.onClose} style={styles.done} testID="ask-sheet-done">
                 <Text style={styles.doneText}>done</Text>
               </Pressable>
@@ -229,6 +234,7 @@ const useStyles = createStyles((theme) => ({
   },
   titleRow: { flexDirection: 'row' as const, justifyContent: 'space-between' as const, alignItems: 'center' as const },
   title: { ...theme.text('title'), color: theme.color.text.primary },
+  providerLabel: { ...theme.text('meta'), color: theme.color.text.tertiary },
   done: { minHeight: theme.layout.control, paddingHorizontal: 8, justifyContent: 'center' as const },
   doneText: { ...theme.text('buttonCompact'), color: theme.color.text.primary },
   chips: { gap: 6 },
