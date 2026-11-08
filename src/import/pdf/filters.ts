@@ -25,8 +25,10 @@ export class UnsupportedFilter extends Error {
 }
 
 async function inflate(data: Uint8Array, budget: Budget): Promise<Uint8Array> {
-  const out = inflateBounded(data, 'zlib', budget.remaining);
-  budget.take(out.byteLength);
+  if (budget.remaining < 0) throw new Error('This PDF expands beyond the import size limit.');
+  // Even a rejected object stream has spent this budget. The document loader
+  // tolerates damaged optional objects, so debit while decoding, not on success.
+  const out = inflateBounded(data, 'zlib', budget.remaining, (bytes) => budget.take(bytes));
   return out;
 }
 

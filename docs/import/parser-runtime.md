@@ -23,6 +23,8 @@ limit. Every callback counts actual output bytes before retaining them; the
 result allocation uses that checked total, never an unchecked advertised size.
 PDF calls retain the existing aggregate 64 MiB decompression budget, and DOCX
 uses the selected entry's already bounded advertised size (at most 1 MiB).
+PDF output is debited during decoding even when a damaged optional object stream
+is rejected, so retrying other objects cannot restart a spent expansion budget.
 
 PDF zlib streams have their header and Adler-32 checked. Up to eight trailing
 PDF whitespace/NUL bytes are tolerated only when a valid checksum is found;

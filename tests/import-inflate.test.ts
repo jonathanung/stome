@@ -3,6 +3,8 @@ import { test } from 'node:test';
 import { deflateRawSync, deflateSync } from 'node:zlib';
 
 import { crc32, inflateBounded } from '../src/import/inflate.ts';
+import { Budget, decodeStream } from '../src/import/pdf/filters.ts';
+import { Lexer, dict } from '../src/import/pdf/syntax.ts';
 
 test('zlib and raw DEFLATE work without browser or Node compression APIs', () => {
   const previousStream = Object.getOwnPropertyDescriptor(globalThis, 'DecompressionStream');
@@ -54,4 +56,17 @@ test('CRC32 uses the standard ZIP checksum and empty streams remain valid', () =
   assert.equal(crc32(new Uint8Array()), 0);
   assert.deepEqual(inflateBounded(new Uint8Array(deflateRawSync(new Uint8Array())), 'raw', 0), new Uint8Array());
   assert.deepEqual(inflateBounded(new Uint8Array(deflateSync(new Uint8Array())), 'zlib', 0), new Uint8Array());
+});
+
+test('a rejected PDF stream still consumes its shared document expansion budget', async () => {
+  const budget = new Budget(1000);
+  const token = new Lexer('<< /Filter /FlateDecode >>').next();
+  assert.equal(token.type, 'value');
+  if (token.type !== 'value') return;
+  const streamDict = dict(token.value);
+  assert.ok(streamDict);
+  const bomb = new Uint8Array(deflateSync(Buffer.alloc(10_000, 0x20)));
+  await assert.rejects(decodeStream(streamDict, bomb, budget), /expands beyond/);
+  assert.ok(budget.remaining < 0);
+  await assert.rejects(decodeStream(streamDict, new Uint8Array(deflateSync(Buffer.from('x'))), budget), /expands beyond/);
 });

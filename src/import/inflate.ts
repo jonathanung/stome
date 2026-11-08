@@ -55,13 +55,19 @@ function checkZlibChecksum(source: Uint8Array, output: Uint8Array): void {
  * callback is checked before keeping its bytes. Corrupt/truncated input throws,
  * so callers never receive a partial result as if it were a complete document.
  */
-export function inflateBounded(bytes: Uint8Array, format: 'raw' | 'zlib', maxOutputBytes: number): Uint8Array {
+export function inflateBounded(
+  bytes: Uint8Array,
+  format: 'raw' | 'zlib',
+  maxOutputBytes: number,
+  onOutputBytes?: (bytes: number) => void,
+): Uint8Array {
   if (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes < 0) throw new Error('Invalid decompression limit.');
   const input = format === 'zlib' ? zlibPayload(bytes) : bytes;
   const chunks: Uint8Array[] = [];
   let total = 0;
   const stream = new Inflate((chunk) => {
     total += chunk.byteLength;
+    onOutputBytes?.(chunk.byteLength);
     if (total > maxOutputBytes) throw new Error('This compressed stream expands beyond the import size limit.');
     if (chunk.byteLength) chunks.push(new Uint8Array(chunk));
   });
