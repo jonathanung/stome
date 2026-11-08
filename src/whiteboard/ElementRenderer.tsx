@@ -28,6 +28,23 @@ import type {
 // Singleton generator — stateless and pure, no DOM needed
 const gen = new RoughGenerator();
 
+type RoughPathProps = {
+  d: string;
+  setType: 'path' | 'fillPath' | 'fillSketch';
+  strokeColor: string;
+  fillColor: string;
+  strokeWidth: number;
+};
+function roughPathProps(p: RoughPathProps) {
+  if (p.setType === 'fillSketch') {
+    return { fill: 'none', stroke: p.fillColor, strokeWidth: p.strokeWidth * 0.5 };
+  }
+  if (p.setType === 'fillPath') {
+    return { fill: p.fillColor, stroke: 'none', strokeWidth: 0 };
+  }
+  return { fill: 'none', stroke: p.strokeColor, strokeWidth: p.strokeWidth };
+}
+
 /** Convert a rough OpSet's ops array to an SVG path string. */
 function opsToPath(ops: Op[]): string {
   return ops
@@ -103,7 +120,7 @@ function RenderRectangle({ el }: { el: RectangleElement }) {
   return (
     <G opacity={el.opacity}>
       {drawable.sets.map((set, i) => (
-        <Path key={i} d={opsToPath(set.ops)} fill={set.type === 'fillSketch' ? el.backgroundColor : 'none'} stroke={set.type === 'fillSketch' ? el.backgroundColor : el.strokeColor} strokeWidth={set.type === 'fillSketch' ? el.strokeWidth * 0.5 : el.strokeWidth} />
+        <Path key={i} d={opsToPath(set.ops)} {...roughPathProps({ d: '', setType: set.type, strokeColor: el.strokeColor, fillColor: el.backgroundColor, strokeWidth: el.strokeWidth })} />
       ))}
     </G>
   );
@@ -140,7 +157,7 @@ function RenderDiamond({ el }: { el: DiamondElement }) {
   return (
     <G opacity={el.opacity}>
       {drawable.sets.map((set, i) => (
-        <Path key={i} d={opsToPath(set.ops)} fill={set.type === 'fillSketch' ? el.backgroundColor : 'none'} stroke={set.type === 'fillSketch' ? el.backgroundColor : el.strokeColor} strokeWidth={set.type === 'fillSketch' ? el.strokeWidth * 0.5 : el.strokeWidth} />
+        <Path key={i} d={opsToPath(set.ops)} {...roughPathProps({ d: '', setType: set.type, strokeColor: el.strokeColor, fillColor: el.backgroundColor, strokeWidth: el.strokeWidth })} />
       ))}
     </G>
   );
@@ -168,7 +185,7 @@ function RenderEllipse({ el }: { el: EllipseElement }) {
   return (
     <G opacity={el.opacity}>
       {drawable.sets.map((set, i) => (
-        <Path key={i} d={opsToPath(set.ops)} fill={set.type === 'fillSketch' ? el.backgroundColor : 'none'} stroke={set.type === 'fillSketch' ? el.backgroundColor : el.strokeColor} strokeWidth={set.type === 'fillSketch' ? el.strokeWidth * 0.5 : el.strokeWidth} />
+        <Path key={i} d={opsToPath(set.ops)} {...roughPathProps({ d: '', setType: set.type, strokeColor: el.strokeColor, fillColor: el.backgroundColor, strokeWidth: el.strokeWidth })} />
       ))}
     </G>
   );
