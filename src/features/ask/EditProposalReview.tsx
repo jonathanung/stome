@@ -79,17 +79,26 @@ function ActionButton({
 export function EditProposalReview({
   proposal,
   title,
+  asked,
+  why,
   confirmDisabled,
   busy,
   onConfirm,
   onDiscard,
+  onEdit,
 }: {
   proposal: EditProposal;
   title: string;
+  /** The user's request, quoted under the heading. */
+  asked?: string;
+  /** Companion's reasons for the change, one per line. Hidden when absent. */
+  why?: string[];
   confirmDisabled: boolean;
   busy: boolean;
   onConfirm: () => void;
   onDiscard: () => void;
+  /** Opens the proposed text for editing before saving. Button hidden when absent. */
+  onEdit?: () => void;
 }) {
   const theme = useStoneTheme();
   const { width } = useWindowDimensions();
@@ -125,7 +134,7 @@ export function EditProposalReview({
           </View>
         </View>
         <Text style={[theme.text('bodySmall'), { color: theme.color.text.secondary }]}>
-          An edit replaces the whole chunk.
+          {asked ? `You asked: “${asked}”. An edit replaces the whole chunk.` : 'An edit replaces the whole chunk.'}
         </Text>
       </View>
       <View style={{ borderTopWidth: 1, borderTopColor: theme.color.border.hairline, paddingHorizontal: theme.space.section, paddingVertical: theme.space.xxl, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: theme.space.xl }}>
@@ -151,9 +160,18 @@ export function EditProposalReview({
           <View testID="proposal-after"><DiffBody parts={diff.after} tone="added" /></View>
         </View>
       </View>
+      {why && why.length > 0 ? (
+        <View testID="proposal-why" style={{ borderTopWidth: 1, borderTopColor: theme.color.border.hairline, padding: theme.space.card, gap: theme.space.xs }}>
+          <Text style={[theme.text('eyebrow'), { color: theme.color.text.tertiary }]}>WHY</Text>
+          {why.map((line) => (
+            <Text key={line} style={[theme.text('bodySmall'), { color: theme.color.text.secondary }]}>{line}</Text>
+          ))}
+        </View>
+      ) : null}
       <View style={{ borderTopWidth: 1, borderTopColor: theme.color.border.hairline, padding: theme.space.section, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: theme.space.md }}>
         <ActionButton primary label="Confirm and save" onPress={onConfirm} disabled={confirmDisabled} testID="confirm-button" />
         <ActionButton label="Discard" accessibilityLabel="Discard the edit" onPress={onDiscard} disabled={busy} testID="discard-button" />
+        {onEdit ? <ActionButton label="Edit before saving" onPress={onEdit} disabled={busy} testID="edit-before-saving-button" /> : null}
         <Text style={[theme.text('caption'), { color: theme.color.text.tertiary, marginLeft: split ? 'auto' : 0 }]}>
           Subjects, highlights and source link stay as they are
         </Text>
@@ -163,7 +181,18 @@ export function EditProposalReview({
 }
 
 /** Shown when confirming failed because the chunk moved past the revision the edit read. */
-export function StaleEditNotice({ onAskAgain, disabled }: { onAskAgain: () => void; disabled: boolean }) {
+export function StaleEditNotice({
+  onAskAgain,
+  disabled,
+  chunkLabel,
+  currentRevision,
+}: {
+  onAskAgain: () => void;
+  disabled: boolean;
+  /** e.g. "chunk 3". With currentRevision, names the revision that beat the edit. */
+  chunkLabel?: string;
+  currentRevision?: number;
+}) {
   const theme = useStoneTheme();
   const danger = theme.color.status.danger;
   return (
@@ -192,7 +221,9 @@ export function StaleEditNotice({ onAskAgain, disabled }: { onAskAgain: () => vo
       <View style={{ flex: 1, minWidth: 200, gap: theme.space.xs }}>
         <Text style={[theme.text('cardTitle'), { color: theme.color.text.primary }]}>The note changed first</Text>
         <Text style={[theme.text('bodySmall'), { color: theme.color.text.secondary }]}>
-          This chunk is newer than the revision the edit read. The edit was not applied, so your newer text is safe.
+          {chunkLabel && currentRevision !== undefined
+            ? `${chunkLabel} is at revision ${currentRevision} now, newer than the one this edit read. The edit was not applied, so your newer text is safe.`
+            : 'This chunk is newer than the revision the edit read. The edit was not applied, so your newer text is safe.'}
         </Text>
       </View>
       <ActionButton label="Ask again on the new text" onPress={onAskAgain} disabled={disabled} testID="stale-ask-again" />

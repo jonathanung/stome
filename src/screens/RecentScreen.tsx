@@ -10,7 +10,7 @@ import { listRecentChunks } from '../data/queries';
 import { searchNotes, type SearchHit, type SearchKind } from '../data/search';
 import { expoDriver } from '../db/expo-driver';
 import { Icon } from '../ui/Icon';
-import { BackButton, EmptyState, Field, Notice, ScreenHeader, useColumn } from '../ui/kit';
+import { EmptyState, Field, Notice, ScreenHeader, useColumn } from '../ui/kit';
 import { Eyebrow, FilterChip, RecentRow, SearchResult, groupByRecency } from './RecentSearchParts';
 
 const RECENT_LIMIT = 30;
@@ -36,6 +36,7 @@ export function RecentScreen() {
   const [query, setQuery] = useState('');
   const [kindIndex, setKindIndex] = useState(0);
   const [roomId, setRoomId] = useState<string | null>(null);
+  const [subject, setSubject] = useState<string | null>(null);
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [searching, setSearching] = useState(false);
 
@@ -68,7 +69,7 @@ export function RecentScreen() {
     let active = true;
     const timer = setTimeout(() => {
       setSearching(true);
-      searchNotes(db, trimmed, { kinds: KINDS[kindIndex].kinds, roomId })
+      searchNotes(db, trimmed, { kinds: KINDS[kindIndex].kinds, roomId, subject })
         .then((rows) => active && setHits(rows))
         .catch((reason: unknown) => active && setError(reason instanceof Error ? reason.message : 'Search failed'))
         .finally(() => active && setSearching(false));
@@ -77,7 +78,7 @@ export function RecentScreen() {
       active = false;
       clearTimeout(timer);
     };
-  }, [db, trimmed, kindIndex, roomId]);
+  }, [db, trimmed, kindIndex, roomId, subject]);
 
   const rooms = useMemo(() => {
     const seen = new Map<string, string>();
@@ -88,6 +89,12 @@ export function RecentScreen() {
   const cycleRoom = () => {
     const at = rooms.findIndex(([id]) => id === roomId);
     setRoomId(at + 1 < rooms.length ? rooms[at + 1][0] : null);
+  };
+
+  const subjects = useMemo(() => [...new Set(chunks.flatMap((chunk) => chunk.subjects))].sort(), [chunks]);
+  const cycleSubject = () => {
+    const at = subject ? subjects.indexOf(subject) : -1;
+    setSubject(at + 1 < subjects.length ? subjects[at + 1] : null);
   };
 
   const groups = useMemo(() => {
@@ -139,7 +146,7 @@ export function RecentScreen() {
     <Screen>
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'left', 'right']}>
         <ScrollView contentContainerStyle={[column, { paddingBottom: 120, gap: theme.space.card }, wide ? { maxWidth: 1180 } : null]} keyboardShouldPersistTaps="handled">
-          <ScreenHeader back={<BackButton label="Rooms" accessibilityLabel="All rooms" onPress={() => router.replace('/')} />} title="Find a note" />
+          <ScreenHeader title="Find a note" />
           <View
             accessibilityRole="search"
             style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.xl, paddingLeft: 18, paddingRight: theme.space.md, minHeight: 56, borderRadius: 18, borderWidth: 1.5, borderColor: theme.color.text.primary, backgroundColor: theme.color.bg.surface }}>
@@ -160,6 +167,7 @@ export function RecentScreen() {
               <FilterChip key={kind.label} label={kind.label} on={i === kindIndex} onPress={() => setKindIndex(i)} />
             ))}
             <FilterChip label={roomName ? `${roomName} ▾` : 'All rooms ▾'} on={!!roomId} onPress={cycleRoom} />
+            <FilterChip label={subject ? `${subject} ▾` : 'Any subject ▾'} on={!!subject} onPress={cycleSubject} />
           </View>
           {error ? <Notice tone="danger">{error}</Notice> : null}
           {wide && results ? (

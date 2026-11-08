@@ -152,6 +152,16 @@ export function recordRetry(store: AttemptStore | null, now: number = Date.now()
   store?.setItem(ATTEMPT_KEY, `${readAttempt(store, now) + 1}:${now}`);
 }
 
+const FIRST_AT_KEY = 'stome.storage.first-at';
+
+/** Wall-clock time of the first failed attempt in this episode; recorded once, ignored once stale. */
+export function readFirstAttemptAt(store: AttemptStore | null, now: number = Date.now()): number {
+  const saved = Number.parseInt(store?.getItem(FIRST_AT_KEY) ?? '', 10);
+  if (Number.isFinite(saved) && now - saved <= ATTEMPT_TTL_MS * AUTO_RETRY_LIMIT) return saved;
+  store?.setItem(FIRST_AT_KEY, String(now));
+  return now;
+}
+
 export function clearAttempts(store: AttemptStore | null): void {
   store?.removeItem(ATTEMPT_KEY);
 }

@@ -83,7 +83,7 @@ export function SearchResult({ hit, query, onPress }: { hit: SearchHit; query: s
       </Text>
       <Text numberOfLines={4} style={[theme.text('body'), { color: theme.color.text.primary }]}>
         {highlightRuns(hit.text.slice(0, 400), query).map((run, i) => (
-          <Text key={i} style={run.hit ? { fontWeight: '600', backgroundColor: theme.color.status.warning.wash } : undefined}>{run.text}</Text>
+          <Text key={i} style={run.hit ? { fontWeight: '600', backgroundColor: theme.color.status.warning.wash, borderBottomWidth: 2, borderBottomColor: theme.color.status.warning.fill } : undefined}>{run.text}</Text>
         ))}
       </Text>
     </Pressable>
