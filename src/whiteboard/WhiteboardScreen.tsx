@@ -143,7 +143,7 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
   const svgContainerRef = useRef<React.ElementRef<typeof View>>(null);
   const spaceHandRef = useRef(false);
 
-  // Keep canvasOriginRef in sync when the window is resized
+  // Keep canvasOriginRef accurate for TextInput placement (boardToRootScreen)
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     const update = () => {
@@ -154,8 +154,15 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
         canvasOriginRef.current = { x: rect.left, y: rect.top };
       }
     };
+    // Run immediately after mount so the TextInput is positioned correctly from the start
+    update();
+    // Also run after first paint in case layout hasn't settled yet
+    const raf = requestAnimationFrame(update);
     window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize', update);
+    };
   }, []);
 
   useEffect(() => {

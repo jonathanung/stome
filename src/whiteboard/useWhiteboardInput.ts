@@ -64,12 +64,13 @@ type Refs = {
 };
 
 export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
-  // Subtract canvas DOM offset so coords are canvas-relative (fixes web cursor drift)
-  function toCanvasXY(px: number, py: number): [number, number] {
-    const o = refs.canvasOriginRef.current ?? { x: 0, y: 0 };
-    return [px - o.x, py - o.y];
+  // locationX/locationY are computed by RNW as (pageX - viewLeft) — always canvas-relative.
+  // Use them for single-touch coords; pageX/pageY are viewport-absolute and need origin subtracted.
+  function eventXY(e: { locationX: number; locationY: number }): [number, number] {
+    return [e.locationX, e.locationY];
   }
-  // Convert board coords to screen coords relative to the root View (for TextInput placement)
+  // Convert board coords to root-View screen coords (for TextInput placement outside canvas).
+  // Add canvas origin so the TextInput appears at the right spot in the full-screen root.
   function boardToRootScreen(bx: number, by: number, t: { offsetX: number; offsetY: number; scale: number }): [number, number] {
     const o = refs.canvasOriginRef.current ?? { x: 0, y: 0 };
     return [bx * t.scale + t.offsetX + o.x, by * t.scale + t.offsetY + o.y];
@@ -85,17 +86,16 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
 
       if (nativeEvent.touches && nativeEvent.touches.length === 2) {
         const [t1, t2] = nativeEvent.touches;
-        const [t1x, t1y] = toCanvasXY(t1.pageX, t1.pageY);
-        const [t2x, t2y] = toCanvasXY(t2.pageX, t2.pageY);
-        const dx = t1x - t2x;
-        const dy = t1y - t2y;
+        // For pinch we only need the distance delta, so raw pageX is fine (origin cancels out)
+        const dx = t1.pageX - t2.pageX;
+        const dy = t1.pageY - t2.pageY;
         const dist = Math.sqrt(dx * dx + dy * dy);
         refs.pinchRef.current = { dist, scale: t.scale, ox: t.offsetX, oy: t.offsetY };
         refs.panStartRef.current = null;
         return;
       }
 
-      const [sx, sy] = toCanvasXY(nativeEvent.pageX, nativeEvent.pageY);
+      const [sx, sy] = eventXY(nativeEvent);
       const [bx, by] = screenToBoard(sx, sy, t);
       const activeTool = refs.toolRef.current!;
       const style = refs.currentStyleRef.current!;
@@ -220,15 +220,13 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
 
       if (nativeEvent.touches && nativeEvent.touches.length === 2 && refs.pinchRef.current) {
         const [t1, t2] = nativeEvent.touches;
-        const [t1x, t1y] = toCanvasXY(t1.pageX, t1.pageY);
-        const [t2x, t2y] = toCanvasXY(t2.pageX, t2.pageY);
-        const dx = t1x - t2x;
-        const dy = t1y - t2y;
+        const dx = t1.pageX - t2.pageX;
+        const dy = t1.pageY - t2.pageY;
         const dist = Math.sqrt(dx * dx + dy * dy);
         const scaleFactor = dist / refs.pinchRef.current.dist;
         const newScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, refs.pinchRef.current.scale * scaleFactor));
-        const mx = (t1x + t2x) / 2;
-        const my = (t1y + t2y) / 2;
+        // Midpoint in canvas coords for zoom anchor
+        const [mx, my] = eventXY({ locationX: (t1.pageX + t2.pageX) / 2, locationY: (t1.pageY + t2.pageY) / 2 });
         const newOffsetX = mx - (mx - refs.pinchRef.current.ox) * (newScale / refs.pinchRef.current.scale);
         const newOffsetY = my - (my - refs.pinchRef.current.oy) * (newScale / refs.pinchRef.current.scale);
         const next = { offsetX: newOffsetX, offsetY: newOffsetY, scale: newScale };
@@ -237,7 +235,7 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
         return;
       }
 
-      const [sx, sy] = toCanvasXY(nativeEvent.pageX, nativeEvent.pageY);
+      const [sx, sy] = eventXY(nativeEvent);
 
       if (refs.toolRef.current === 'hand' && refs.panStartRef.current) {
         const { ox, oy, tx, ty } = refs.panStartRef.current;
@@ -310,7 +308,7 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
 
       if (refs.toolRef.current === 'text') {
         const t = refs.transformRef.current!;
-        const [sx, sy] = toCanvasXY(nativeEvent.pageX, nativeEvent.pageY);
+        const [sx, sy] = eventXY(nativeEvent);
         const [bx, by] = screenToBoard(sx, sy, t);
         // If tapping on an existing text element, edit it instead of creating new
         const hit = [...refs.elementsRef.current!].reverse().find((el) => hitTest(el, bx, by));
