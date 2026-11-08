@@ -1,9 +1,11 @@
 import type { ComponentRef, Ref } from 'react';
-import { Platform, Pressable, Text, TextInput, View } from 'react-native';
+import { useEffect, useRef } from 'react';
+import { Modal, Platform, Pressable, ScrollView, Text, TextInput, View, type ScrollViewInstance } from 'react-native';
 
 import { useStoneTheme } from '../../../design-theme/src/primitives';
 import { Icon } from '../../ui/Icon';
 import { Notice } from '../../ui/kit';
+import { useCaptureKeyboardOverlap } from './use-capture-keyboard-inset';
 
 /** Phone layout of quick capture: a bottom sheet over a scrim. Width below this uses the sheet. */
 export const CAPTURE_SHEET_MAX_WIDTH = 600;
@@ -26,30 +28,60 @@ export type QuickCaptureSheetProps = {
 export function QuickCaptureSheet(props: QuickCaptureSheetProps) {
   const { text, onChangeText, onSave, onClose, ready, failed, roomName, createRoomLink, error, warning, inputRef } = props;
   const theme = useStoneTheme();
-  const fixed = (Platform.OS === 'web' ? 'fixed' : 'absolute') as 'absolute';
+  const { overlap, layerRef, onLayerLayout } = useCaptureKeyboardOverlap();
+  const scrollRef = useRef<ScrollViewInstance>(null);
+  const hasCreateRoomLink = createRoomLink != null;
+  // Keep the save row, notices, and create-room link in reach when the
+  // keyboard leaves less than the sheet's height. A short sheet stays put.
+  useEffect(() => {
+    scrollRef.current?.scrollToEnd({ animated: false });
+  }, [overlap, error, warning, hasCreateRoomLink]);
+
   return (
-    <View pointerEvents="box-none" style={{ position: fixed, top: 0, left: 0, right: 0, bottom: 0, zIndex: 40, justifyContent: 'flex-end' }} testID="quick-capture-sheet-layer">
-      <Pressable
-        accessibilityLabel="Close quick capture"
-        accessibilityRole="button"
-        onPress={onClose}
-        style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(36, 34, 30, 0.4)' }}
-        testID="quick-capture-scrim"
-      />
+    <Modal
+      animationType="none"
+      navigationBarTranslucent
+      onRequestClose={onClose}
+      statusBarTranslucent
+      transparent
+      visible
+    >
       <View
-        accessibilityViewIsModal
-        style={{
-          backgroundColor: theme.color.bg.surface,
-          borderTopLeftRadius: theme.radius.panel,
-          borderTopRightRadius: theme.radius.panel,
-          paddingTop: 10,
-          paddingHorizontal: theme.space.base,
-          paddingBottom: 34,
-          gap: 14,
-          ...theme.shadow.float,
-        }}
-        testID="quick-capture-panel"
+        onLayout={onLayerLayout}
+        pointerEvents="box-none"
+        ref={layerRef}
+        style={{ flex: 1, paddingBottom: overlap }}
+        testID="quick-capture-sheet-layer"
       >
+        <ScrollView
+          bounces={false}
+          contentContainerStyle={{ flexGrow: 1, justifyContent: 'flex-end' }}
+          keyboardShouldPersistTaps="handled"
+          onContentSizeChange={() => { scrollRef.current?.scrollToEnd({ animated: false }); }}
+          ref={scrollRef}
+          style={{ flex: 1 }}
+        >
+          <Pressable
+            accessibilityLabel="Close quick capture"
+            accessibilityRole="button"
+            onPress={onClose}
+            style={{ flexGrow: 1, backgroundColor: 'rgba(36, 34, 30, 0.4)' }}
+            testID="quick-capture-scrim"
+          />
+          <View
+            accessibilityViewIsModal
+            style={{
+              backgroundColor: theme.color.bg.surface,
+              borderTopLeftRadius: theme.radius.panel,
+              borderTopRightRadius: theme.radius.panel,
+              paddingTop: 10,
+              paddingHorizontal: theme.space.base,
+              paddingBottom: 34,
+              gap: 14,
+              ...theme.shadow.float,
+            }}
+            testID="quick-capture-panel"
+          >
         <View style={{ alignSelf: 'center', width: 40, height: 5, borderRadius: 3, backgroundColor: theme.color.bg.inset }} />
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: theme.space.md }}>
           <Text accessibilityRole="header" style={[theme.text('title'), { color: theme.color.text.primary }]}>quick capture</Text>
@@ -130,7 +162,9 @@ export function QuickCaptureSheet(props: QuickCaptureSheetProps) {
         {createRoomLink}
         {error ? <Notice tone="danger" testID="quick-capture-error">{error}</Notice> : null}
         {warning ? <Notice tone="warning" testID="quick-capture-warning">{warning}</Notice> : null}
+          </View>
+        </ScrollView>
       </View>
-    </View>
+    </Modal>
   );
 }
