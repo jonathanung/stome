@@ -2,14 +2,39 @@ import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpServer, request as forward } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
-import { connect } from 'node:net';
+import { connect, createServer as createNetServer } from 'node:net';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 
 import { proxyCompanion } from './companion-proxy.mjs';
 
-const expoPort = Number(process.env.EXPO_INTERNAL_PORT ?? 8082);
+function portIsFree(port, host) {
+  return new Promise((resolve) => {
+    const probe = createNetServer();
+    probe.once('error', () => resolve(false));
+    probe.listen(port, host, () => probe.close(() => resolve(true)));
+  });
+}
+
 const webPort = Number(process.env.STOME_WEB_PORT ?? 8081);
+const webHost = process.env.STOME_WEB_LAN === '1' ? '0.0.0.0' : '127.0.0.1';
+if (!(await portIsFree(webPort, webHost))) {
+  process.stderr.write(
+    `Port ${webPort} is already in use, probably by another web:sqlite or web:lan. Stop it, or set STOME_WEB_PORT.\n`,
+  );
+  process.exit(1);
+}
+
+// Expo is internal to this proxy. Port 8082 is also where `npx expo start --port 8082` serves Expo Go,
+// so when EXPO_INTERNAL_PORT is not set, take the first free port from 8082 up instead of failing.
+async function chooseExpoPort() {
+  if (process.env.EXPO_INTERNAL_PORT) return Number(process.env.EXPO_INTERNAL_PORT);
+  for (let port = 8082; port < 8100; port += 1) {
+    if (port !== webPort && (await portIsFree(port, '0.0.0.0'))) return port;
+  }
+  throw new Error('No free port from 8082 to 8099 for Expo. Set EXPO_INTERNAL_PORT.');
+}
+const expoPort = await chooseExpoPort();
 const companionPort = Number(process.env.STOME_COMPANION_PORT ?? 8787);
 if (!Number.isInteger(companionPort) || companionPort < 1 || companionPort > 65535) {
   throw new Error('STOME_COMPANION_PORT must be a TCP port');
