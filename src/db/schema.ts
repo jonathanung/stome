@@ -2,7 +2,7 @@ import { REVIEW_STATES } from './models.ts';
 
 export const DATABASE_NAME = 'stome.db';
 
-export const SUPPORTED_VERSION = 5;
+export const SUPPORTED_VERSION = 6;
 
 export { ROOM_STAGES, ANNOTATION_TYPES, REVIEW_STATES, type RoomStage, type AnnotationType, type ReviewState } from './models.ts';
 
@@ -145,6 +145,21 @@ export const MIGRATIONS: readonly Migration[] = [
         due_at INTEGER NOT NULL,
         time_zone TEXT NOT NULL CHECK (length(time_zone) BETWEEN 1 AND 64),
         PRIMARY KEY (chunk_id, local_day)
+      );
+    `,
+  },
+  {
+    version: 6,
+    name: 'pinned answer review marks (REV.3 #127, annotation-keyed)',
+    sql: `
+      CREATE TABLE answer_marks (
+        annotation_id TEXT NOT NULL REFERENCES annotations (id) ON DELETE CASCADE,
+        local_day TEXT NOT NULL CHECK (local_day GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+        state TEXT NOT NULL CHECK (state IN (${REVIEW_STATES.map((state) => `'${state}'`).join(', ')})),
+        marked_at INTEGER NOT NULL,
+        due_at INTEGER NOT NULL,
+        time_zone TEXT NOT NULL CHECK (length(time_zone) BETWEEN 1 AND 64),
+        PRIMARY KEY (annotation_id, local_day)
       );
     `,
   },

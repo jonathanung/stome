@@ -76,3 +76,42 @@ export interface DueChunk {
   chunk: Chunk;
   mark: ReviewMark;
 }
+
+/**
+ * Due-ownership rule for REV.3 (#127): annotation-keyed.
+ *
+ * Each pinned `ai_answer` annotation owns its due clock in `answer_marks`,
+ * keyed by annotation id. The source chunk keeps its own clock in
+ * `review_marks` and is never moved by an answer mark. To keep one fact from
+ * staying due twice, presentation (`planDueItems`, the review queue) hides a
+ * chunk's own due entry while any of its answers is due — the answer card
+ * replaces it. Once the answer is marked into the future, the chunk shows
+ * again under its own clock. Related research #64 is notes-only (no code).
+ */
+export interface AnswerMark {
+  annotationId: string;
+  chunkId: string;
+  state: ReviewState;
+  localDay: string;
+  markedAt: number;
+  dueAt: number;
+  timeZone: string;
+}
+
+/**
+ * A pinned AI answer with its review clock. `mark` is null until the first
+ * human mark; an unmarked answer is due as soon as it is pinned.
+ */
+export interface DueAnswer {
+  annotation: Annotation;
+  chunk: Chunk;
+  mark: AnswerMark | null;
+}
+
+/** Anything the Today/session ordering can rank: a due chunk or a due answer. */
+export type DueItem = DueChunk | DueAnswer;
+
+/** True for a due answer; false for a due chunk. */
+export function isDueAnswer(item: DueItem): item is DueAnswer {
+  return (item as DueAnswer).annotation !== undefined;
+}

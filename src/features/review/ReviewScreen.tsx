@@ -10,24 +10,31 @@ import { Icon } from '../../ui/Icon';
 import { REVIEW_ICON, REVIEW_TONE, StatusMark } from '../../ui/StatusMark';
 import { EmptyState, Group, Notice, SectionTitle, useColumn } from '../../ui/kit';
 import { createCommit } from '../../data/commit';
-import type { ReviewMark, Room, RoomStage } from '../../data/models';
-import { getChunk, getRoom, latestReviewMark, listChunks } from '../../data/queries';
+import type { Annotation, ReviewMark, Room, RoomStage } from '../../data/models';
+import { getAnnotation, getChunk, getRoom, latestAnswerMark, latestReviewMark, listChunks, listRoomAnnotations } from '../../data/queries';
 import type { ReviewState } from '../../db/schema';
 import { expoDriver } from '../../db/expo-driver';
+import { citationFromAnnotation } from '../ask/citations';
 import { EMPTY_TALLY, ReviewDone, nextUpSummary, type ReviewTally } from './ReviewDone';
 import { reviewMarkController } from './mark-attempt';
-import { acknowledgeDisplayedCards, reviewQueueOnOpen } from './mark-progress';
+import { acknowledgeDisplayedCards } from './mark-progress';
 import {
   REVIEW_LABEL,
-  chunksReadyToReview,
   deviceTimeZone,
   formatDueAt,
+  mockAnswerQuestion,
   mockReviewQuestion,
-  type ReviewQueueChunk,
+  orderReviewQueue,
+  reviewCardId,
+  reviewQueueForRoom,
+  type ReviewCard,
+  type ReviewQueueAnswer,
 } from './session';
 
 type Scheduled = {
+  key: string;
   chunkId: string;
+  annotationId: string | null;
   state: ReviewState;
   localDay: string;
   dueAt: number;
@@ -56,13 +63,41 @@ function consumeLostReviewReport(): boolean {
   return true;
 }
 
-function toCard(chunk: ReviewQueueChunk): ReviewQueueChunk {
+function toCard(chunk: { id: string; position: number; body: string; revision: number }): ReviewCard {
   return {
-    id: chunk.id,
-    position: chunk.position,
-    body: chunk.body,
-    revision: chunk.revision,
+    kind: 'chunk',
+    chunk: { id: chunk.id, position: chunk.position, body: chunk.body, revision: chunk.revision },
   };
+}
+
+function answerText(annotation: Annotation): string {
+  const answer = annotation.payload.answer;
+  return typeof answer === 'string' ? answer : '';
+}
+
+function savedQuote(grounding: unknown): string | null {
+  if (typeof grounding !== 'object' || grounding === null || Array.isArray(grounding)) return null;
+  const quote = (grounding as { quote?: unknown }).quote;
+  return typeof quote === 'string' && quote.length > 0 ? quote : null;
+}
+
+function toAnswerCard(
+  annotation: Annotation,
+  chunk: { id: string; position: number; body: string; revision: number },
+): ReviewCard {
+  const answer: ReviewQueueAnswer = {
+    id: annotation.id,
+    annotationId: annotation.id,
+    chunkId: chunk.id,
+    position: chunk.position,
+    answer: answerText(annotation),
+    quote: savedQuote(annotation.payload),
+    chunkBody: chunk.body,
+    chunkRevision: chunk.revision,
+    anchor: annotation.anchor,
+    grounding: annotation.payload,
+  };
+  return { kind: 'answer', answer };
 }
 
 export function ReviewScreen() {
@@ -78,7 +113,7 @@ export function ReviewScreen() {
   const [stage, setStage] = useState<RoomStage>('stonehenge');
   const stageRef = useRef<RoomStage>('stonehenge');
   const marking = useRef(false);
-  const [cards, setCards] = useState<ReviewQueueChunk[]>([]);
+  const [cards, setCards] = useState<ReviewCard[]>([]);
   const [total, setTotal] = useState(0);
   const [done, setDone] = useState(0);
   const [outcomes, setOutcomes] = useState<(ReviewState | 'skipped')[]>([]);
@@ -95,9 +130,10 @@ export function ReviewScreen() {
   const [finishedAt, setFinishedAt] = useState(() => Date.now());
 
   const load = useCallback(async () => {
-    if (!roomId) return { missing: true, room: null, cards: [] as ReviewQueueChunk[], scheduled: [] as Scheduled[] };
+    if (!roomId) return { missing: true, room: null, cards: [] as ReviewCard[], scheduled: [] as Scheduled[] };
     const found = await getRoom(db, roomId);
-    if (!found) return { missing: true, room: null, cards: [] as ReviewQueueChunk[], scheduled: [] as Scheduled[] };
+    if (!found) return { missing: true, room: null, cards: [] as ReviewCard[], scheduled: [] as Scheduled[] };
+    const now = Date.now();
     const chunks = await listChunks(db, roomId);
     const marks = await Promise.all(chunks.map((chunk) => latestReviewMark(db, chunk.id)));
     const latest = new Map<string, ReviewMark>();
@@ -105,18 +141,55 @@ export function ReviewScreen() {
       const mark = marks[index];
       if (mark) latest.set(chunk.id, mark);
     });
-    const ready = chunksReadyToReview(chunks, latest, Date.now());
-    const retainedIds = chunks.filter((chunk) => reviewMarkController.retained(chunk.id)).map((chunk) => chunk.id);
-    const cards = reviewQueueOnOpen({ ready, all: chunks, startId: startChunkId, retainedIds }).map(toCard);
-    const scheduled = [...latest.values()]
-      .filter((mark) => mark.dueAt > Date.now())
-      .map((mark) => ({
-        chunkId: mark.chunkId,
-        state: mark.state,
-        localDay: mark.localDay,
-        dueAt: mark.dueAt,
-      }))
-      .sort((left, right) => left.dueAt - right.dueAt || left.chunkId.localeCompare(right.chunkId));
+    const annotations = (await listRoomAnnotations(db, roomId)).filter((annotation) => annotation.type === 'ai_answer');
+    const byChunk = new Map(chunks.map((chunk) => [chunk.id, chunk]));
+    const answerMarks = await Promise.all(annotations.map((annotation) => latestAnswerMark(db, annotation.id)));
+    const latestAnswers = new Map<string, { dueAt: number }>();
+    answerMarks.forEach((mark, index) => {
+      const annotation = annotations[index];
+      if (mark && annotation) latestAnswers.set(annotation.id, mark);
+    });
+    const answers = annotations.flatMap((annotation) => {
+      const chunk = byChunk.get(annotation.chunkId);
+      if (!chunk) return [];
+      const card = toAnswerCard(annotation, chunk);
+      return card.kind === 'answer' ? [card.answer] : [];
+    });
+    const queue = reviewQueueForRoom({
+      chunks: chunks.map((chunk) => ({ id: chunk.id, position: chunk.position, body: chunk.body, revision: chunk.revision })),
+      answers,
+      latestByChunk: latest,
+      latestByAnnotation: latestAnswers,
+      now,
+    });
+    const entries = queue.map((card) => ({ id: reviewCardId(card), card }));
+    const retainedIds = entries.filter((entry) => reviewMarkController.retained(entry.id)).map((entry) => entry.id);
+    const startId = startChunkId ?? retainedIds.find((id) => entries.some((entry) => entry.id === id));
+    const cards = orderReviewQueue(entries, startId, entries).map((entry) => entry.card);
+    const scheduled: Scheduled[] = [
+      ...[...latest.values()]
+        .filter((mark) => mark.dueAt > now)
+        .map((mark) => ({
+          key: mark.chunkId,
+          chunkId: mark.chunkId,
+          annotationId: null as string | null,
+          state: mark.state,
+          localDay: mark.localDay,
+          dueAt: mark.dueAt,
+        })),
+      ...answerMarks.flatMap((mark) =>
+        mark !== null && mark.dueAt > now
+          ? [{
+              key: mark.annotationId,
+              chunkId: mark.chunkId,
+              annotationId: mark.annotationId,
+              state: mark.state,
+              localDay: mark.localDay,
+              dueAt: mark.dueAt,
+            }]
+          : [],
+      ),
+    ].sort((left, right) => left.dueAt - right.dueAt || left.key.localeCompare(right.key));
     return { missing: false, room: found, cards, scheduled };
   }, [db, roomId, startChunkId]);
 
@@ -163,8 +236,12 @@ export function ReviewScreen() {
   }
 
   const card = cards[0];
-  const asked = card ? mockReviewQuestion(card) : null;
-  const pending = !busy && card ? reviewMarkController.retained(card.id) : null;
+  const asked = card
+    ? card.kind === 'answer'
+      ? mockAnswerQuestion(card.answer)
+      : mockReviewQuestion(card.chunk)
+    : null;
+  const pending = !busy && card ? reviewMarkController.retained(reviewCardId(card)) : null;
   const shownError = error ?? (pending
     ? `The previous ${REVIEW_LABEL[pending.payload.state]} mark did not finish. Retry that choice. It will not be counted twice.`
     : null);
@@ -172,6 +249,10 @@ export function ReviewScreen() {
   async function mark(state: ReviewState) {
     if (!card || !roomId || marking.current) return;
     const seen = card;
+    const seenKey = reviewCardId(seen);
+    const seenChunkId = seen.kind === 'answer' ? seen.answer.chunkId : seen.chunk.id;
+    const seenRevision = seen.kind === 'answer' ? seen.answer.chunkRevision : seen.chunk.revision;
+    const seenAnnotationId = seen.kind === 'answer' ? seen.answer.annotationId : undefined;
     const gen = reviewMarkController.generation();
     marking.current = true;
     setBusy(true);
@@ -185,29 +266,34 @@ export function ReviewScreen() {
           if (gate) await gate;
           return commit(attempt);
         },
-        request: { chunkId: seen.id, state, expectedRevision: seen.revision },
+        request: seenAnnotationId === undefined
+          ? { chunkId: seenChunkId, state, expectedRevision: seenRevision }
+          : { chunkId: seenChunkId, annotationId: seenAnnotationId, state, expectedRevision: seenRevision },
         report: (result, attempt) => {
           if (consumeLostReviewReport()) throw new Error('response lost');
           const was = stageRef.current;
           stageRef.current = result.value.stage;
           const promoted = was === 'stonehenge' && result.value.stage === 'brick' ? ' This room is now brick.' : '';
           const progress = acknowledgeDisplayedCards({
-            cards: [seen],
+            cards: [],
             done: 0,
-            displayedId: seen.id,
-            displayedRevision: seen.revision,
+            displayedId: seenKey,
+            displayedRevision: seenRevision,
             markedRevision: attempt.expectedRevision,
           });
           setStage(result.value.stage);
+          const scheduledKey = result.value.annotationId ?? result.value.chunkId;
           setScheduled((current) => {
-            const next = current.filter((item) => item.chunkId !== result.value.chunkId);
+            const next = current.filter((item) => item.key !== scheduledKey);
             next.push({
+              key: scheduledKey,
               chunkId: result.value.chunkId,
+              annotationId: result.value.annotationId,
               state: result.value.state,
               localDay: result.value.localDay,
               dueAt: result.value.dueAt,
             });
-            next.sort((left, right) => left.dueAt - right.dueAt || left.chunkId.localeCompare(right.chunkId));
+            next.sort((left, right) => left.dueAt - right.dueAt || left.key.localeCompare(right.key));
             return next;
           });
           if (!progress.reviewedDisplayedRevision) {
@@ -215,7 +301,7 @@ export function ReviewScreen() {
             return;
           }
           setSaved(`Saved ${REVIEW_LABEL[result.value.state]}. Due ${formatDueAt(result.value.dueAt)}.${promoted}`);
-          setCards((current) => current.filter((item) => item.id !== seen.id));
+          setCards((current) => current.filter((item) => reviewCardId(item) !== seenKey));
           setDone((count) => count + 1);
           setOutcomes((current) => [...current, result.value.state]);
           setTally((current) => ({ ...current, [result.value.state]: current[result.value.state] + 1 }));
@@ -238,19 +324,33 @@ export function ReviewScreen() {
       if (outcome.status !== 'rejected') return;
       const failure = outcome.result.error;
       if (failure.code === 'stale_revision') {
-        setError('This note changed since you opened it. Nothing was saved and it did not count. Read the current note, then mark it again.');
-        const fresh = await getChunk(db, seen.id);
+        if (seenAnnotationId === undefined) {
+          setError('This note changed since you opened it. Nothing was saved and it did not count. Read the current note, then mark it again.');
+          const fresh = await getChunk(db, seenChunkId);
+          if (reviewMarkController.generation() !== gen) return;
+          if (fresh && fresh.roomId === roomId) {
+            setCards((current) => current.map((item) => (reviewCardId(item) === seenKey ? toCard(fresh) : item)));
+          } else {
+            setCards((current) => current.filter((item) => reviewCardId(item) !== seenKey));
+          }
+          return;
+        }
+        setError('This saved answer no longer matches the note. Nothing was saved and it did not count. Ask again, then mark the new answer.');
+        const fresh = await getChunk(db, seenChunkId);
         if (reviewMarkController.generation() !== gen) return;
         if (fresh && fresh.roomId === roomId) {
-          setCards((current) => current.map((item) => (item.id === seen.id ? toCard(fresh) : item)));
-        } else {
-          setCards((current) => current.filter((item) => item.id !== seen.id));
+          const pin = await getAnnotation(db, seenAnnotationId);
+          if (pin && pin.chunkId === fresh.id) {
+            setCards((current) => current.map((item) => (reviewCardId(item) === seenKey ? toAnswerCard(pin, fresh) : item)));
+            return;
+          }
         }
+        setCards((current) => current.filter((item) => reviewCardId(item) !== seenKey));
         return;
       }
       if (failure.code === 'not_found') {
-        setError('This note no longer exists.');
-        setCards((current) => current.filter((item) => item.id !== seen.id));
+        setError(seenAnnotationId === undefined ? 'This note no longer exists.' : 'This saved answer no longer exists.');
+        setCards((current) => current.filter((item) => reviewCardId(item) !== seenKey));
         setDone((count) => count + 1);
         return;
       }
@@ -266,7 +366,8 @@ export function ReviewScreen() {
 
   function skip() {
     if (!card || marking.current) return;
-    setCards((current) => current.filter((item) => item.id !== card.id));
+    const skipped = reviewCardId(card);
+    setCards((current) => current.filter((item) => reviewCardId(item) !== skipped));
     setDone((count) => count + 1);
     setOutcomes((current) => [...current, 'skipped']);
     setError(null);
@@ -319,7 +420,9 @@ export function ReviewScreen() {
               </View>
               {card ? (
                 <Text testID="review-progress" style={[theme.text('caption'), { color: tertiary, minWidth: 44, textAlign: 'center', fontVariant: ['tabular-nums'] }]}>
-                  {`Note ${Math.min(done + 1, total)} of ${total}`}
+                  {card.kind === 'answer'
+                    ? `Answer ${Math.min(done + 1, total)} of ${total}`
+                    : `Note ${Math.min(done + 1, total)} of ${total}`}
                 </Text>
               ) : null}
             </View>
@@ -340,7 +443,9 @@ export function ReviewScreen() {
                         <Text testID="review-stage" numberOfLines={1} style={[theme.text('eyebrow'), { flex: 1, color: tertiary }]}>
                           {`${room.name} · Stone stage: ${stage}`}
                         </Text>
-                        <Text testID="review-revision" style={[theme.text('caption'), { color: tertiary }]}>{`Revision ${card.revision}`}</Text>
+                        <Text testID="review-revision" style={[theme.text('caption'), { color: tertiary }]}>
+                          {card.kind === 'answer' ? `Revision ${card.answer.chunkRevision}` : `Revision ${card.chunk.revision}`}
+                        </Text>
                       </View>
                       {asked.ok ? (
                         <Text testID="review-question" accessibilityRole="header" style={[theme.text('actionTitle'), { color: ink, fontSize: 22, lineHeight: 28, letterSpacing: -0.4 }]}>
@@ -352,15 +457,19 @@ export function ReviewScreen() {
                         </View>
                       )}
                     </View>
-                    <View accessibilityLabel="Your note" style={[cardStyle, { gap: 10, paddingVertical: 18 }]}>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Text style={[theme.text('eyebrow'), { color: tertiary }]}>Your note</Text>
-                        <Pressable accessibilityRole="link" testID="review-open-room" onPress={() => void reviewMarkController.requestLeave(() => router.replace(`/rooms/${roomId}`))} style={{ minHeight: 44, justifyContent: 'center' }}>
-                          <Text style={[theme.text('caption'), { color: muted }]}>Open in room</Text>
-                        </Pressable>
-                      </View>
-                      <Text testID="review-chunk" style={[theme.text('reading'), { color: ink, fontSize: 16, lineHeight: 26 }]}>{card.body}</Text>
-                    </View>
+                    {card.kind === 'answer'
+                      ? <AnswerCardBody card={card} roomId={roomId} />
+                      : (
+                        <View accessibilityLabel="Your note" style={[cardStyle, { gap: 10, paddingVertical: 18 }]}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Text style={[theme.text('eyebrow'), { color: tertiary }]}>Your note</Text>
+                            <Pressable accessibilityRole="link" testID="review-open-room" onPress={() => void reviewMarkController.requestLeave(() => router.replace(`/rooms/${roomId}`))} style={{ minHeight: 44, justifyContent: 'center' }}>
+                              <Text style={[theme.text('caption'), { color: muted }]}>Open in room</Text>
+                            </Pressable>
+                          </View>
+                          <Text testID="review-chunk" style={[theme.text('reading'), { color: ink, fontSize: 16, lineHeight: 26 }]}>{card.chunk.body}</Text>
+                        </View>
+                      )}
                     <Text style={[theme.text('caption'), { color: tertiary, textAlign: 'center' }]}>How well did you know it?</Text>
                     <View style={{ flexDirection: 'row', gap: theme.space.md, marginTop: 'auto' }}>
                       {(Object.keys(REVIEW_LABEL) as ReviewState[]).map((state) => (
@@ -368,7 +477,7 @@ export function ReviewScreen() {
                       ))}
                     </View>
                     <Pressable accessibilityRole="button" disabled={busy} onPress={skip} style={{ minHeight: 44, alignItems: 'center', justifyContent: 'center' }}>
-                      <Text style={[theme.text('nav'), { color: muted }]}>Skip this note</Text>
+                      <Text style={[theme.text('nav'), { color: muted }]}>{card.kind === 'answer' ? 'Skip this answer' : 'Skip this note'}</Text>
                     </Pressable>
                   </>
                 ) : total > 0 && done > 0 && tally.got_it + tally.unclear + tally.missed > 0 ? (
@@ -394,10 +503,12 @@ export function ReviewScreen() {
                     <SectionTitle>Coming up</SectionTitle>
                     <Group>
                       {scheduled.map((item) => (
-                        <View key={item.chunkId} style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.xl, minHeight: 52, paddingHorizontal: theme.space.base, paddingVertical: theme.space.md }}>
+                        <View key={item.key} style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.xl, minHeight: 52, paddingHorizontal: theme.space.base, paddingVertical: theme.space.md }}>
                           <StatusMark state={item.state} size={24} />
-                          <Text testID={`review-scheduled-${item.chunkId}`} style={[theme.text('bodySmall'), { flex: 1, color: muted }]}>
-                            {`${REVIEW_LABEL[item.state]} · ${item.localDay} · due ${formatDueAt(item.dueAt)}`}
+                          <Text testID={`review-scheduled-${item.key}`} style={[theme.text('bodySmall'), { flex: 1, color: muted }]}>
+                            {item.annotationId
+                              ? `Saved answer · ${REVIEW_LABEL[item.state]} · ${item.localDay} · due ${formatDueAt(item.dueAt)}`
+                              : `${REVIEW_LABEL[item.state]} · ${item.localDay} · due ${formatDueAt(item.dueAt)}`}
                           </Text>
                         </View>
                       ))}
@@ -420,8 +531,35 @@ const REVIEW_HINT: Record<ReviewState, string> = {
   got_it: 'in 3 days',
 };
 
-/** One review choice: a solid status fill carrying its icon, label and next-due hint. */
-function MarkButton({ state, label, hint, disabled, onPress }: { state: ReviewState; label: string; hint: string; disabled: boolean; onPress: () => void }) {
+/** A pinned answer under review: the saved answer plus its cited passage, or the stale warning. */
+function AnswerCardBody({ card, roomId }: { card: Extract<ReviewCard, { kind: 'answer' }>; roomId: string | undefined }) {
+  const theme = useStoneTheme();
+  const cited = citationFromAnnotation(card.answer.chunkBody, card.answer.anchor, card.answer.grounding);
+  return (
+    <View accessibilityLabel="Your saved answer" style={{ backgroundColor: theme.color.bg.surface, borderColor: theme.color.border.hairline, borderRadius: theme.radius.card, borderWidth: 1, gap: 10, paddingHorizontal: theme.space.card, paddingVertical: 18 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Text style={[theme.text('eyebrow'), { color: theme.color.text.tertiary }]}>Saved answer</Text>
+        <Pressable accessibilityRole="link" testID="review-open-room" onPress={() => void reviewMarkController.requestLeave(() => router.replace(roomId ? `/rooms/${roomId}` : '/'))} style={{ minHeight: 44, justifyContent: 'center' }}>
+          <Text style={[theme.text('caption'), { color: theme.color.text.secondary }]}>Open in room</Text>
+        </Pressable>
+      </View>
+      <Text testID="review-answer" style={[theme.text('reading'), { color: theme.color.text.primary, fontSize: 16, lineHeight: 26 }]}>
+        {card.answer.answer || 'AI answer'}
+      </Text>
+      {cited.ok ? (
+        <Text testID="review-answer-quote" style={[theme.text('bodySmall'), { color: theme.color.text.secondary }]}>
+          {`Cited passage: ${cited.quote}`}
+        </Text>
+      ) : (
+        <Text accessibilityRole="alert" testID="review-answer-error" style={[theme.text('bodySmall'), { color: theme.color.status.danger.text }]}>
+          {cited.message}
+        </Text>
+      )}
+    </View>
+  );
+}
+
+/** One review choice: a solid status fill carrying its icon, label and next-due hint. */function MarkButton({ state, label, hint, disabled, onPress }: { state: ReviewState; label: string; hint: string; disabled: boolean; onPress: () => void }) {
   const theme = useStoneTheme();
   const fill = theme.color.status[REVIEW_TONE[state]].fill;
   const onFill = theme.color.text.onFill;
