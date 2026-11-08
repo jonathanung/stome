@@ -40,20 +40,17 @@ export async function commitCapture(
 
 /**
  * Reload `refresh` when a capture commits into `roomId`. A capture into
- * another room must not reload this one. A failed reload surfaces as the
- * room's load error; the capture itself already committed. Returns the
- * unsubscribe, for a focus-scoped subscription.
+ * another room must not reload this one. The room's refresh reports its own
+ * failures and applies only the newest read; the final catch just keeps a
+ * rejected refresh from becoming an unhandled rejection.
  */
 export function watchRoomCaptureRefresh(
   roomId: string | null,
   refresh: () => Promise<void>,
-  onError: (message: string) => void,
 ): () => void {
   if (!roomId) return () => undefined;
   return onCaptureCommit((changed) => {
     if (changed !== roomId) return;
-    refresh().catch((reason: unknown) => {
-      onError(reason instanceof Error ? reason.message : 'Could not load room');
-    });
+    void refresh().catch(() => undefined);
   });
 }

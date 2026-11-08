@@ -171,11 +171,19 @@ export function RoomScreen() {
   const loads = useRef(createLatestLoad()).current;
   const refresh = useCallback(async () => {
     const token = loads.start();
-    const next = await load();
-    if (!loads.isLatest(token)) return;
-    setRoom(next.room);
-    setChunks(next.chunks);
-    setDueToday(next.due);
+    try {
+      const next = await load();
+      if (!loads.isLatest(token)) return;
+      setRoom(next.room);
+      setChunks(next.chunks);
+      setDueToday(next.due);
+      // A refresh can be the newest read before the initial focus load settles.
+      setLoading(false);
+    } catch (reason) {
+      if (!loads.isLatest(token)) return;
+      setError(reason instanceof Error ? reason.message : 'Could not load room');
+      setLoading(false);
+    }
   }, [load, loads]);
   useFocusEffect(useCallback(() => {
     let active = true;
@@ -188,8 +196,13 @@ export function RoomScreen() {
     // A capture from the global panel commits outside this screen; reload so the
     // note list and the Ask chunk selection see it without a reload. It is scoped
     // to focus so a retained, unfocused room does not keep reading the database.
-    const stop = watchRoomCaptureRefresh(id ?? null, refresh, setError);
-    return () => { active = false; stop(); };
+    const stop = watchRoomCaptureRefresh(id ?? null, refresh);
+    return () => {
+      active = false;
+      stop();
+      // Blur invalidates reads still in flight so they cannot apply after leaving.
+      loads.start();
+    };
   }, [id, loads, load, refresh]));
   const openCitation = useCallback((next: ChunkFocus) => {
     setFocus(next);

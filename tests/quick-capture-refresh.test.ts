@@ -43,8 +43,9 @@ async function room(commit: ReturnType<typeof createCommit>, opId: string, name:
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => { resolve = done; });
-  return { promise, resolve };
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
 }
 
 test('the capture panel and room screen use the production wiring', () => {
@@ -52,7 +53,7 @@ test('the capture panel and room screen use the production wiring', () => {
   // guard fails if either side stops calling the functions exercised above.
   const read = (file: string) => readFileSync(path.join(import.meta.dirname, '..', file), 'utf8');
   assert.match(read('src/features/capture/QuickCapture.tsx'), /commit:\s*\(operation\)\s*=>\s*commitCapture\(/);
-  assert.match(read('src/screens/RoomScreen.tsx'), /watchRoomCaptureRefresh\(id \?\? null, refresh, setError\)/);
+  assert.match(read('src/screens/RoomScreen.tsx'), /watchRoomCaptureRefresh\(id \?\? null, refresh\)/);
 });
 
 test('a slow older room load cannot overwrite the quick capture refresh', async () => {
@@ -104,7 +105,6 @@ test('saving from quick capture makes the room see exactly one chunk without a r
       pending = listChunks(db, roomId).then((chunks) => { loads.push(chunks); });
       return pending;
     },
-    (message) => { throw new Error(`unexpected refresh error: ${message}`); },
   );
 
   const controller = createCaptureController({
@@ -156,7 +156,7 @@ test('a capture into another room does not reload, and unmount unsubscribes', as
   const otherRoomId = await room(commit, 'room-b', 'Other');
 
   let refreshes = 0;
-  const stop = watchRoomCaptureRefresh(roomId, async () => { refreshes += 1; }, () => undefined);
+  const stop = watchRoomCaptureRefresh(roomId, async () => { refreshes += 1; });
   const save = (text: string, opId: string, target: string) => commitCapture(
     captureOperation({ text, opId }, target),
     async (capture) => {
@@ -179,14 +179,43 @@ test('a capture into another room does not reload, and unmount unsubscribes', as
   db.close();
 });
 
-test('a failed room reload is reported without pretending the capture failed', async () => {
+test('a stale failed load cannot report an error after a newer success', async () => {
+  const loads = createLatestLoad();
+  const applied: string[][] = [];
   const errors: string[] = [];
-  const stop = watchRoomCaptureRefresh('room-a', async () => { throw new Error('database locked'); }, (message) => { errors.push(message); });
+  const run = async (source: Promise<string[]>) => {
+    const token = loads.start();
+    try {
+      const value = await source;
+      if (loads.isLatest(token)) applied.push(value);
+    } catch (reason) {
+      if (loads.isLatest(token)) errors.push(reason instanceof Error ? reason.message : 'failed');
+    }
+  };
+
+  const older = deferred<string[]>();
+  const newer = deferred<string[]>();
+  const olderRun = run(older.promise);
+  const newerRun = run(newer.promise);
+  newer.resolve(['the captured note']);
+  await newerRun;
+  older.reject(new Error('database locked'));
+  await olderRun;
+
+  assert.deepEqual(applied, [['the captured note']]);
+  assert.deepEqual(errors, [], 'the stale failure must not show an error on a healthy room');
+
+  // The newest failure is still reported.
+  await run(Promise.reject(new Error('database locked')));
+  assert.deepEqual(errors, ['database locked']);
+});
+
+test('a rejected room refresh never becomes an unhandled rejection', async () => {
+  const stop = watchRoomCaptureRefresh('room-a', async () => { throw new Error('database locked'); });
   await commitCapture(
     captureOperation({ text: 'saved', opId: 'op-a' }, 'room-a'),
     async () => ({ ok: true, duplicate: false }),
   );
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.deepEqual(errors, ['database locked']);
   stop();
 });
