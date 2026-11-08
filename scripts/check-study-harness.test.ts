@@ -27,7 +27,7 @@ import {
   STUDY_TOOL_NAMES,
   STUDY_TOOL_REGISTRY,
   TOOL_REGISTRY,
-  assertRegistryIsNotesOnly,
+  assertRegistryIsWriteTools,
   assertStudyRegistry,
   chunkViewFromFoundation,
   isStudyDeckProposal,
@@ -199,8 +199,13 @@ async function confirmCurrent(
 /* ---------------------------------------------------------- registries */
 
 test('study tools have their own registry and never join the live set', () => {
-  assert.deepEqual(Object.keys(TOOL_REGISTRY).sort(), ['notes.proposeAnnotation', 'notes.proposeChunkEdit'].sort());
-  assertRegistryIsNotesOnly();
+  // HAR.6 adds the whiteboard stroke writer to the write registry; study
+  // tools stay in their own registry either way.
+  assert.deepEqual(
+    Object.keys(TOOL_REGISTRY).sort(),
+    ['notes.proposeAnnotation', 'notes.proposeChunkEdit', 'whiteboard.proposeStroke'].sort(),
+  );
+  assertRegistryIsWriteTools();
   assert.deepEqual(Object.keys(STUDY_TOOL_REGISTRY).sort(), [...STUDY_TOOL_NAMES].sort());
   assertStudyRegistry();
   for (const tool of STUDY_TOOL_NAMES) {

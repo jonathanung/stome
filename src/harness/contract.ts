@@ -36,6 +36,9 @@ export const TOOL_NAME = 'notes.proposeAnnotation' as const;
 
 export const EDIT_TOOL_NAME = 'notes.proposeChunkEdit' as const;
 
+/** Whiteboard stroke generation (HAR.6 #74): proposes one chunk-anchored freehand stroke. */
+export const STROKE_TOOL_NAME = 'whiteboard.proposeStroke' as const;
+
 /**
  * STUDY.5 (#135) tools. The mock provider runs these by calling the STUDY.2
  * generator; the live companion providers never see them (they are not in
@@ -145,6 +148,14 @@ export type EditProposeOutput = {
   body: string;
 };
 
+/** One freehand stroke in canvas units, against the same limits as the commit boundary. */
+export type StrokeProposeOutput = {
+  roomId: string;
+  chunkId: string;
+  type: 'stroke';
+  points: [number, number][];
+};
+
 type ProposalBase = {
   id: string;
   roomId: string;
@@ -169,10 +180,27 @@ export type EditProposal = ProposalBase & {
   body: string;
 };
 
-export type StoredProposal = AnnotationProposal | EditProposal | StudyDeckProposal | StudyQuizProposal | StudyOutlineProposal;
+/** A chunk-anchored whiteboard stroke. Committed as an `annotation.create` of type `stroke`. */
+export type StrokeProposal = ProposalBase & {
+  tool: typeof STROKE_TOOL_NAME;
+  type: 'stroke';
+  points: [number, number][];
+};
+
+export type StoredProposal =
+  | AnnotationProposal
+  | EditProposal
+  | StrokeProposal
+  | StudyDeckProposal
+  | StudyQuizProposal
+  | StudyOutlineProposal;
 
 export function isEditProposal(proposal: StoredProposal): proposal is EditProposal {
   return proposal.tool === EDIT_TOOL_NAME;
+}
+
+export function isStrokeProposal(proposal: StoredProposal): proposal is StrokeProposal {
+  return proposal.tool === STROKE_TOOL_NAME;
 }
 
 export function isAnnotationProposal(proposal: StoredProposal): proposal is AnnotationProposal {
@@ -227,12 +255,17 @@ export function isStudyOutlineProposal(proposal: StoredProposal): proposal is St
   return proposal.tool === STUDY_OUTLINE_TOOL_NAME;
 }
 
-/** One-line summary stored as the assistant message; study drafts have no single body. */
-export function proposalMessageBody(proposal: StoredProposal): string {
+/** One-line summary stored as the assistant message; strokes and study drafts have no single body. */
+export function proposalMessageBody(proposal: StoredProposal | null): string {
+  if (!proposal) {
+    return '';
+  }
   switch (proposal.type) {
     case 'ai_answer':
     case 'chunk_edit':
       return proposal.body;
+    case 'stroke':
+      return `Stroke proposal (${proposal.points.length} points)`;
     case 'study_deck':
       return `Study deck proposal: ${proposal.title} (${proposal.cards.length} cards)`;
     case 'study_quiz':
@@ -258,6 +291,23 @@ export type FoundationAnnotationRequest = {
     body: string;
     anchorStart: number;
     anchorEnd: number;
+  };
+};
+
+/** Assessed stroke proposal. Committed as an `annotation.create` of type `stroke`. */
+export type FoundationStrokeRequest = {
+  opId: string;
+  kind: 'annotation.create';
+  source: 'ai';
+  confirmed: true;
+  expectedRevision: number;
+  payload: {
+    proposalId: string;
+    roomId: string;
+    chunkId: string;
+    noteId: number;
+    type: 'stroke';
+    points: [number, number][];
   };
 };
 
@@ -432,6 +482,47 @@ export function parseProposeOutput(value: unknown): ProposeOutput {
   };
 }
 
+/**
+ * The same 1–5000 finite-points limits as the commit boundary
+ * (`LIMITS.strokePoints` in `src/data/operations.ts`, enforced again by
+ * `checkAnchor` for `stroke` in `src/data/commit.ts`).
+ */
+export function parseStrokePoints(value: unknown): [number, number][] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new HarnessError('invalid_shape', 'A stroke needs at least one [x, y] point');
+  }
+  if (value.length > LIMITS.strokePoints) {
+    throw new HarnessError('output_limit', `A stroke holds at most ${LIMITS.strokePoints} points`);
+  }
+  return value.map((point) => {
+    if (!Array.isArray(point) || point.length !== 2) {
+      throw new HarnessError('invalid_shape', 'Each stroke point must be an [x, y] pair');
+    }
+    const [x, y] = point;
+    if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) {
+      throw new HarnessError('invalid_shape', 'Each stroke point must be two finite numbers');
+    }
+    const parsed: [number, number] = [x, y];
+    return parsed;
+  });
+}
+
+export function parseStrokeOutput(value: unknown): StrokeProposeOutput {
+  if (!isRecord(value)) {
+    throw new HarnessError('invalid_shape', 'Tool output must be an object');
+  }
+  exactKeys(value, ['roomId', 'chunkId', 'type', 'points']);
+  if (value.type !== 'stroke') {
+    throw new HarnessError('invalid_shape', 'whiteboard.proposeStroke only proposes a freehand stroke');
+  }
+  return {
+    roomId: requireString(value.roomId, 'roomId'),
+    chunkId: requireString(value.chunkId, 'chunkId'),
+    type: 'stroke',
+    points: parseStrokePoints(value.points),
+  };
+}
+
 export const TOOL_REGISTRY = {
   [TOOL_NAME]: {
     name: TOOL_NAME,
@@ -443,8 +534,14 @@ export const TOOL_REGISTRY = {
     parseInput: parseProposeInput,
     parseOutput: parseEditOutput,
   },
+  [STROKE_TOOL_NAME]: {
+    name: STROKE_TOOL_NAME,
+    parseInput: parseProposeInput,
+    parseOutput: parseStrokeOutput,
+  },
 } as const;
 
+const WRITE_TOOLS = [TOOL_NAME, EDIT_TOOL_NAME, STROKE_TOOL_NAME].sort();
 // ---------------------------------------------------------------------------
 // STUDY.5 (#135) propose/confirm seam. The mock provider calls the STUDY.2
 // generator and these parses validate the draft before it reaches the
@@ -812,25 +909,25 @@ export function assertStudyRegistry(): void {
   }
 }
 
-const NOTE_TOOLS = [TOOL_NAME, EDIT_TOOL_NAME].sort();
 
 /**
- * Every tool name the companion may run: the two note proposals plus the
+ * Every tool name the companion may run: the write proposals plus the
  * read-only suggestion tools in tools.ts. There is still no shell, file, or
  * plugin tool. Keep this list literal so a new tool is a reviewed change.
  */
 export const ALLOWED_TOOL_NAMES = [
   TOOL_NAME,
   EDIT_TOOL_NAME,
+  STROKE_TOOL_NAME,
   'review.generateQuestion',
   'board.proposeStickies',
   'import.suggestRooms',
 ] as const;
 
-export function assertRegistryIsNotesOnly(): void {
+export function assertRegistryIsWriteTools(): void {
   const names = Object.keys(TOOL_REGISTRY).sort();
-  if (names.length !== NOTE_TOOLS.length || names.some((name, index) => name !== NOTE_TOOLS[index])) {
-    throw new HarnessError('invalid_shape', 'The tool registry is no longer the notes-only set');
+  if (names.length !== WRITE_TOOLS.length || names.some((name, index) => name !== WRITE_TOOLS[index])) {
+    throw new HarnessError('invalid_shape', 'The tool registry is no longer the write-tool set');
   }
 }
 
@@ -882,6 +979,22 @@ export function assertOutputInScope(output: ProposeOutput, chunks: readonly Chun
     throw new HarnessError('scope_rejected', 'The proposal chunk is outside the session room');
   }
   assertAnchor(chunk.text, output.anchorStart, output.anchorEnd);
+}
+
+/** Same room and selection rules as an answer, then the stroke point limits. */
+export function assertStrokeOutputInScope(output: StrokeProposeOutput, chunks: readonly ChunkView[]): void {
+  const roomId = chunks[0]?.roomId;
+  if (!roomId || output.roomId !== roomId) {
+    throw new HarnessError('scope_rejected', 'The proposal is for a different room');
+  }
+  const chunk = chunks.find((item) => item.id === output.chunkId);
+  if (!chunk) {
+    throw new HarnessError('scope_rejected', 'The proposal targets a chunk that was not selected');
+  }
+  if (chunk.roomId !== output.roomId) {
+    throw new HarnessError('scope_rejected', 'The proposal chunk is outside the session room');
+  }
+  parseStrokePoints(output.points);
 }
 
 export function assessConfirmedAnnotation(input: {
@@ -941,6 +1054,66 @@ export function assessConfirmedAnnotation(input: {
       body: proposal.body,
       anchorStart: proposal.anchorStart,
       anchorEnd: proposal.anchorEnd,
+    },
+  };
+}
+
+/**
+ * Confirms a stroke proposal for FND.2. Same gates as an answer: explicit
+ * confirmation, the stored operation id, the session room and selection, and
+ * the chunk revision read at propose time. The points are revalidated so an
+ * over-limit or non-finite stroke never reaches the commit.
+ */
+export function assessConfirmedStroke(input: {
+  confirmed: boolean;
+  operationId: string;
+  proposal: StoredProposal | null;
+  sessionRoomId: string;
+  sessionState: SessionState;
+  selectedChunkIds: readonly string[];
+  confirmedOperationId: string | null;
+  chunk: ChunkView;
+}): FoundationStrokeRequest {
+  if (input.confirmed !== true) {
+    throw new HarnessError('confirmation_required', 'An AI stroke is saved only after you confirm it');
+  }
+  const operationId = input.operationId.trim();
+  if (operationId.length === 0) {
+    throw new HarnessError('invalid_shape', 'The confirmation needs an operation id');
+  }
+  if (input.sessionState !== 'completed' || input.proposal === null) {
+    throw new HarnessError('proposal_mismatch', 'There is no proposal waiting for confirmation');
+  }
+  if (input.confirmedOperationId) {
+    throw new HarnessError('already_confirmed', 'This proposal was already saved');
+  }
+  const proposal = input.proposal;
+  if (!isStrokeProposal(proposal) || proposal.roomId !== input.sessionRoomId) {
+    throw new HarnessError('scope_rejected', 'The proposal is outside this session room');
+  }
+  if (!input.selectedChunkIds.includes(proposal.chunkId)) {
+    throw new HarnessError('scope_rejected', 'The proposal targets a chunk that was not selected');
+  }
+  if (proposal.chunkId !== input.chunk.id || proposal.noteId !== input.chunk.noteId) {
+    throw new HarnessError('proposal_mismatch', 'The open chunk does not match the proposal');
+  }
+  if (proposal.chunkRevision !== input.chunk.revision) {
+    throw new HarnessError('stale_revision', 'The chunk changed after the proposal. Ask again before saving.');
+  }
+  const points = parseStrokePoints(proposal.points);
+  return {
+    opId: operationId,
+    kind: 'annotation.create',
+    source: 'ai',
+    confirmed: true,
+    expectedRevision: proposal.chunkRevision,
+    payload: {
+      proposalId: proposal.id,
+      roomId: proposal.roomId,
+      chunkId: proposal.chunkId,
+      noteId: proposal.noteId,
+      type: 'stroke',
+      points,
     },
   };
 }

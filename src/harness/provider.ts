@@ -2,6 +2,7 @@ import {
   EDIT_TOOL_NAME,
   MOCK_SCENARIOS,
   PROVIDER_LIMITS,
+  STROKE_TOOL_NAME,
   STUDY_DECK_TOOL_NAME,
   STUDY_OUTLINE_TOOL_NAME,
   STUDY_QUIZ_TOOL_NAME,
@@ -11,6 +12,7 @@ import {
   parseEditOutput,
   parseProposeInput,
   parseProposeOutput,
+  parseStrokeOutput,
   parseStudyDeckOutput,
   parseStudyDraft,
   parseStudyOutlineOutput,
@@ -21,6 +23,7 @@ import {
   type MockScenario,
   type ProposeInput,
   type ProposeOutput,
+  type StrokeProposeOutput,
   type StudyDeckDraft,
   type StudyQuizDraft,
   type StudySlideOutlineDraft,
@@ -34,7 +37,7 @@ import {
 } from '../features/study/generator.ts';
 import { isReadTool, mockReadToolOutput, parseReadToolInput, parseReadToolOutput, type ReadToolName } from './tools';
 
-export type NoteToolName = typeof TOOL_NAME | typeof EDIT_TOOL_NAME;
+export type NoteToolName = typeof TOOL_NAME | typeof EDIT_TOOL_NAME | typeof STROKE_TOOL_NAME;
 
 export type ProviderRequest = {
   tool: NoteToolName | ReadToolName;
@@ -98,6 +101,24 @@ export function mockEditOutput(input: ProposeInput): EditProposeOutput {
     chunkId: chunk.id,
     type: 'chunk_edit',
     body,
+  };
+}
+
+/** Deterministic mock stroke: a short diagonal on the first selected chunk. */
+export function mockStrokeOutput(input: ProposeInput): StrokeProposeOutput {
+  const chunk = [...input.chunks].sort((left, right) => left.id.localeCompare(right.id))[0];
+  if (!chunk) {
+    throw new HarnessError('invalid_output', 'The mock provider received no chunks');
+  }
+  return {
+    roomId: input.roomId,
+    chunkId: chunk.id,
+    type: 'stroke',
+    points: [
+      [8, 8],
+      [48, 32],
+      [88, 56],
+    ],
   };
 }
 
@@ -197,10 +218,11 @@ export async function mockComplete(
   if (isReadTool(request.tool)) {
     return mockReadComplete(request as ProviderRequest & { tool: ReadToolName }, signal);
   }
-  if (request.tool !== TOOL_NAME && request.tool !== EDIT_TOOL_NAME) {
+  if (request.tool !== TOOL_NAME && request.tool !== EDIT_TOOL_NAME && request.tool !== STROKE_TOOL_NAME) {
     throw new HarnessError('invalid_shape', 'The mock provider only runs the allowed tools');
   }
   const editing = request.tool === EDIT_TOOL_NAME;
+  const stroking = request.tool === STROKE_TOOL_NAME;
   if (!MOCK_SCENARIOS.includes(request.scenario)) {
     throw new HarnessError('invalid_shape', 'The mock scenario is unknown');
   }
@@ -230,6 +252,14 @@ export async function mockComplete(
         body,
       };
     }
+    if (stroking) {
+      return {
+        roomId: input.roomId,
+        chunkId: input.chunks[0]?.id ?? '',
+        type: 'stroke',
+        points: Array.from({ length: 5_001 }, (_, index) => [index, index]),
+      };
+    }
     return {
       roomId: input.roomId,
       chunkId: input.chunks[0]?.id ?? '',
@@ -238,6 +268,9 @@ export async function mockComplete(
       anchorStart: 0,
       anchorEnd: 1,
     };
+  }
+  if (stroking) {
+    return parseStrokeOutput(mockStrokeOutput(input));
   }
   return editing ? parseEditOutput(mockEditOutput(input)) : parseProposeOutput(mockSuccessOutput(input));
 }
@@ -320,7 +353,7 @@ export async function completeWithLimits(
   request: ProviderRequest,
   signal: AbortSignal,
   timeoutMs: number = PROVIDER_LIMITS.timeoutMs,
-): Promise<ProposeOutput | EditProposeOutput> {
+): Promise<ProposeOutput | EditProposeOutput | StrokeProposeOutput> {
   const timed = combineSignals(signal, timeoutMs);
   let raw: unknown;
   try {
@@ -347,7 +380,11 @@ export async function completeWithLimits(
   if (signal.aborted || timed.signal.aborted) {
     throw abortError(signal.aborted ? signal : timed.signal);
   }
-  return request.tool === EDIT_TOOL_NAME ? parseEditOutput(raw) : parseProposeOutput(raw);
+  return request.tool === EDIT_TOOL_NAME
+    ? parseEditOutput(raw)
+    : request.tool === STROKE_TOOL_NAME
+      ? parseStrokeOutput(raw)
+      : parseProposeOutput(raw);
 }
 
 /**

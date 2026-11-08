@@ -14,7 +14,7 @@ import {
   type MessageClient,
 } from '../companion/providers/anthropic.ts';
 import { liveConfigFromEnv, startCompanion } from '../companion/server.ts';
-import { ALLOWED_TOOL_NAMES, EDIT_TOOL_NAME, HarnessError, TOOL_NAME } from '../src/harness/contract.ts';
+import { ALLOWED_TOOL_NAMES, EDIT_TOOL_NAME, HarnessError, STROKE_TOOL_NAME, TOOL_NAME } from '../src/harness/contract.ts';
 import { completeReadTool, completeWithLimits } from '../src/harness/provider.ts';
 import {
   BOARD_TOOL_NAME,
@@ -125,6 +125,32 @@ test('edit: one chunk, full replacement', async () => {
       signal(),
     ),
     (error: unknown) => error instanceof HarnessError && error.code === 'output_limit',
+  );
+});
+
+test('stroke: points map to StrokeProposeOutput and reject a foreign chunk', async () => {
+  const { client } = fake(json({ chunkId: 'c1', points: [{ x: 10, y: 20 }, { x: 30, y: 40 }] }));
+  const out = await completeWithLimits(
+    createAnthropicProvider({ client }),
+    { tool: STROKE_TOOL_NAME, input: annotateInput, scenario: 'success' },
+    signal(),
+  );
+  assert.deepEqual(out, { roomId: 'r1', chunkId: 'c1', type: 'stroke', points: [[10, 20], [30, 40]] });
+  await assert.rejects(
+    completeWithLimits(
+      createAnthropicProvider({ client: fake(json({ chunkId: 'other', points: [{ x: 1, y: 1 }] })).client }),
+      { tool: STROKE_TOOL_NAME, input: annotateInput, scenario: 'success' },
+      signal(),
+    ),
+    (error: unknown) => error instanceof HarnessError && error.code === 'scope_rejected',
+  );
+  await assert.rejects(
+    completeWithLimits(
+      createAnthropicProvider({ client: fake(json({ chunkId: 'c1', points: [] })).client }),
+      { tool: STROKE_TOOL_NAME, input: annotateInput, scenario: 'success' },
+      signal(),
+    ),
+    (error: unknown) => error instanceof HarnessError && error.code === 'invalid_shape',
   );
 });
 
@@ -303,7 +329,7 @@ test('the companion serves /v1/status for the live provider with no key-like str
     assert.equal(body.status.provider, 'anthropic');
     assert.equal(body.status.live, true);
     assert.equal(body.status.model, 'claude-opus-5-5');
-    assert.equal(body.status.tools.length, 5);
+    assert.equal(body.status.tools.length, 6);
     assert.doesNotMatch(text, /sk-|api[_-]?key|secret/i);
   } finally {
     await handle.close();
