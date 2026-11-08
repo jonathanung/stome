@@ -1,7 +1,10 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { AccessibilityInfo, Pressable, Text, TextInput, View, useColorScheme } from "react-native";
+import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { Text, TextInput, View, useColorScheme } from "react-native";
 import { createTheme, type StoneTheme } from "./theme";
 import { dayTileRadius, type ColorScheme, type TypeRole } from "./tokens";
+
+import { MotionProvider, MotionPressable as Pressable, MotionView } from "./motion";
+export { useReduceMotion } from "./motion";
 
 const StoneContext = createContext<StoneTheme>(createTheme("light"));
 
@@ -24,7 +27,7 @@ export function ThemeProvider({
   const resolved: ColorScheme =
     scheme === "light" || scheme === "dark" ? scheme : system === "dark" ? "dark" : "light";
   const theme = useMemo(() => createTheme(resolved, fontMode), [resolved, fontMode]);
-  return <StoneContext.Provider value={theme}>{children}</StoneContext.Provider>;
+  return <MotionProvider><StoneContext.Provider value={theme}>{children}</StoneContext.Provider></MotionProvider>;
 }
 
 export function useStoneTheme(): StoneTheme {
@@ -37,22 +40,6 @@ export function createStyles<T>(factory: (theme: StoneTheme) => T): () => T {
     const theme = useStoneTheme();
     return useMemo(() => factory(theme), [theme]);
   };
-}
-
-export function useReduceMotion(): boolean {
-  const [reduce, setReduce] = useState(false);
-  useEffect(() => {
-    let mounted = true;
-    AccessibilityInfo.isReduceMotionEnabled().then((value) => {
-      if (mounted) setReduce(value);
-    });
-    const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduce);
-    return () => {
-      mounted = false;
-      subscription.remove();
-    };
-  }, []);
-  return reduce;
 }
 
 type Tone =
@@ -152,7 +139,7 @@ export function Hairline() {
 export function Card({ children }: { children: ReactNode }) {
   const theme = useStoneTheme();
   return (
-    <View
+    <MotionView
       style={{
         backgroundColor: theme.color.bg.surface,
         borderRadius: theme.radius.card,
@@ -163,7 +150,7 @@ export function Card({ children }: { children: ReactNode }) {
       }}
     >
       {children}
-    </View>
+    </MotionView>
   );
 }
 
