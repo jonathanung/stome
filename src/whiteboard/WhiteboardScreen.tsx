@@ -29,14 +29,16 @@ import {
   type WhiteboardElement,
 } from './types';
 import { createWhiteboardPanResponder, type TextEditState } from './useWhiteboardInput';
+import { loadWhiteboardState, useWhiteboardPersistence } from './useWhiteboardStorage';
 
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 20;
 const HISTORY_LIMIT = 50;
 
-export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
-  const [elements, setElements] = useState<WhiteboardElement[]>([]);
-  const [history, setHistory] = useState<WhiteboardElement[][]>([[]]);
+export function WhiteboardScreen({ onBack, roomId }: { onBack?: () => void; roomId?: string } = {}) {
+  const saved = roomId ? loadWhiteboardState(roomId) : null;
+  const [elements, setElements] = useState<WhiteboardElement[]>(saved?.elements ?? []);
+  const [history, setHistory] = useState<WhiteboardElement[][]>([saved?.elements ?? []]);
   const [historyIndex, setHistoryIndex] = useState(0);
   const [tool, setTool] = useState<Tool>('freedraw');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -48,8 +50,8 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
   });
   const [showStylePanel, setShowStylePanel] = useState(false);
   const [showBgPicker, setShowBgPicker] = useState(false);
-  const [bgPattern, setBgPattern] = useState<BackgroundPattern>(DEFAULT_BACKGROUND.pattern);
-  const [bgSize, setBgSize] = useState<BackgroundSize>(DEFAULT_BACKGROUND.size);
+  const [bgPattern, setBgPattern] = useState<BackgroundPattern>(saved?.bgPattern ?? DEFAULT_BACKGROUND.pattern);
+  const [bgSize, setBgSize] = useState<BackgroundSize>(saved?.bgSize ?? DEFAULT_BACKGROUND.size);
   const [textEdit, setTextEdit] = useState<TextEditState | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const canvasOriginRef = useRef({ x: 0, y: 0 });
@@ -306,6 +308,7 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
   }, []);
 
   const theme = useStoneTheme();
+  useWhiteboardPersistence(roomId, elements, bgPattern, bgSize);
   const canUndo = historyIndex > 0;
   const canRedo = historyIndex < history.length - 1;
   const cursor = tool === 'hand' ? 'grab' : tool === 'text' ? 'text' : 'crosshair';

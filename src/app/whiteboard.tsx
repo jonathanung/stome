@@ -4,5 +4,5 @@ import { WhiteboardScreen } from '../whiteboard/WhiteboardScreen';
 
 export default function WhiteboardRoute() {
   const router = useRouter();
-  return <WhiteboardScreen onBack={() => router.back()} />;
+  return <WhiteboardScreen roomId="standalone" onBack={() => router.back()} />;
 }
