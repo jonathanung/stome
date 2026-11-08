@@ -2,13 +2,14 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { pathToFileURL } from 'node:url';
 
-import { PAIRING_TTL_MS, PROVIDER_LIMITS, HarnessError, type HarnessErrorCode } from '../src/harness/contract.ts';
+import { COMPANION_RAW_BODY_LIMIT, companionOriginAllowed, devWebPorts } from '../src/harness/companionAddress.ts';
+import { PAIRING_TTL_MS, HarnessError, type HarnessErrorCode } from '../src/harness/contract.ts';
 import { createProvider, type Provider, type ProviderRequest } from '../src/harness/provider.ts';
 import { ALLOWED_TOOL_NAMES } from '../src/harness/contract.ts';
 import type { CompanionStatus } from '../src/harness/tools.ts';
 
 const LOOPBACK_HOST = '127.0.0.1';
-const RAW_BODY_LIMIT = PROVIDER_LIMITS.maxRequestChars + 2_000;
+const RAW_BODY_LIMIT = COMPANION_RAW_BODY_LIMIT;
 
 export const MOCK_STATUS: CompanionStatus = {
   provider: 'mock',
@@ -24,6 +25,8 @@ type CompanionOptions = {
   provider: Provider;
   /** What GET /v1/status reports. Defaults to the mock. Never holds a key. */
   status?: CompanionStatus;
+  /** Web ports whose loopback http and private https origins may pair. Defaults from `origin`. */
+  webPorts?: readonly number[];
 };
 
 export type CompanionHandle = {
@@ -84,12 +87,13 @@ function sendJson(
   response.end(payload);
 }
 
-function corsHeaders(origin: string | undefined, allowed: string): Record<string, string> | null {
-  if (origin !== allowed) {
+function corsHeaders(origin: string | undefined, options: CompanionOptions): Record<string, string> | null {
+  const ports = options.webPorts ?? devWebPorts(options.origin);
+  if (!origin || !companionOriginAllowed(origin, options.origin, ports)) {
     return null;
   }
   return {
-    'access-control-allow-origin': allowed,
+    'access-control-allow-origin': origin,
     'access-control-allow-methods': 'GET, POST, OPTIONS',
     'access-control-allow-headers': 'content-type, x-stome-token',
     'access-control-max-age': '600',
@@ -140,7 +144,7 @@ export function startCompanion(options: CompanionOptions): Promise<CompanionHand
 
 async function handle(request: IncomingMessage, response: ServerResponse, options: CompanionOptions): Promise<void> {
   const origin = request.headers.origin;
-  const cors = corsHeaders(typeof origin === 'string' ? origin : undefined, options.origin);
+  const cors = corsHeaders(typeof origin === 'string' ? origin : undefined, options);
   const remote = request.socket.remoteAddress;
   if (!isLoopback(remote)) {
     sendJson(response, 403, { ok: false, error: { code: 'forbidden', message: 'The companion accepts loopback clients only' } }, {});
@@ -279,6 +283,7 @@ async function main(): Promise<void> {
   const token = process.env.STOME_PAIRING_TOKEN ?? randomBytes(16).toString('hex');
   const ttl = pairingTtlMs(process.env.STOME_PAIRING_TTL_MS);
   const expiresAt = Date.now() + ttl;
+  const webPorts = devWebPorts(origin, [process.env.STOME_WEB_PORT]);
   const live = await liveConfigFromEnv(process.env);
   const provider = live ? live.provider : createProvider('mock');
   const server = createServer((request, response) => {
@@ -287,6 +292,7 @@ async function main(): Promise<void> {
       token,
       expiresAt,
       provider,
+      webPorts,
       ...(live ? { status: live.status } : {}),
     });
   });
@@ -305,6 +311,7 @@ async function main(): Promise<void> {
         `Pairing token (expires in ${lifetime}, keep it out of browser storage): ${token}`,
         `Pairing deadline: ${expiresAt}`,
         live ? live.banner : 'Provider: deterministic mock. No live model call.',
+        'iPad and other tablets cannot run npm. Run npm run web:lan and open its https address. This process stays on 127.0.0.1; that page proxies to it. The pairing token is still required.',
         '',
       ].join('\n'),
     );

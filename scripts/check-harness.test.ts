@@ -1194,7 +1194,7 @@ test('the CLI pairing deadline is fixed at startup and a bad ttl does not listen
   }
 });
 
-test('companion allows only the configured origin, token, and loopback host', async () => {
+test('companion allows the configured origin, local app origins, the token, and a loopback host', async () => {
   process.env.STOME_PROVIDER_API_KEY = SECRET;
   const companion = await startCompanion({
     origin: 'http://localhost:8081',
@@ -1231,6 +1231,45 @@ test('companion allows only the configured origin, token, and loopback host', as
     body,
   });
   assert.equal(suffix.status, 403);
+  const tabletHttps = await post(companion.url, {
+    origin: 'https://192.168.1.40:8081',
+    token: companion.token,
+    body,
+  });
+  assert.equal(tabletHttps.status, 200);
+  assert.equal(tabletHttps.text.includes(companion.token), false);
+  assert.equal(tabletHttps.text.includes(SECRET), false);
+  const tabletHttp = await post(companion.url, {
+    origin: 'http://192.168.1.40:8081',
+    token: companion.token,
+    body,
+  });
+  assert.equal(tabletHttp.status, 403);
+  const publicHttps = await post(companion.url, {
+    origin: 'https://8.8.8.8:8081',
+    token: companion.token,
+    body,
+  });
+  assert.equal(publicHttps.status, 403);
+  const wrongPort = await post(companion.url, {
+    origin: 'https://192.168.1.40:9999',
+    token: companion.token,
+    body,
+  });
+  assert.equal(wrongPort.status, 403);
+  const paddedIp = await post(companion.url, {
+    origin: 'https://192.168.01.40:8081',
+    token: companion.token,
+    body,
+  });
+  assert.equal(paddedIp.status, 403);
+  const loopbackApp = await post(companion.url, {
+    origin: 'http://127.0.0.1:8081',
+    token: companion.token,
+    body,
+  });
+  assert.equal(loopbackApp.status, 200);
+  assert.equal(loopbackApp.text.includes(companion.token), false);
   const wrongToken = await post(companion.url, {
     origin: 'http://localhost:8081',
     token: 'nope',
