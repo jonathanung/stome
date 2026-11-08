@@ -26,7 +26,7 @@ import { InkLassoActions } from '../features/ask/InkLassoActions';
 import { PencilToolbar, type PencilTool } from '../features/ask/PencilToolbar';
 import { RoomAskPanel, type AskMessage } from '../features/ask/RoomAskPanel';
 import { RoomSidePanel } from '../features/room/RoomSidePanel';
-import { createLatestLoad } from '../features/room/latestLoad';
+import { createRoomLoadCoordinator } from '../features/room/roomLoadCoordinator';
 import { PhoneRoomActions, PhoneRoomHeader, RoomTabs, SubjectChips, roomSubjects, type RoomTab } from '../features/room/PhoneRoomChrome';
 import { Icon } from '../ui/Icon';
 import { stageName } from '../ui/StageGlyph';
@@ -168,16 +168,14 @@ export function RoomScreen() {
   }, [db, id]);
   // Focus loads, saves and quick-capture refreshes all read the same room.
   // Only the newest started read may apply, so an older one cannot restore stale chunks.
-  const loads = useRef(createLatestLoad()).current;
-  const refresh = useCallback(async () => {
-    const token = loads.start();
+  const loads = useRef(createRoomLoadCoordinator()).current;
+  const applyRefresh = useCallback(async (token: { id: number }) => {
     try {
       const next = await load();
       if (!loads.isLatest(token)) return;
       setRoom(next.room);
       setChunks(next.chunks);
       setDueToday(next.due);
-      // A refresh can be the newest read before the initial focus load settles.
       setLoading(false);
     } catch (reason) {
       if (!loads.isLatest(token)) return;
@@ -185,13 +183,28 @@ export function RoomScreen() {
       setLoading(false);
     }
   }, [load, loads]);
+  const refresh = useCallback(async () => {
+    const plan = loads.startRefresh();
+    if (!plan.run) return;
+    await applyRefresh(plan.token);
+  }, [applyRefresh, loads]);
   useFocusEffect(useCallback(() => {
     let active = true;
-    const token = loads.start();
+    const token = loads.startInitial();
     load().then((next) => {
-      if (active && loads.isLatest(token)) { setRoom(next.room); setChunks(next.chunks); setDueToday(next.due); setLoading(false); }
+      if (!active || !loads.isLatest(token)) return;
+      setRoom(next.room);
+      setChunks(next.chunks);
+      setDueToday(next.due);
+      setLoading(false);
+      // A capture landed while this first load was running; refresh now that
+      // the room has rendered, instead of invalidating the only successful read.
+      if (loads.initialSucceeded()) void refresh();
     }).catch((reason: unknown) => {
-      if (active && loads.isLatest(token)) { setError(reason instanceof Error ? reason.message : 'Could not load room'); setLoading(false); }
+      if (!active || !loads.isLatest(token)) return;
+      loads.initialFailed();
+      setError(reason instanceof Error ? reason.message : 'Could not load room');
+      setLoading(false);
     });
     // A capture from the global panel commits outside this screen; reload so the
     // note list and the Ask chunk selection see it without a reload. It is scoped
@@ -201,7 +214,7 @@ export function RoomScreen() {
       active = false;
       stop();
       // Blur invalidates reads still in flight so they cannot apply after leaving.
-      loads.start();
+      loads.invalidate();
     };
   }, [id, loads, load, refresh]));
   const openCitation = useCallback((next: ChunkFocus) => {

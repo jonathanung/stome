@@ -15,7 +15,7 @@ import {
   createCaptureController,
   type CaptureStorage,
 } from '../src/features/capture/session.ts';
-import { createLatestLoad } from '../src/features/room/latestLoad.ts';
+import { createRoomLoadCoordinator } from '../src/features/room/roomLoadCoordinator.ts';
 import { migrateDb } from '../src/db/migrate.ts';
 import { nodeDb } from './support/node-db.ts';
 
@@ -56,13 +56,33 @@ test('the capture panel and room screen use the production wiring', () => {
   assert.match(read('src/screens/RoomScreen.tsx'), /watchRoomCaptureRefresh\(id \?\? null, refresh\)/);
 });
 
+test('a capture during the initial load waits for it and then refreshes', () => {
+  const loads = createRoomLoadCoordinator();
+  const initial = loads.startInitial();
+
+  // The capture lands before the first read; the refresh must not invalidate it.
+  assert.deepEqual(loads.startRefresh(), { run: false });
+  assert.equal(loads.isLatest(initial), true, 'the initial load is still the newest read');
+  assert.equal(loads.initialSucceeded(), true, 'the deferred refresh runs after the room renders');
+
+  // Once loaded, a refresh runs as its own read and supersedes the initial one.
+  const refresh = loads.startRefresh();
+  assert.equal(refresh.run, true);
+  if (!refresh.run) return;
+  assert.equal(loads.isLatest(refresh.token), true);
+  assert.equal(loads.isLatest(initial), false, 'the older initial load must not apply after the refresh');
+});
+
 test('a slow older room load cannot overwrite the quick capture refresh', async () => {
-  const loads = createLatestLoad();
+  const loads = createRoomLoadCoordinator();
+  loads.startInitial();
+  assert.equal(loads.initialSucceeded(), false);
   const applied: string[][] = [];
   const run = async (source: Promise<string[]>) => {
-    const token = loads.start();
+    const plan = loads.startRefresh();
+    if (!plan.run) return;
     const value = await source;
-    if (loads.isLatest(token)) applied.push(value);
+    if (loads.isLatest(plan.token)) applied.push(value);
   };
 
   const older = deferred<string[]>();
@@ -70,22 +90,26 @@ test('a slow older room load cannot overwrite the quick capture refresh', async 
   const olderRun = run(older.promise);
   const newerRun = run(newer.promise);
 
-  // The capture refresh finishes first; the focus load that read the old list finishes last.
+  // The capture refresh finishes first; the older room read finishes last.
   newer.resolve(['the captured note']);
   await newerRun;
   older.resolve([]);
   await olderRun;
   assert.deepEqual(applied, [['the captured note']], 'the stale older load must be dropped');
+});
 
-  const stale = deferred<string[]>();
-  const fresh = deferred<string[]>();
-  const staleRun = run(stale.promise);
-  const freshRun = run(fresh.promise);
-  stale.resolve([]);
-  await staleRun;
-  fresh.resolve(['the captured note']);
-  await freshRun;
-  assert.deepEqual(applied, [['the captured note'], ['the captured note']]);
+test('a failed initial load clears the deferred refresh, and blur drops in-flight reads', () => {
+  const loads = createRoomLoadCoordinator();
+  loads.startInitial();
+  assert.deepEqual(loads.startRefresh(), { run: false });
+  loads.initialFailed();
+  assert.equal(loads.initialSucceeded(), false, 'a failed first load must not trigger the deferred refresh');
+
+  const refresh = loads.startRefresh();
+  assert.equal(refresh.run, true);
+  if (!refresh.run) return;
+  loads.invalidate();
+  assert.equal(loads.isLatest(refresh.token), false, 'blur must drop a read still in flight');
 });
 
 test('saving from quick capture makes the room see exactly one chunk without a reload', async () => {
@@ -179,35 +203,19 @@ test('a capture into another room does not reload, and unmount unsubscribes', as
   db.close();
 });
 
-test('a stale failed load cannot report an error after a newer success', async () => {
-  const loads = createLatestLoad();
-  const applied: string[][] = [];
-  const errors: string[] = [];
-  const run = async (source: Promise<string[]>) => {
-    const token = loads.start();
-    try {
-      const value = await source;
-      if (loads.isLatest(token)) applied.push(value);
-    } catch (reason) {
-      if (loads.isLatest(token)) errors.push(reason instanceof Error ? reason.message : 'failed');
-    }
-  };
+test('a stale failed load cannot report an error after a newer success', () => {
+  const loads = createRoomLoadCoordinator();
+  loads.startInitial();
+  loads.initialSucceeded();
 
-  const older = deferred<string[]>();
-  const newer = deferred<string[]>();
-  const olderRun = run(older.promise);
-  const newerRun = run(newer.promise);
-  newer.resolve(['the captured note']);
-  await newerRun;
-  older.reject(new Error('database locked'));
-  await olderRun;
+  const older = loads.startRefresh();
+  const newer = loads.startRefresh();
+  assert.equal(older.run, true);
+  assert.equal(newer.run, true);
+  if (!older.run || !newer.run) return;
 
-  assert.deepEqual(applied, [['the captured note']]);
-  assert.deepEqual(errors, [], 'the stale failure must not show an error on a healthy room');
-
-  // The newest failure is still reported.
-  await run(Promise.reject(new Error('database locked')));
-  assert.deepEqual(errors, ['database locked']);
+  assert.equal(loads.isLatest(newer.token), true);
+  assert.equal(loads.isLatest(older.token), false, 'the stale failure must not show an error on a healthy room');
 });
 
 test('a rejected room refresh never becomes an unhandled rejection', async () => {

@@ -120,12 +120,17 @@ async function runLane(browser, width, height, label) {
     assert(withoutReload.length === 1, `expected 1 chunk card without reload at ${width}x${height}, saw ${withoutReload.length}`);
     assert(!emptyState, 'empty state still visible after the capture landed');
     assert(boxes.length === 1, `expected the Ask picker to offer 1 chunk without reload, saw ${boxes.length}`);
+    // The new chunk must be selectable in Ask, not merely present.
+    const checkbox = await page.$('[data-testid^="select-chunk-"]');
+    await checkbox.evaluate((node) => node.click());
+    const checkboxText = await page.$eval('[data-testid^="select-chunk-"]', (node) => node.innerText);
+    assert(checkboxText.includes('Included'), `the new chunk was not selectable in Ask at ${width}x${height} (${JSON.stringify(checkboxText)})`);
     const subtitle = await page.evaluate(() => {
       const plate = document.querySelector('[data-testid="room-ask-panel"]');
       return plate ? plate.innerText : '';
     });
     if (width >= 900) note(`  ask panel subtitle: ${JSON.stringify(subtitle.split('\n').find((line) => line.includes('chunk')) ?? '')}`);
-    note(`  ${width}x${height} save without reload: ${withoutReload.length} chunk card, ${boxes.length} Ask checkbox`);
+    note(`  ${width}x${height} save without reload: ${withoutReload.length} chunk card, Ask chunk selectable`);
     await page.screenshot({ path: `${outDir}/capture-refresh-${label}-after-save.png` });
 
     // A reload is the separate persistence check.
