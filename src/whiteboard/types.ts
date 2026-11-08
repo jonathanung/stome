@@ -10,6 +10,10 @@ export type Tool =
   | 'text';
 
 export type StrokeStyle = 'solid' | 'dashed' | 'dotted';
+export type BackgroundPattern = 'blank' | 'dots' | 'lines' | 'grid';
+export type BackgroundSize = 'small' | 'medium' | 'large';
+export const BG_SPACING: Record<BackgroundSize, number> = { small: 15, medium: 20, large: 30 };
+export const DEFAULT_BACKGROUND: { pattern: BackgroundPattern; size: BackgroundSize } = { pattern: 'dots', size: 'medium' };
 export type FillStyle = 'hachure' | 'cross-hatch' | 'solid';
 export type RoughnessLevel = 0 | 1 | 2;
 

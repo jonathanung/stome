@@ -42,7 +42,8 @@ export type IconName =
   | 'lineSegment'
   | 'arrowRight'
   | 'textT'
-  | 'trash';
+  | 'trash'
+  | 'gridPattern';
 
 /** 24px stroke glyphs, drawn the way the Stone boards draw them (1.75 stroke, round caps). */
 function Glyph({ name }: { name: IconName }) {
@@ -127,6 +128,8 @@ function Glyph({ name }: { name: IconName }) {
       return <><Path d="M4 7h16" /><Path d="M12 7v10" /></>;
     case 'trash':
       return <><Path d="M3 6h18" /><Path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" /><Path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></>;
+    case 'gridPattern':
+      return <><Path d="M8 3v18M16 3v18M3 8h18M3 16h18" /></>;
   }
 }
 

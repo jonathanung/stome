@@ -8,30 +8,37 @@ import {
   View,
   type LayoutChangeEvent,
 } from 'react-native';
-import Svg, { Circle, Defs, G, Pattern, Rect } from 'react-native-svg';
+import Svg, { Circle, Defs, G, Line, Pattern, Rect } from 'react-native-svg';
 
 import { useStoneTheme } from '../../design-theme/src/primitives';
 import { Icon } from '../ui/Icon';
+import { BackgroundPicker } from './BackgroundPicker';
 import { ElementRenderer } from './ElementRenderer';
 import { StylePanel, type ElementStyle } from './StylePanel';
 import { Toolbar } from './Toolbar';
 import {
+  BG_SPACING,
+  DEFAULT_BACKGROUND,
   DEFAULT_STYLE,
   EXCALIDRAW_COLORS,
+  type BackgroundPattern,
+  type BackgroundSize,
   type CanvasTransform,
   type TextElement,
   type Tool,
   type WhiteboardElement,
 } from './types';
 import { createWhiteboardPanResponder, type TextEditState } from './useWhiteboardInput';
+import { loadWhiteboardState, useWhiteboardPersistence } from './useWhiteboardStorage';
 
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 20;
 const HISTORY_LIMIT = 50;
 
-export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
-  const [elements, setElements] = useState<WhiteboardElement[]>([]);
-  const [history, setHistory] = useState<WhiteboardElement[][]>([[]]);
+export function WhiteboardScreen({ onBack, roomId }: { onBack?: () => void; roomId?: string } = {}) {
+  const saved = roomId ? loadWhiteboardState(roomId) : null;
+  const [elements, setElements] = useState<WhiteboardElement[]>(saved?.elements ?? []);
+  const [history, setHistory] = useState<WhiteboardElement[][]>([saved?.elements ?? []]);
   const [historyIndex, setHistoryIndex] = useState(0);
   const [tool, setTool] = useState<Tool>('freedraw');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -42,6 +49,9 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
     scale: 1,
   });
   const [showStylePanel, setShowStylePanel] = useState(false);
+  const [showBgPicker, setShowBgPicker] = useState(false);
+  const [bgPattern, setBgPattern] = useState<BackgroundPattern>(saved?.bgPattern ?? DEFAULT_BACKGROUND.pattern);
+  const [bgSize, setBgSize] = useState<BackgroundSize>(saved?.bgSize ?? DEFAULT_BACKGROUND.size);
   const [textEdit, setTextEdit] = useState<TextEditState | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const canvasOriginRef = useRef({ x: 0, y: 0 });
@@ -298,6 +308,7 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
   }, []);
 
   const theme = useStoneTheme();
+  useWhiteboardPersistence(roomId, elements, bgPattern, bgSize);
   const canUndo = historyIndex > 0;
   const canRedo = historyIndex < history.length - 1;
   const cursor = tool === 'hand' ? 'grab' : tool === 'text' ? 'text' : 'crosshair';
@@ -315,20 +326,33 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
         {...panHandlers}
       >
         <Svg width={canvasSize.width} height={canvasSize.height}>
-          <Defs>
-            <Pattern
-              id="wb-dots"
-              x={transform.offsetX % (20 * transform.scale)}
-              y={transform.offsetY % (20 * transform.scale)}
-              width={20 * transform.scale}
-              height={20 * transform.scale}
-              patternUnits="userSpaceOnUse"
-            >
-              <Circle cx={1} cy={1} r={1} fill="#adb5bd" opacity={0.5} />
-            </Pattern>
-          </Defs>
+          {bgPattern !== 'blank' && (() => {
+            const sp = BG_SPACING[bgSize] * transform.scale;
+            const ox = transform.offsetX % sp;
+            const oy = transform.offsetY % sp;
+            return (
+              <Defs>
+                <Pattern id="wb-bg" x={ox} y={oy} width={sp} height={sp} patternUnits="userSpaceOnUse">
+                  {bgPattern === 'dots' && (
+                    <Circle cx={sp / 2} cy={sp / 2} r={1.2} fill="#adb5bd" opacity={0.6} />
+                  )}
+                  {bgPattern === 'lines' && (
+                    <Line x1={0} y1={sp} x2={sp} y2={sp} stroke="#adb5bd" strokeWidth={1} opacity={0.4} />
+                  )}
+                  {bgPattern === 'grid' && (
+                    <>
+                      <Line x1={0} y1={sp} x2={sp} y2={sp} stroke="#adb5bd" strokeWidth={0.75} opacity={0.4} />
+                      <Line x1={sp} y1={0} x2={sp} y2={sp} stroke="#adb5bd" strokeWidth={0.75} opacity={0.4} />
+                    </>
+                  )}
+                </Pattern>
+              </Defs>
+            );
+          })()}
           <Rect x={0} y={0} width={canvasSize.width} height={canvasSize.height} fill={EXCALIDRAW_COLORS.canvasBg} />
-          <Rect x={0} y={0} width={canvasSize.width} height={canvasSize.height} fill="url(#wb-dots)" />
+          {bgPattern !== 'blank' && (
+            <Rect x={0} y={0} width={canvasSize.width} height={canvasSize.height} fill="url(#wb-bg)" />
+          )}
           <G transform={`translate(${transform.offsetX}, ${transform.offsetY}) scale(${transform.scale})`}>
             {elements.map((el) => (
               // Hide the element being edited so the TextInput appears in its place
@@ -394,11 +418,32 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
       {/* Properties toggle */}
       <Pressable
         style={[styles.propertiesButton, onBack && styles.propertiesButtonWithBack, { backgroundColor: theme.color.bg.surface, shadowColor: theme.color.text.primary }]}
-        onPress={() => setShowStylePanel((v) => !v)}
+        onPress={() => { setShowStylePanel((v) => !v); setShowBgPicker(false); }}
         accessibilityLabel="Toggle style panel"
       >
         <Icon name="more" size={20} color={theme.color.text.secondary} />
       </Pressable>
+
+      {/* Background picker toggle */}
+      <Pressable
+        style={[styles.bgButton, onBack && styles.bgButtonWithBack, { backgroundColor: theme.color.bg.surface, shadowColor: theme.color.text.primary }]}
+        onPress={() => { setShowBgPicker((v) => !v); setShowStylePanel(false); }}
+        accessibilityLabel="Toggle background"
+      >
+        <Icon name="gridPattern" size={20} color={theme.color.text.secondary} />
+      </Pressable>
+
+      {/* Background picker panel */}
+      {showBgPicker ? (
+        <View style={[styles.bgPickerWrapper, onBack && styles.bgPickerWrapperWithBack]} pointerEvents="box-none">
+          <BackgroundPicker
+            pattern={bgPattern}
+            size={bgSize}
+            onPatternChange={setBgPattern}
+            onSizeChange={setBgSize}
+          />
+        </View>
+      ) : null}
 
       {/* Zoom indicator */}
       <View style={[styles.zoomBadge, { backgroundColor: theme.color.bg.surface }]} pointerEvents="none">
@@ -465,6 +510,23 @@ const styles = StyleSheet.create({
     width: 40,
   },
   propertiesButtonWithBack: { top: 70 },
+  bgButton: {
+    alignItems: 'center',
+    borderRadius: 10,
+    elevation: 4,
+    height: 40,
+    justifyContent: 'center',
+    left: 16,
+    position: 'absolute',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    top: 70,
+    width: 40,
+  },
+  bgButtonWithBack: { top: 120 },
+  bgPickerWrapper: { left: 64, position: 'absolute', top: 70 },
+  bgPickerWrapperWithBack: { left: 64, position: 'absolute', top: 120 },
   deleteButton: {
     alignItems: 'center',
     borderRadius: 10,
