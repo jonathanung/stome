@@ -60,9 +60,21 @@ type Refs = {
   setTextEditRef: React.RefObject<(state: TextEditState) => void>;
   setTransform: (t: CanvasTransform) => void;
   setElements: React.Dispatch<React.SetStateAction<WhiteboardElement[]>>;
+  canvasOriginRef: React.RefObject<{ x: number; y: number }>;
 };
 
 export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
+  // Subtract canvas DOM offset so coords are canvas-relative (fixes web cursor drift)
+  function toCanvasXY(px: number, py: number): [number, number] {
+    const o = refs.canvasOriginRef.current ?? { x: 0, y: 0 };
+    return [px - o.x, py - o.y];
+  }
+  // Convert board coords to screen coords relative to the root View (for TextInput placement)
+  function boardToRootScreen(bx: number, by: number, t: { offsetX: number; offsetY: number; scale: number }): [number, number] {
+    const o = refs.canvasOriginRef.current ?? { x: 0, y: 0 };
+    return [bx * t.scale + t.offsetX + o.x, by * t.scale + t.offsetY + o.y];
+  }
+
   return PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: () => true,
@@ -73,16 +85,17 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
 
       if (nativeEvent.touches && nativeEvent.touches.length === 2) {
         const [t1, t2] = nativeEvent.touches;
-        const dx = t1.pageX - t2.pageX;
-        const dy = t1.pageY - t2.pageY;
+        const [t1x, t1y] = toCanvasXY(t1.pageX, t1.pageY);
+        const [t2x, t2y] = toCanvasXY(t2.pageX, t2.pageY);
+        const dx = t1x - t2x;
+        const dy = t1y - t2y;
         const dist = Math.sqrt(dx * dx + dy * dy);
         refs.pinchRef.current = { dist, scale: t.scale, ox: t.offsetX, oy: t.offsetY };
         refs.panStartRef.current = null;
         return;
       }
 
-      const sx = nativeEvent.pageX;
-      const sy = nativeEvent.pageY;
+      const [sx, sy] = toCanvasXY(nativeEvent.pageX, nativeEvent.pageY);
       const [bx, by] = screenToBoard(sx, sy, t);
       const activeTool = refs.toolRef.current!;
       const style = refs.currentStyleRef.current!;
@@ -105,7 +118,7 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
         ) {
           refs.lastTapRef.current = null;
           const el = hit as TextElement;
-          const [sxEl, syEl] = boardToScreen(el.x, el.y, t);
+          const [sxEl, syEl] = boardToRootScreen(el.x, el.y, t);
           refs.setTextEditRef.current!({
             id: el.id,
             x: el.x,
@@ -128,11 +141,8 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
           now - last.time < DOUBLE_TAP_MS
         ) {
           refs.lastTapRef.current = null;
-          // Find or create a text element that is "bound" to this shape by convention:
-          // it has id = `${shape.id}__label`
           const labelId = `${hit.id}__label`;
           const existing = refs.elementsRef.current!.find((e) => e.id === labelId) as TextElement | undefined;
-          // Center of the shape in board coords
           let cx = hit.x, cy = hit.y;
           if ('width' in hit && 'height' in hit) {
             const w = hit.width as number;
@@ -140,7 +150,7 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
             cx = (w < 0 ? hit.x + w : hit.x) + Math.abs(w) / 2;
             cy = (h < 0 ? hit.y + h : hit.y) + Math.abs(h) / 2;
           }
-          const [sxLabel, syLabel] = boardToScreen(cx, cy, t);
+          const [sxLabel, syLabel] = boardToRootScreen(cx, cy, t);
           refs.setTextEditRef.current!({
             id: labelId,
             x: cx,
@@ -210,13 +220,15 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
 
       if (nativeEvent.touches && nativeEvent.touches.length === 2 && refs.pinchRef.current) {
         const [t1, t2] = nativeEvent.touches;
-        const dx = t1.pageX - t2.pageX;
-        const dy = t1.pageY - t2.pageY;
+        const [t1x, t1y] = toCanvasXY(t1.pageX, t1.pageY);
+        const [t2x, t2y] = toCanvasXY(t2.pageX, t2.pageY);
+        const dx = t1x - t2x;
+        const dy = t1y - t2y;
         const dist = Math.sqrt(dx * dx + dy * dy);
         const scaleFactor = dist / refs.pinchRef.current.dist;
         const newScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, refs.pinchRef.current.scale * scaleFactor));
-        const mx = (t1.pageX + t2.pageX) / 2;
-        const my = (t1.pageY + t2.pageY) / 2;
+        const mx = (t1x + t2x) / 2;
+        const my = (t1y + t2y) / 2;
         const newOffsetX = mx - (mx - refs.pinchRef.current.ox) * (newScale / refs.pinchRef.current.scale);
         const newOffsetY = my - (my - refs.pinchRef.current.oy) * (newScale / refs.pinchRef.current.scale);
         const next = { offsetX: newOffsetX, offsetY: newOffsetY, scale: newScale };
@@ -225,8 +237,7 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
         return;
       }
 
-      const sx = nativeEvent.pageX;
-      const sy = nativeEvent.pageY;
+      const [sx, sy] = toCanvasXY(nativeEvent.pageX, nativeEvent.pageY);
 
       if (refs.toolRef.current === 'hand' && refs.panStartRef.current) {
         const { ox, oy, tx, ty } = refs.panStartRef.current;
@@ -299,14 +310,13 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
 
       if (refs.toolRef.current === 'text') {
         const t = refs.transformRef.current!;
-        const sx = nativeEvent.pageX;
-        const sy = nativeEvent.pageY;
+        const [sx, sy] = toCanvasXY(nativeEvent.pageX, nativeEvent.pageY);
         const [bx, by] = screenToBoard(sx, sy, t);
         // If tapping on an existing text element, edit it instead of creating new
         const hit = [...refs.elementsRef.current!].reverse().find((el) => hitTest(el, bx, by));
         if (hit?.type === 'text') {
           const el = hit as TextElement;
-          const [sxEl, syEl] = boardToScreen(el.x, el.y, t);
+          const [sxEl, syEl] = boardToRootScreen(el.x, el.y, t);
           refs.setTextEditRef.current!({
             id: el.id,
             x: el.x,
@@ -317,12 +327,13 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
             isEditing: true,
           });
         } else {
+          const o = refs.canvasOriginRef.current ?? { x: 0, y: 0 };
           refs.setTextEditRef.current!({
             id: newId(),
             x: bx,
             y: by,
-            screenX: sx,
-            screenY: sy,
+            screenX: sx + o.x,
+            screenY: sy + o.y,
             value: '',
             isEditing: false,
           });

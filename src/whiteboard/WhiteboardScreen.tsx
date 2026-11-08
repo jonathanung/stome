@@ -43,6 +43,7 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
   const [showStylePanel, setShowStylePanel] = useState(false);
   const [textEdit, setTextEdit] = useState<TextEditState | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+  const canvasOriginRef = useRef({ x: 0, y: 0 });
 
   // Stable refs so the PanResponder (created once) always has fresh values
   const drawingRef = useRef<WhiteboardElement | null>(null);
@@ -133,13 +134,29 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
       setTextEditRef: setTextEditStable as React.RefObject<(state: TextEditState) => void>,
       setTransform,
       setElements,
+      canvasOriginRef,
     }).panHandlers,
   );
   /* eslint-enable react-hooks/refs */
 
   // Web: scroll-wheel pan/zoom + spacebar hand mode + Delete key
   const svgContainerRef = useRef<React.ElementRef<typeof View>>(null);
-  const spaceHandRef = useRef(false); // true while spacebar is held
+  const spaceHandRef = useRef(false);
+
+  // Keep canvasOriginRef in sync when the window is resized
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const update = () => {
+      const node = (svgContainerRef.current as unknown as { _nativeTag?: HTMLElement } | null)
+        ?._nativeTag as HTMLElement | undefined;
+      if (node) {
+        const rect = node.getBoundingClientRect();
+        canvasOriginRef.current = { x: rect.left, y: rect.top };
+      }
+    };
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;
@@ -261,6 +278,15 @@ export function WhiteboardScreen({ onBack }: { onBack?: () => void } = {}) {
   const onLayout = useCallback((e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
     setCanvasSize({ width, height });
+    // On web, also capture the canvas's screen-space origin so PanResponder coords can be corrected
+    if (Platform.OS === 'web') {
+      const node = (svgContainerRef.current as unknown as { _nativeTag?: HTMLElement } | null)
+        ?._nativeTag as HTMLElement | undefined;
+      if (node) {
+        const rect = node.getBoundingClientRect();
+        canvasOriginRef.current = { x: rect.left, y: rect.top };
+      }
+    }
   }, []);
 
   const canUndo = historyIndex > 0;
