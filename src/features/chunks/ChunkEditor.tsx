@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ComponentRef, type ReactNode } from 'react';
 import { Pressable, Text, TextInput, View, useWindowDimensions } from 'react-native';
 
 import { StoneText, useStoneTheme } from '../../../design-theme/src/primitives';
@@ -7,6 +7,9 @@ import Svg, { Path } from 'react-native-svg';
 
 import { Icon } from '../../ui/Icon';
 import { isSubmitShortcut, splitAt } from '../notes/note-ops';
+import { formatNote, type NoteFormat, type NoteSelection } from '../notes/formatting';
+import { NotePreview } from '../notes/NotePreview';
+import { LIMITS } from '../../data/operations';
 import { deleteAfterFlush, type AutosaveController, type AutosaveState } from './autosave';
 import { DraftRevision, saveBodyWithBase } from './draft-revision';
 import { readDraft, syncChunkDraft } from './draft-store';
@@ -67,6 +70,11 @@ export function ChunkEditor({
   const n = index + 1;
   const phone = useWindowDimensions().width < 640;
   const [editing, setEditing] = useState(false);
+  const [preview, setPreview] = useState(false);
+  const [details, setDetails] = useState(false);
+  const input = useRef<ComponentRef<typeof TextInput>>(null);
+  const selectionRef = useRef<NoteSelection>({ start: 0, end: 0 });
+  const [selection, setSelection] = useState<NoteSelection | undefined>();
 
   // Draft base is frozen on the first keystroke. Render reads `view`, which
   // is state copied from that record after each edit or save.
@@ -145,6 +153,17 @@ export function ChunkEditor({
   }, [chunk.body]);
   const caret = useRef<number | null>(null);
 
+  const applyFormat = (format: NoteFormat) => {
+    const next = formatNote(controller.current.text ?? chunk.body, selectionRef.current, format);
+    if (next.text.length > LIMITS.body) { onError('This note is too long to add formatting. Split it first.'); return; }
+    revisionsRef.current?.noteEdit(chunk.revision);
+    setView({ written: revisionsRef.current?.written ?? 0, frozen: revisionsRef.current?.frozen ?? null });
+    controller.edit(next.text);
+    selectionRef.current = next.selection;
+    setSelection(next.selection);
+    input.current?.focus();
+  };
+
   const leaveField = async () => {
     await controller.flush();
     const current = controller.current.text ?? chunk.body;
@@ -185,16 +204,15 @@ export function ChunkEditor({
         borderColor: state.status === 'error' ? theme.color.status.danger.fill
           : highlighted ? theme.color.status.warning.fill : theme.color.border.hairline,
         borderWidth: highlighted ? 2 : 1,
-        borderRadius: theme.radius.float,
-        paddingTop: theme.space.xxl + 4,
-        paddingBottom: theme.space.base,
-        paddingRight: theme.space.card,
-        paddingLeft: phone ? theme.space.card : 52,
+        borderRadius: theme.radius.sm,
+        paddingTop: theme.space.inner,
+        paddingBottom: theme.space.inner,
+        paddingRight: phone ? theme.space.card : theme.space.paperX,
+        paddingLeft: phone ? theme.space.card : theme.space.paperX,
         gap: theme.space.xl,
-        ...theme.shadow.card,
         ...(editing ? { outlineWidth: 2, outlineStyle: 'solid', outlineColor: theme.color.text.primary, outlineOffset: 2 } : null),
       }}>
-      {phone ? null : (
+      {phone || !details ? null : (
         <View style={{ position: 'absolute', left: 10, top: 14, gap: 2 }}>
           <HandleButton direction="up" label={`Move chunk ${n} up`} disabled={reorderDisabled || index === 0}
             onPress={() => void run((rev) => onMove(index - 1, rev))} />
@@ -202,11 +220,20 @@ export function ChunkEditor({
             onPress={() => void run((rev) => onMove(index + 1, rev))} />
         </View>
       )}
-      {editing ? (
-        <Text style={[theme.text('eyebrow'), { color: theme.color.text.tertiary }]}>
-          {`editing · ${state.status === 'saving' ? 'saving…' : state.status === 'unsaved' ? 'unsaved' : 'saved'}`}
-        </Text>
-      ) : null}
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: theme.space.md }}>
+        <Text style={[theme.text('eyebrow'), { color: theme.color.text.tertiary }]}>{`Note ${n}`}</Text>
+        <View style={{ flexDirection: 'row', gap: theme.space.base }}>
+          <TextAction label={preview ? 'Write' : 'Read'} accessibilityLabel={`${preview ? 'Write' : 'Read'} note ${n}`} onPress={() => setPreview((value) => !value)} />
+          <TextAction label={details ? 'Hide details' : 'Details'} accessibilityLabel={`${details ? 'Hide' : 'Show'} details for note ${n}`} onPress={() => setDetails((value) => !value)} />
+        </View>
+      </View>
+      {!preview && !readView ? <View accessibilityLabel={`Formatting for note ${n}`} style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.space.xs, borderBottomWidth: 1, borderBottomColor: theme.color.border.hairline, paddingBottom: theme.space.md }}>
+        {([['heading', 'H2', 'Heading'], ['bold', 'B', 'Bold'], ['italic', 'I', 'Italic'], ['bullet', '• List', 'Bullet list'], ['quote', '“ Quote', 'Quote']] as const).map(([format, label, accessible]) =>
+          <Pressable key={format} accessibilityRole="button" accessibilityLabel={`${accessible} in note ${n}`} onPress={() => applyFormat(format)}
+            style={({ pressed }) => ({ minWidth: theme.layout.control, minHeight: theme.layout.control, paddingHorizontal: theme.space.md, alignItems: 'center', justifyContent: 'center', borderRadius: theme.radius.sm, backgroundColor: pressed ? theme.color.bg.inset : undefined })}>
+            <Text style={[theme.text('meta'), { color: theme.color.text.secondary, fontWeight: format === 'bold' ? '700' : '500', fontStyle: format === 'italic' ? 'italic' : 'normal' }]}>{label}</Text>
+          </Pressable>)}
+      </View> : null}
       {readView ? (
         <View style={{ gap: theme.space.sm }}>
           {readView}
@@ -214,14 +241,16 @@ export function ChunkEditor({
             <TextAction label="Edit text" accessibilityLabel={`Edit chunk ${n} text`} onPress={onExitReadView} />
           ) : null}
         </View>
-      ) : (
+      ) : preview ? <NotePreview body={body} /> : (
       <TextInput
+        ref={input}
         accessibilityLabel={`Chunk ${n}`}
-        placeholder="Empty chunk"
+        placeholder="Start writing…"
         placeholderTextColor={theme.color.text.tertiary}
         multiline
         textAlignVertical="top"
         value={body}
+        selection={selection}
         onChangeText={(text) => {
           const revisions = revisionsRef.current;
           if (!revisions) return;
@@ -233,6 +262,8 @@ export function ChunkEditor({
         onBlur={() => { setEditing(false); void leaveField(); }}
         onSelectionChange={(event) => {
           caret.current = event.nativeEvent.selection.start;
+          selectionRef.current = event.nativeEvent.selection;
+          setSelection(event.nativeEvent.selection);
         }}
         onKeyPress={(event) => {
           if (!isSubmitShortcut(event as unknown as Parameters<typeof isSubmitShortcut>[0])) return;
@@ -248,7 +279,7 @@ export function ChunkEditor({
       />
       )}
 
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: theme.space.sm }}>
+      {details ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: theme.space.sm }}>
         {chunk.subjects.map((subject) => (
           <Pressable
             key={subject}
@@ -288,9 +319,9 @@ export function ChunkEditor({
             borderRadius: theme.radius.pill, borderWidth: 1, borderStyle: 'dashed', borderColor: theme.color.border.strong,
           }]}
         />
-      </View>
+      </View> : null}
 
-      <SaveStatus state={state} editing={editing} onRetry={() => void controller.retry()} />
+      <SaveStatus state={state} onRetry={() => void controller.retry()} />
       {state.status === 'error' && view.frozen !== null && chunk.revision !== view.frozen ? (
         <Text style={[theme.text('bodySmall'), { color: theme.color.text.secondary }]}>
           {`Latest saved note: ${chunk.body}`}
@@ -298,9 +329,9 @@ export function ChunkEditor({
       ) : null}
       {children}
 
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: theme.space.md }}>
+      {details ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: theme.space.md }}>
         <StoneText role="fine" tone="tertiary">
-          {`Chunk ${n} · edited ${new Date(chunk.updatedAt).toLocaleString()}`}
+          {`Note ${n} · edited ${new Date(chunk.updatedAt).toLocaleString()}`}
         </StoneText>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: theme.space.base }}>
           {onAddBelow ? <TextAction label="Add below" accessibilityLabel={`Add a note below chunk ${n}`} onPress={onAddBelow} /> : null}
@@ -329,7 +360,7 @@ export function ChunkEditor({
             }}
           />
         </View>
-      </View>
+      </View> : null}
       {after}
     </View>
   );
@@ -338,7 +369,7 @@ export function ChunkEditor({
 const STATUS_LABEL = { saved: 'Saved', unsaved: 'Unsaved changes', saving: 'Saving…' } as const;
 
 /** Visible saved / unsaved / error state. A failed save keeps the text and offers retry. */
-function SaveStatus({ state, onRetry, editing }: { state: AutosaveState; onRetry: () => void; editing: boolean }) {
+function SaveStatus({ state, onRetry }: { state: AutosaveState; onRetry: () => void }) {
   const theme = useStoneTheme();
   if (state.status === 'error') {
     return (
@@ -369,7 +400,7 @@ function SaveStatus({ state, onRetry, editing }: { state: AutosaveState; onRetry
       </View>
     );
   }
-  if (state.text === null || editing) return null; // nothing typed yet, or the eyebrow already says
+  if (state.text === null) return null;
   return (
     <View accessibilityLiveRegion="polite">
       <StoneText role="fine" tone={state.status === 'saved' ? 'tertiary' : 'secondary'}>
