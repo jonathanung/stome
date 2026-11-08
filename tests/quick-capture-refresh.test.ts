@@ -124,12 +124,12 @@ test('a capture during a refocus load also waits, and blur drops in-flight reads
   assert.deepEqual(applied, ['refreshed room']);
 });
 
-test('a failed focus load clears the deferred refresh', () => {
+test('a failed focus load reports the deferred refresh so the reader can run it', () => {
   const loads = createRoomLoadCoordinator();
   loads.startFocus();
   assert.deepEqual(loads.startRefresh(), { run: false });
-  loads.focusFailed();
-  assert.equal(loads.focusSucceeded(), false, 'a failed focus load must not trigger the deferred refresh');
+  assert.equal(loads.focusFailed(), true, 'the deferred capture refresh must survive the failure');
+  assert.equal(loads.focusSucceeded(), false, 'the deferred request is consumed once');
 });
 
 test('saving from quick capture makes the room see exactly one chunk without a reload', async () => {
@@ -304,4 +304,108 @@ test('a successful load clears only a load error, even when the messages match',
   const fromAction = actionError('database locked');
   assert.deepEqual(clearLoadError(fromAction), fromAction, 'an action error must survive a successful load');
   assert.equal(actionError(null), null);
+});
+
+function controlledReader() {
+  const reads: Array<ReturnType<typeof deferred<string>>> = [];
+  const applied: string[] = [];
+  const errors: string[] = [];
+  const reader = createRoomReader<string>({
+    read: () => {
+      const read = deferred<string>();
+      reads.push(read);
+      return read.promise;
+    },
+    apply: (value) => { applied.push(value); },
+    onError: (message) => { errors.push(message); },
+  });
+  return { reader, reads, applied, errors };
+}
+
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+test('blur drops an in-flight refresh and the queued refresh behind it', async () => {
+  const { reader, reads, applied } = controlledReader();
+  const focus = reader.focus();
+  reads[0].resolve('room');
+  await focus;
+
+  const first = reader.refresh();
+  const second = reader.refresh();
+  await tick();
+  assert.equal(reads.length, 2);
+
+  reader.blur();
+  reads[1].resolve('late read');
+  await first;
+  await second;
+  await tick();
+
+  assert.equal(reads.length, 2, 'the queued refresh must not start after blur');
+  assert.deepEqual(applied, ['room'], 'neither read may apply after blur');
+});
+
+test('unmount drops a queued refresh so it cannot apply', async () => {
+  const { reader, reads, applied } = controlledReader();
+  const focus = reader.focus();
+  reads[0].resolve('room');
+  await focus;
+
+  const queued = reader.refresh();
+  await tick();
+  assert.equal(reads.length, 2);
+  // Unmount runs the same cleanup as blur.
+  reader.blur();
+
+  reads[1].resolve('after unmount');
+  await queued;
+  await tick();
+  assert.deepEqual(applied, ['room']);
+});
+
+test('a replaced reader cannot apply an old room read', async () => {
+  const { reader, reads, applied } = controlledReader();
+  const focus = reader.focus();
+  reads[0].resolve('old room');
+  await focus;
+
+  const oldRefresh = reader.refresh();
+  await tick();
+  assert.equal(reads.length, 2);
+
+  // The route changes: the screen blurs and builds a new reader.
+  reader.blur();
+  const replacement = controlledReader();
+  const newFocus = replacement.reader.focus();
+  replacement.reads[0].resolve('new room');
+  await newFocus;
+
+  reads[1].resolve('old room again');
+  await oldRefresh;
+  await tick();
+
+  assert.deepEqual(applied, ['old room']);
+  assert.equal(reads.length, 2, 'the old reader must not read again after replacement');
+  assert.deepEqual(replacement.applied, ['new room']);
+});
+
+test('a capture refresh survives a failed focus load', async () => {
+  const { reader, reads, applied, errors } = controlledReader();
+  const focus = reader.focus();
+  // A capture lands while the focus read is still running.
+  const deferredCapture = reader.refresh();
+  await tick();
+  assert.equal(reads.length, 1, 'the capture refresh waits for the focus load');
+
+  reads[0].reject(new Error('transient read failure'));
+  await focus;
+  await tick();
+  assert.equal(reads.length, 2, 'the deferred capture refresh still runs after the failure');
+
+  reads[1].resolve('the captured note');
+  await deferredCapture;
+  await tick();
+
+  assert.deepEqual(applied, ['the captured note']);
+  assert.deepEqual(errors, ['transient read failure']);
 });

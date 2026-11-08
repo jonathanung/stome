@@ -18,7 +18,7 @@ export type RoomLoadCoordinator = {
   isLatest: (token: LoadToken) => boolean;
   /** Marks the focus load as settled; true when a deferred refresh must run now. */
   focusSucceeded: () => boolean;
-  focusFailed: () => void;
+  focusFailed: () => boolean;
   /** Drops in-flight reads, e.g. when the screen loses focus. */
   invalidate: () => void;
 };
@@ -52,7 +52,9 @@ export function createRoomLoadCoordinator(): RoomLoadCoordinator {
     },
     focusFailed() {
       focusPending = false;
+      const rerun = deferred;
       deferred = false;
+      return rerun;
     },
     invalidate() {
       latest += 1;
@@ -106,27 +108,60 @@ export function createRoomReader<T>(deps: {
 }): RoomReader<T> {
   const loads = createRoomLoadCoordinator();
   let chain: Promise<void> = Promise.resolve();
-  const runRefresh = async (): Promise<void> => {
+  // Queued work belongs to the focus generation that requested it. Blur (or a
+  // replaced reader) moves the generation on, so a queued refresh can neither
+  // start nor apply against an unfocused screen or a room that is gone.
+  let generation = 0;
+  let live = false;
+  const isLive = (gen: number) => live && gen === generation;
+  const runRefresh = async (gen: number): Promise<void> => {
+    if (!isLive(gen)) return;
     const plan = loads.startRefresh();
     if (!plan.run) return;
-    await settleLatest(loads, plan.token, deps.read, deps.apply, deps.onError);
+    await settleLatest(
+      loads,
+      plan.token,
+      deps.read,
+      (value) => { if (isLive(gen)) deps.apply(value); },
+      (message) => { if (isLive(gen)) deps.onError(message); },
+    );
   };
   const refresh = (): Promise<void> => {
-    chain = chain.then(runRefresh, runRefresh);
+    const gen = generation;
+    chain = chain.then(() => runRefresh(gen), () => runRefresh(gen));
     return chain;
   };
   return {
     async focus() {
+      generation += 1;
+      live = true;
+      const gen = generation;
       const token = loads.startFocus();
-      const outcome = await settleLatest(loads, token, deps.read, deps.apply, (message) => {
-        loads.focusFailed();
-        deps.onError(message);
-      });
-      if (outcome === 'applied' && loads.focusSucceeded()) await refresh();
+      let deferredOnFailure = false;
+      const outcome = await settleLatest(
+        loads,
+        token,
+        deps.read,
+        (value) => { if (isLive(gen)) deps.apply(value); },
+        (message) => {
+          deferredOnFailure = loads.focusFailed();
+          if (isLive(gen)) deps.onError(message);
+        },
+      );
+      if (!isLive(gen)) return outcome;
+      if (outcome === 'applied') {
+        if (loads.focusSucceeded()) void refresh();
+      } else if (deferredOnFailure) {
+        // The focus read failed after a capture landed; still reload so the
+        // captured chunk is not lost to a transient read error.
+        void refresh();
+      }
       return outcome;
     },
     refresh,
     blur() {
+      live = false;
+      generation += 1;
       loads.invalidate();
     },
   };
