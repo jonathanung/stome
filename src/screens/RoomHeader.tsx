@@ -73,6 +73,12 @@ export function RoomHeader({ room, chunkCount, onBack, onAsk, onNewNote, onImpor
           justifyContent: 'center', borderWidth: 1, borderColor: theme.color.border.strong, opacity: pressed ? 0.7 : 1 })}>
         <Text style={[theme.text('buttonCompact'), { color: theme.color.text.primary }]}>study</Text>
       </Pressable>
+      <Pressable accessibilityRole="link" accessibilityLabel="Open the whiteboard" testID="open-whiteboard"
+        onPress={() => router.push(`/rooms/${room.id}/whiteboard`)}
+        style={({ pressed }) => ({ minHeight: theme.layout.control, paddingHorizontal: theme.space.xxl + 2, borderRadius: theme.radius.lg,
+          justifyContent: 'center', borderWidth: 1, borderColor: theme.color.border.strong, opacity: pressed ? 0.7 : 1 })}>
+        <Text style={[theme.text('buttonCompact'), { color: theme.color.text.primary }]}>whiteboard</Text>
+      </Pressable>
       <Action label="ask" accessibilityLabel="Ask about this room" icon="ask" onPress={onAsk} />
       <Action label="import notes" accessibilityLabel="Import notes into this room" onPress={onImport} />
       <Action label="new note" accessibilityLabel="Jump to new note" icon="plus" primary onPress={onNewNote} />

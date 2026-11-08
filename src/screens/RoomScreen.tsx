@@ -29,6 +29,7 @@ import { InkLassoActions } from '../features/ask/InkLassoActions';
 import { PencilToolbar, type PencilTool } from '../features/ask/PencilToolbar';
 import { RoomAskPanel, type AskMessage } from '../features/ask/RoomAskPanel';
 import { RoomSidePanel } from '../features/room/RoomSidePanel';
+import { whiteboardEntry } from '../features/room/whiteboard-entry';
 import { PhoneRoomActions, PhoneRoomHeader, RoomTabs, SubjectChips, roomSubjects, type RoomTab } from '../features/room/PhoneRoomChrome';
 import { Icon } from '../ui/Icon';
 import { stageName } from '../ui/StageGlyph';
@@ -133,7 +134,7 @@ export function RoomScreen() {
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
   const [addedId, setAddedId] = useState<string | null>(null);
   const { width } = useWindowDimensions();
-  const phone = width < 600;
+  const phone = whiteboardEntry(width) === 'phone';
   const splitView = width >= 900 && width < 1300;
   const wide = width >= 1300;
   const [dueToday, setDueToday] = useState(0);
@@ -455,8 +456,12 @@ export function RoomScreen() {
             </Text> : null}
           </View> : null}
         </View>}
-        ListEmptyComponent={phone && tab !== 'notes'
-          ? <EmptyState title={`No ${tab} in this room yet`} body={`${tab === 'slides' ? 'Slides' : 'Boards'} will show up here once they are added.`} />
+        ListEmptyComponent={phone && tab === 'boards'
+          ? <EmptyState testID="room-boards-empty" title="No board open" body="Open the whiteboard for this room.">
+              <Button label="Open whiteboard" size="compact" onPress={() => router.push(`/rooms/${room.id}/whiteboard`)} />
+            </EmptyState>
+          : phone && tab === 'slides'
+          ? <EmptyState title="No slides in this room yet" body="Slides will show up here once they are added." />
           : searching ? <EmptyState title="No notes match" body="Try fewer or different words, or clear the search." />
           : chunks.length ? <EmptyState title="No notes with this subject" body="Pick another subject, or choose all." />
           : <EmptyState title="No notes in this room yet" body="Write your first chunk above, or paste a few paragraphs at once." />}
