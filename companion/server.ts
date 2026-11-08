@@ -4,15 +4,26 @@ import { pathToFileURL } from 'node:url';
 
 import { PAIRING_TTL_MS, PROVIDER_LIMITS, HarnessError, type HarnessErrorCode } from '../src/harness/contract.ts';
 import { createProvider, type Provider, type ProviderRequest } from '../src/harness/provider.ts';
+import { ALLOWED_TOOL_NAMES } from '../src/harness/contract.ts';
+import type { CompanionStatus } from '../src/harness/tools.ts';
 
 const LOOPBACK_HOST = '127.0.0.1';
 const RAW_BODY_LIMIT = PROVIDER_LIMITS.maxRequestChars + 2_000;
+
+export const MOCK_STATUS: CompanionStatus = {
+  provider: 'mock',
+  model: null,
+  live: false,
+  tools: [...ALLOWED_TOOL_NAMES],
+};
 
 type CompanionOptions = {
   origin: string;
   token: string;
   expiresAt: number;
   provider: Provider;
+  /** What GET /v1/status reports. Defaults to the mock. Never holds a key. */
+  status?: CompanionStatus;
 };
 
 export type CompanionHandle = {
@@ -56,7 +67,10 @@ function statusFor(code: HarnessErrorCode): number {
 function sendJson(
   response: ServerResponse,
   status: number,
-  body: { ok: true; provider: 'mock'; output: unknown } | { ok: false; error: { code: string; message: string } },
+  body:
+    | { ok: true; provider: CompanionStatus['provider']; output: unknown }
+    | { ok: true; status: CompanionStatus }
+    | { ok: false; error: { code: string; message: string } },
   extraHeaders: Record<string, string>,
 ): void {
   const payload = JSON.stringify(body);
@@ -76,7 +90,7 @@ function corsHeaders(origin: string | undefined, allowed: string): Record<string
   }
   return {
     'access-control-allow-origin': allowed,
-    'access-control-allow-methods': 'POST, OPTIONS',
+    'access-control-allow-methods': 'GET, POST, OPTIONS',
     'access-control-allow-headers': 'content-type, x-stome-token',
     'access-control-max-age': '600',
     vary: 'Origin',
@@ -147,7 +161,9 @@ async function handle(request: IncomingMessage, response: ServerResponse, option
     response.end();
     return;
   }
-  if (request.method !== 'POST' || request.url !== '/v1/tool') {
+  const isTool = request.method === 'POST' && request.url === '/v1/tool';
+  const isStatus = request.method === 'GET' && request.url === '/v1/status';
+  if (!isTool && !isStatus) {
     sendJson(response, 404, { ok: false, error: { code: 'not_found', message: 'Unknown companion route' } }, cors);
     return;
   }
@@ -159,6 +175,11 @@ async function handle(request: IncomingMessage, response: ServerResponse, option
   const provided = Array.isArray(header) ? header[0] : header;
   if (!provided || !tokenMatches(provided, options.token)) {
     sendJson(response, 401, { ok: false, error: { code: 'unauthorized', message: 'The pairing token does not match' } }, cors);
+    return;
+  }
+  const status = options.status ?? MOCK_STATUS;
+  if (isStatus) {
+    sendJson(response, 200, { ok: true, status }, cors);
     return;
   }
   const controller = new AbortController();
@@ -176,7 +197,7 @@ async function handle(request: IncomingMessage, response: ServerResponse, option
     if (response.writableEnded) {
       return;
     }
-    sendJson(response, 200, { ok: true, provider: 'mock', output }, cors);
+    sendJson(response, 200, { ok: true, provider: status.provider, output }, cors);
   } catch (error) {
     if (response.writableEnded) {
       return;
@@ -204,19 +225,69 @@ export function pairingTtlMs(raw: string | undefined): number {
   return ttl;
 }
 
-function main(): void {
+export type LiveConfig = { provider: Provider; status: CompanionStatus; banner: string };
+
+/** STOME_PROVIDER=anthropic (alias api-key) selects the live provider. Anything else is the mock. */
+export async function liveConfigFromEnv(env: Record<string, string | undefined>): Promise<LiveConfig | null> {
+  if (env.STOME_PROVIDER === 'openai' || env.STOME_PROVIDER === 'xai') {
+    const vendor = env.STOME_PROVIDER;
+    const openai = await import('./providers/openai.ts');
+    const { getCredential, authFilePath } = await import('./auth/store.ts');
+    const { credentialSource } = await import('./auth/oauth.ts');
+    const info = openai.VENDORS[vendor];
+    const effort = openai.parseOpenAiEffort(env.STOME_EFFORT);
+    const key = env[info.keyEnv]?.trim() || undefined;
+    // An API key always wins (platform billing). Otherwise use a stored
+    // subscription sign-in from `npm run companion:login -- <vendor>`.
+    const path = authFilePath(env);
+    const subscription = !key && getCredential(vendor, path) !== null;
+    const model = env.STOME_MODEL?.trim() || (subscription ? openai.SUBSCRIPTION_DEFAULT_MODEL[vendor] : info.defaultModel);
+    const client = subscription
+      ? openai.subscriptionResponsesClient(vendor, credentialSource(vendor, { path }))
+      : openai.sdkResponsesClient(vendor, key);
+    const shownEffort = effort ?? (info.sendsEffort ? 'medium' : 'provider default');
+    const plan = vendor === 'openai' ? 'ChatGPT' : 'Grok';
+    const auth = key
+      ? `${info.keyEnv} set (API billing)`
+      : subscription
+        ? `signed in with your ${plan} subscription (billed to the plan)`
+        : `no ${info.keyEnv} and no sign-in, so every question will fail: set ${info.keyEnv} or run npm run companion:login -- ${vendor}`;
+    return {
+      provider: openai.createCompatibleProvider({ vendor, client, model, effort, subscription }),
+      status: { provider: vendor, model, live: true, tools: [...ALLOWED_TOOL_NAMES] },
+      banner: `Provider: ${info.label} ${model} (effort ${shownEffort}). Live model calls cost money. Credentials: ${auth}.`,
+    };
+  }
+  if (env.STOME_PROVIDER !== 'anthropic' && env.STOME_PROVIDER !== 'api-key') {
+    return null;
+  }
+  const { createAnthropicProvider, sdkMessageClient, parseEffort, DEFAULT_MODEL } = await import('./providers/anthropic.ts');
+  const model = env.STOME_MODEL?.trim() || DEFAULT_MODEL;
+  const effort = parseEffort(env.STOME_EFFORT);
+  const keySet = Boolean(env.ANTHROPIC_API_KEY);
+  return {
+    provider: createAnthropicProvider({ client: sdkMessageClient(), model, effort }),
+    status: { provider: 'anthropic', model, live: true, tools: [...ALLOWED_TOOL_NAMES] },
+    banner: `Provider: Anthropic ${model} (effort ${effort}). Live model calls cost money. ANTHROPIC_API_KEY env var: ${
+      keySet ? 'set' : 'not set (the SDK will try an ant auth login profile)'
+    }.`,
+  };
+}
+
+async function main(): Promise<void> {
   const origin = process.env.STOME_APP_ORIGIN ?? 'http://localhost:8081';
   const token = process.env.STOME_PAIRING_TOKEN ?? randomBytes(16).toString('hex');
   const ttl = pairingTtlMs(process.env.STOME_PAIRING_TTL_MS);
   const expiresAt = Date.now() + ttl;
-  const kind = process.env.STOME_PROVIDER === 'api-key' ? 'api-key' : 'mock';
-  const provider = createProvider(kind);
+  const live = await liveConfigFromEnv(process.env);
+  const provider = live ? live.provider : createProvider('mock');
   const server = createServer((request, response) => {
     void handle(request, response, {
       origin,
       token,
       expiresAt,
       provider,
+      ...(live ? { status: live.status } : {}),
     });
   });
   const port = Number(process.env.STOME_COMPANION_PORT ?? 8787);
@@ -233,7 +304,7 @@ function main(): void {
         `App origin: ${origin}`,
         `Pairing token (expires in ${lifetime}, keep it out of browser storage): ${token}`,
         `Pairing deadline: ${expiresAt}`,
-        'Provider: deterministic mock. No live model call.',
+        live ? live.banner : 'Provider: deterministic mock. No live model call.',
         '',
       ].join('\n'),
     );
@@ -242,5 +313,8 @@ function main(): void {
 
 const entry = process.argv[1];
 if (entry && import.meta.url === pathToFileURL(entry).href) {
-  main();
+  main().catch((error: unknown) => {
+    process.stderr.write(`${error instanceof Error ? error.message : 'The companion failed to start'}\n`);
+    process.exitCode = 1;
+  });
 }
