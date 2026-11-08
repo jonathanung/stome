@@ -1,4 +1,5 @@
 import { dict, name, num, type PdfDict, type PdfValue } from './syntax.ts';
+import { inflateBounded } from '../inflate.ts';
 
 /** Total decompressed bytes one PDF may produce. Stops compression bombs. */
 export class Budget {
@@ -24,37 +25,8 @@ export class UnsupportedFilter extends Error {
 }
 
 async function inflate(data: Uint8Array, budget: Budget): Promise<Uint8Array> {
-  const Stream = globalThis.DecompressionStream;
-  if (typeof Stream !== 'function') {
-    throw new Error('PDF compression cannot be read on this device. Use the web app to import PDFs.');
-  }
-  const copy = new Uint8Array(data.byteLength);
-  copy.set(data);
-  const reader = new Blob([copy]).stream().pipeThrough(new Stream('deflate')).getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    for (;;) {
-      const step = await reader.read();
-      if (step.done) break;
-      budget.take(step.value.byteLength);
-      total += step.value.byteLength;
-      chunks.push(step.value);
-    }
-  } catch (error) {
-    // Many PDF writers leave bytes after the end of the zlib stream. Keep what
-    // decompressed cleanly; fail only when nothing did.
-    if (error instanceof Error && /expands beyond/.test(error.message)) throw error;
-    if (!total) throw new Error('A compressed PDF stream could not be read.');
-  } finally {
-    reader.releaseLock();
-  }
-  const out = new Uint8Array(total);
-  let at = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, at);
-    at += chunk.byteLength;
-  }
+  const out = inflateBounded(data, 'zlib', budget.remaining);
+  budget.take(out.byteLength);
   return out;
 }
 
