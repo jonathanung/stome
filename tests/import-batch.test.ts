@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { MAX_IMPORT_BATCH, assignRoomToUnmapped, batchLimitMessage, mergeBatch, remainingCapacity } from '../src/import/batch.ts';
+import { MAX_IMPORT_BATCH, assignRoomToUnmapped, batchLimitMessage, createdRoomsInBatch, mergeBatch, remainingCapacity, savedDraftPatch, shareCreatedRoom } from '../src/import/batch.ts';
 import { chooseExistingRoom, chooseNewRoom, unsetRoomMapping } from '../src/import/room-map.ts';
 
 const item = (path: string, fingerprint = path) => ({ id: path, note: { path, fingerprint } });
@@ -55,4 +55,27 @@ test('one room can be given to every note that still needs one', () => {
     done: unsetRoomMapping(),
   });
   assert.equal(result[2], notes[2], 'untouched notes keep their identity');
+});
+
+test('a failed save keeps this batch’s room for the retry and leaves other choices alone', () => {
+  const saved = { ...savedDraftPatch(chooseNewRoom('Biology Lab'), 'room-batch', 'Saved 2 chunks.'), result: 'Could not refresh rooms.' };
+  const pending = { mapping: chooseNewRoom('  biology   lab ') };
+  const explicit = { done: true, mapping: chooseExistingRoom('room-other') };
+  const created = createdRoomsInBatch([saved, pending, explicit, { mapping: chooseNewRoom('Chemistry') }]);
+  assert.deepEqual(shareCreatedRoom(pending.mapping, created), chooseExistingRoom('room-batch'));
+  assert.deepEqual(shareCreatedRoom(chooseNewRoom('Chemistry'), created), chooseNewRoom('Chemistry'));
+  assert.deepEqual(shareCreatedRoom(explicit.mapping, created), chooseExistingRoom('room-other'));
+  assert.equal(savedDraftPatch(chooseExistingRoom('room-other'), 'room-other', 'saved').createdRoomName, undefined);
+  assert.equal(created.size, 1);
+});
+
+test('later notes reuse the room created for the same new name', () => {
+  const created = new Map<string, string>();
+  const first = shareCreatedRoom(chooseNewRoom('Biology Lab'), created);
+  assert.deepEqual(first, chooseNewRoom('Biology Lab'));
+  created.set('biology lab', 'room-biology');
+  assert.deepEqual(shareCreatedRoom(chooseNewRoom('  biology   lab '), created), chooseExistingRoom('room-biology'));
+  assert.deepEqual(shareCreatedRoom(chooseNewRoom('Chemistry'), created), chooseNewRoom('Chemistry'));
+  assert.deepEqual(shareCreatedRoom(chooseExistingRoom('room-2'), created), chooseExistingRoom('room-2'));
+  assert.deepEqual(shareCreatedRoom(unsetRoomMapping(), created), unsetRoomMapping());
 });

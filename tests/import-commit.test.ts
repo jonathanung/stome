@@ -4,6 +4,8 @@ import { test } from 'node:test';
 import { createCommit } from '../src/data/commit.ts';
 import type { Operation } from '../src/data/operations.ts';
 import { getRoom, listChunks, listRooms } from '../src/data/queries.ts';
+import { saveReadyImports, savedDraftPatch, shareCreatedRoom } from '../src/import/batch.ts';
+import { chooseExistingRoom, chooseNewRoom, destinationForMapping, type RoomMapping } from '../src/import/room-map.ts';
 import { migrateDb } from '../src/db/migrate.ts';
 import { failOnWrite, nodeDb } from './support/node-db.ts';
 
@@ -80,6 +82,91 @@ test('failure after chunk writes rolls back new room, provenance, chunks and op 
     assert.equal((await s.db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM ${table}`))?.n, 0);
   }
   assert.ok((await s.commit(note())).ok);
+});
+
+test('notes that name one new room are stored in that single room', async (t) => {
+  const s = await setup();
+  t.after(() => s.db.close());
+  const created = new Map<string, string>();
+  const saveNamed = async (opId: string, sourceId: string, fingerprint: string) => {
+    const mapping = shareCreatedRoom(chooseNewRoom('Biology Lab'), created);
+    const destination = destinationForMapping(mapping);
+    assert.ok(destination);
+    const op = note(opId);
+    op.payload.sourceId = sourceId;
+    op.payload.fingerprint = fingerprint;
+    op.payload.destination = destination;
+    const saved = await s.commit(op);
+    assert.ok(saved.ok);
+    if ('name' in destination) created.set(destination.name.toLowerCase(), saved.value.roomId);
+    return saved.value.roomId;
+  };
+  const first = await saveNamed('op-1', 'markdown:vault/Biology/Cells.md', 'a'.repeat(64));
+  const second = await saveNamed('op-2', 'markdown:vault/Biology/Mitosis.md', 'b'.repeat(64));
+  assert.equal(second, first);
+  const rooms = await listRooms(s.db);
+  assert.equal(rooms.length, 1);
+  assert.equal(rooms[0]?.name, 'Biology Lab');
+  assert.equal((await listChunks(s.db, first)).length, 4);
+});
+
+test('a partial save then a retry keeps one batch room and explicit destinations', async (t) => {
+  const s = await setup();
+  t.after(() => s.db.close());
+  const unrelated = await s.commit({ opId: 'unrelated', kind: 'room.create', source: 'human', confirmed: false, payload: { name: 'Biology Lab' } });
+  const other = await s.commit({ opId: 'other', kind: 'room.create', source: 'human', confirmed: false, payload: { name: 'Other' } });
+  assert.ok(unrelated.ok && other.ok);
+  const drafts: { id: string; sourceId: string; fingerprint: string; mapping: RoomMapping; done?: boolean; createdRoomName?: string; result?: string }[] = [
+    { id: 'a', sourceId: 'markdown:a.md', fingerprint: 'a'.repeat(64), mapping: chooseNewRoom('Biology Lab') },
+    { id: 'b', sourceId: 'markdown:b.md', fingerprint: 'b'.repeat(64), mapping: chooseNewRoom('Biology Lab') },
+    { id: 'c', sourceId: 'markdown:c.md', fingerprint: 'c'.repeat(64), mapping: chooseNewRoom('Biology Lab') },
+    { id: 'd', sourceId: 'markdown:d.md', fingerprint: 'd'.repeat(64), mapping: chooseExistingRoom(other.value.roomId) },
+  ];
+  const persist = async (draft: (typeof drafts)[number], mapping: RoomMapping, options?: { refreshFails?: boolean }) => {
+    const destination = destinationForMapping(mapping);
+    assert.ok(destination);
+    const op = note(draft.id);
+    op.payload.sourceId = draft.sourceId;
+    op.payload.fingerprint = draft.fingerprint;
+    op.payload.destination = destination;
+    const saved = await s.commit(op);
+    assert.ok(saved.ok);
+    Object.assign(draft, savedDraftPatch(mapping, saved.value.roomId, 'Saved 2 chunks.'));
+    if (options?.refreshFails) {
+      draft.result = 'Could not refresh rooms.';
+      return null;
+    }
+    return saved.value.roomId;
+  };
+
+  await saveReadyImports(drafts, async (draft, mapping) => draft.id === 'b' ? null : persist(draft, mapping));
+  assert.equal(drafts[0]?.done, true);
+  assert.equal(drafts[1]?.done, undefined);
+  assert.equal(drafts[3]?.done, undefined);
+
+  await saveReadyImports(drafts, async (draft, mapping) => {
+    assert.equal(mapping.status, 'existing');
+    if (mapping.status === 'existing') assert.notEqual(mapping.roomId, unrelated.value.roomId);
+    return draft.id === 'b' ? persist(draft, mapping, { refreshFails: true }) : persist(draft, mapping);
+  });
+  assert.equal(drafts[1]?.done, true);
+  assert.deepEqual(drafts[1]?.mapping, drafts[0]?.mapping);
+  assert.equal(drafts[1]?.result, 'Could not refresh rooms.');
+  assert.equal(drafts[2]?.done, undefined);
+
+  await saveReadyImports(drafts, async (draft, mapping) => {
+    if (draft.id === 'd') assert.deepEqual(mapping, chooseExistingRoom(other.value.roomId));
+    if (draft.id === 'c') assert.deepEqual(mapping, drafts[0]?.mapping);
+    return persist(draft, mapping);
+  });
+
+  const biology = (await listRooms(s.db)).filter((room) => room.name === 'Biology Lab');
+  assert.equal(biology.length, 2);
+  const batchRoom = drafts[0]?.mapping.status === 'existing' ? drafts[0].mapping.roomId : '';
+  assert.equal((await listChunks(s.db, unrelated.value.roomId)).length, 0);
+  assert.equal((await listChunks(s.db, batchRoom)).length, 6);
+  assert.equal((await listChunks(s.db, other.value.roomId)).length, 2);
+  assert.equal(new Set([drafts[0], drafts[1], drafts[2]].map((draft) => draft?.mapping.status === 'existing' ? draft.mapping.roomId : '')).size, 1);
 });
 
 test('imports append to existing rooms and deleting a room releases source identity', async (t) => {

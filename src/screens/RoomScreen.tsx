@@ -20,6 +20,7 @@ import { MarkButtons } from '../features/review/MarkButtons';
 import { reviewMarkController } from '../features/review/mark-attempt';
 import { AnchoredChunkText, PinnedAnswer } from '../features/ask/AnchoredChunkText';
 import type { ChunkFocus } from '../features/ask/citations';
+import { watchRoomCaptureRefresh } from '../features/capture/commitSignal';
 import { ChunkEditor, type EditResult } from '../features/chunks/ChunkEditor';
 import { readDraft } from '../features/chunks/draft-store';
 import { pastedParagraphs } from '../features/chunks/paste';
@@ -30,6 +31,8 @@ import { PencilToolbar, type PencilTool } from '../features/ask/PencilToolbar';
 import { RoomAskPanel, type AskMessage } from '../features/ask/RoomAskPanel';
 import { RoomSidePanel } from '../features/room/RoomSidePanel';
 import { whiteboardEntry } from '../features/room/whiteboard-entry';
+import { actionError, clearLoadError as dismissLoadError, loadError, type ShownError } from '../features/room/errorOrigin';
+import { createRoomReader } from '../features/room/roomLoadCoordinator';
 import { PhoneRoomActions, PhoneRoomHeader, RoomTabs, SubjectChips, roomSubjects, type RoomTab } from '../features/room/PhoneRoomChrome';
 import { Icon } from '../ui/Icon';
 import { stageName } from '../ui/StageGlyph';
@@ -126,7 +129,8 @@ export function RoomScreen() {
   const [annotationText, setAnnotationText] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [shownError, setShownError] = useState<ShownError>(null);
+  const error = shownError?.message ?? null;
   const [pasteNotice, setPasteNotice] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [belowId, setBelowId] = useState<string | null>(null);
@@ -149,10 +153,14 @@ export function RoomScreen() {
   // Deletes wait out an undo window; the commit runs after this render, so
   // the effect below keeps handing it the latest list and functions.
   const chunksRef = useRef<ChunkWithAnnotations[]>([]);
+  // A load failure is cleared by the next successful load, but an action error is not.
+  const setActionError = useCallback((value: string | null) => {
+    setShownError(actionError(value));
+  }, []);
   const [deletes] = useState(() => new PendingDeletes({
     commit: async () => ({ ok: true }),
     onChange: setPendingDelete,
-    onError: setError,
+    onError: setActionError,
   }));
   // Leaving the room commits a pending delete rather than dropping it.
   useEffect(() => () => { void deletes.flush(); }, [deletes]);
@@ -176,26 +184,42 @@ export function RoomScreen() {
       ...chunk, annotations: byChunk.get(chunk.id) ?? [],
     })) };
   }, [db, id]);
-  const refresh = useCallback(async () => {
-    const next = await load();
+  const reportLoadError = useCallback((message: string) => {
+    setShownError(loadError(message));
+  }, []);
+  const clearLoadError = useCallback(() => {
+    setShownError(dismissLoadError);
+  }, []);
+  const applyRoom = useCallback((next: Awaited<ReturnType<typeof load>>) => {
     setRoom(next.room);
     setChunks(next.chunks);
     setDueToday(next.due);
-  }, [load]);
+    setLoading(false);
+    clearLoadError();
+  }, [clearLoadError]);
+  // Focus loads, saves and quick-capture refreshes all read the same room.
+  // The reader serialises refreshes and applies only the newest read, so a
+  // later failure cannot discard an earlier successful capture refresh.
+  const reader = useMemo(() => createRoomReader({
+    read: load,
+    apply: applyRoom,
+    onError: (message) => { reportLoadError(message); setLoading(false); },
+  }), [applyRoom, load, reportLoadError]);
+  const refresh = reader.refresh;
   useFocusEffect(useCallback(() => {
-    let active = true;
-    load().then((next) => {
-      if (active) { setRoom(next.room); setChunks(next.chunks); setDueToday(next.due); setLoading(false); }
-    }).catch((reason: unknown) => {
-      if (active) { setError(reason instanceof Error ? reason.message : 'Could not load room'); setLoading(false); }
-    });
-    const unsubscribe = reviewMarkController.subscribe(() => {
-      load().then((next) => {
-        if (active) { setRoom(next.room); setChunks(next.chunks); setDueToday(next.due); }
-      }).catch(() => undefined);
-    });
-    return () => { active = false; unsubscribe(); };
-  }, [load]));
+    void reader.focus();
+    // A capture from the global panel commits outside this screen; reload so the
+    // note list and the Ask chunk selection see it without a reload. It is scoped
+    // to focus so a retained, unfocused room does not keep reading the database.
+    const stop = watchRoomCaptureRefresh(id ?? null, reader.refresh);
+    const unsubscribe = reviewMarkController.subscribe(() => { void reader.refresh(); });
+    return () => {
+      stop();
+      unsubscribe();
+      // Blur drops reads and queued refreshes so they cannot apply after leaving.
+      reader.blur();
+    };
+  }, [id, reader]));
   const openCitation = useCallback((next: ChunkFocus) => {
     setFocus(next);
   }, []);
@@ -229,10 +253,10 @@ export function RoomScreen() {
   async function action(run: () => Promise<void>) {
     if (busy) return;
     setBusy(true);
-    setError(null);
+    setActionError(null);
     try { await run(); await refresh(); }
     catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Could not save');
+      setActionError(reason instanceof Error ? reason.message : 'Could not save');
       await refresh().catch(() => undefined);
     } finally { setBusy(false); }
   }
@@ -351,7 +375,7 @@ export function RoomScreen() {
     if (!updated.ok) return updated;
     const removed = await commit({ opId: randomUUID(), kind: 'chunk.delete', ...human, expectedRevision: following.revision, payload: { chunkId: following.id } });
     await refresh().catch(() => undefined);
-    if (!removed.ok) setError(`The notes were joined, but the next note could not be removed: ${readable(removed.error)}`);
+    if (!removed.ok) setActionError(`The notes were joined, but the next note could not be removed: ${readable(removed.error)}`);
     return updated;
   }
 
@@ -368,7 +392,7 @@ export function RoomScreen() {
     if (!latest) return;
     const result = await commit({ opId: randomUUID(), kind: 'chunk.update', ...human, expectedRevision: latest.revision,
       payload: { chunkId: latest.id, body: entry.restoreBody } });
-    if (!result.ok) setError(readable(result.error));
+    if (!result.ok) setActionError(readable(result.error));
     await refresh().catch(() => undefined);
   }
 
@@ -471,7 +495,7 @@ export function RoomScreen() {
           const index = chunks.indexOf(item);
           const cited = focus?.chunkId === item.id ? focus : null;
           const next = chunks[index + 1];
-          return <ChunkEditor chunk={item} index={index} count={chunks.length} onError={setError}
+          return <ChunkEditor chunk={item} index={index} count={chunks.length} onError={setActionError}
             reorderDisabled={searching || Boolean(activeSubject && phone)}
             onAddBelow={() => { setBelowId(item.id); setBelowText(''); }}
             onSplit={(head, tail, rev) => splitNote(item, head, tail, rev)}
