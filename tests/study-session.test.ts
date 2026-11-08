@@ -11,6 +11,7 @@ import {
   mockQuestionForChunk,
   mockQuizForChunks,
   normalizeTrueFalse,
+  pendingAnswerInput,
   ratingToMark,
 } from '../src/features/study/session.ts';
 
@@ -70,6 +71,17 @@ test('answer checking: mcq exact, t/f spellings, fill case-insensitive, empty ne
   assert.equal(normalizeTrueFalse('Yes'), 'true');
   assert.equal(normalizeTrueFalse('0'), 'false');
   assert.equal(normalizeTrueFalse('maybe'), null);
+});
+
+test('pending input reads the choice for mcq/true_false and typed text for fill', () => {
+  // Regression: true_false read `input`, so selecting True/False left "Check answer" disabled.
+  assert.equal(pendingAnswerInput('mcq', 'Mitochondrion', ''), 'Mitochondrion');
+  assert.equal(pendingAnswerInput('mcq', null, ''), '');
+  assert.equal(pendingAnswerInput('true_false', 'true', ''), 'true');
+  assert.equal(pendingAnswerInput('true_false', 'false', ''), 'false');
+  assert.equal(pendingAnswerInput('true_false', null, ''), '');
+  assert.equal(pendingAnswerInput('fill', null, 'mitochondrion'), 'mitochondrion');
+  assert.equal(pendingAnswerInput('fill', 'ignored-choice', 'typed'), 'typed');
 });
 
 test('staleness trips on revision change or missing source', () => {

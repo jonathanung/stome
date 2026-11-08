@@ -4,7 +4,7 @@ import { Platform, Pressable, Text, View } from 'react-native';
 import { Button, useStoneTheme } from '../../../design-theme/src/primitives';
 import type { StudyQuestion } from '../../data/models';
 import { Field, Notice } from '../../ui/kit';
-import { checkAnswer } from './session';
+import { checkAnswer, pendingAnswerInput } from './session';
 
 export type QuizAnswers = { questionId: string; input: string; correct: boolean }[];
 
@@ -35,7 +35,7 @@ export function SessionQuiz({
   const total = questions.length;
   const question = questions[index] ?? null;
   const stale = staleByQuestion[index] ?? false;
-  const currentInput = question?.kind === 'mcq' ? (choice ?? '') : input;
+  const currentInput = pendingAnswerInput(question?.kind ?? 'fill', choice, input);
   const answered = currentInput.trim().length > 0;
 
   function resetAnswer() {

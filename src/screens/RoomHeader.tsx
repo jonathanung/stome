@@ -1,4 +1,4 @@
-import { Link } from 'expo-router';
+import { Link, router } from 'expo-router';
 import { Pressable, Text, View, useWindowDimensions } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
@@ -67,6 +67,13 @@ export function RoomHeader({ room, chunkCount, onBack, onAsk, onNewNote }: {
         </Pressable>
       </Link>
       <Action label="ask" accessibilityLabel="Ask about this room" icon="ask" onPress={onAsk} />
+      {/* Plain Pressable, not <Link asChild>: on web the slot drops the style function, so the row loses its border. */}
+      <Pressable accessibilityRole="link" accessibilityLabel="Study session for this room" testID="open-study-session"
+        onPress={() => router.push(`/rooms/${room.id}/study`)}
+        style={({ pressed }) => ({ minHeight: theme.layout.control, paddingHorizontal: theme.space.xxl + 2, borderRadius: theme.radius.lg,
+          justifyContent: 'center', borderWidth: 1, borderColor: theme.color.border.strong, opacity: pressed ? 0.7 : 1 })}>
+        <Text style={[theme.text('buttonCompact'), { color: theme.color.text.primary }]}>study session</Text>
+      </Pressable>
       <Action label="new note" accessibilityLabel="Jump to new note" icon="plus" primary onPress={onNewNote} />
     </View>
   </View>;

@@ -192,6 +192,20 @@ export function normalizeTrueFalse(input: string): 'true' | 'false' | null {
 }
 
 /**
+ * Pending answer text for the runner. Choice questions (mcq/true_false) read
+ * the selected choice; fill reads the typed input. Regression guard: an early
+ * version read `input` for true_false, so selecting True/False never enabled
+ * "Check answer".
+ */
+export function pendingAnswerInput(
+  kind: Pick<StudyQuestion, 'kind'>['kind'],
+  choice: string | null,
+  input: string,
+): string {
+  return kind === 'fill' ? input : (choice ?? '');
+}
+
+/**
  * Checks one answer. MCQ compares against choices/answer case-insensitively;
  * T/F accepts t/f/yes/no spellings; fill compares case-insensitively after
  * trimming. Empty input never counts as correct.
