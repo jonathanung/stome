@@ -5,7 +5,15 @@ import { createStyles } from '../../design-theme/src/primitives';
 
 import { expoDriver } from '../db/expo-driver';
 import { companionProvider } from '../harness/companionClient';
-import { updateCompanionSettings, useCompanionSettings } from '../harness/companionSettings';
+import {
+  PROVIDER_NAMES,
+  companionLabel,
+  getCompanionSettings,
+  isLiveCompanion,
+  refreshCompanionStatus,
+  updateCompanionSettings,
+  useCompanionSettings,
+} from '../harness/companionSettings';
 import {
   MOCK_SCENARIOS,
   chunkViewFromFoundation,
@@ -59,7 +67,11 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
   const [database, setDatabase] = useState<SQLiteDatabase | null>(null);
   const [databaseError, setDatabaseError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const { url: companionUrl, token, scenario } = useCompanionSettings();
+  const { url: companionUrl, token, scenario: pickedScenario, status: companionStatus } = useCompanionSettings();
+  const live = companionStatus?.live === true;
+  const providerLabel = companionLabel(companionStatus);
+  // A live model has no mock scenarios, so it always gets the plain request.
+  const scenario: MockScenario = live ? 'success' : pickedScenario;
   const setCompanionUrl = (url: string) => updateCompanionSettings({ url });
   const setToken = (next: string) => updateCompanionSettings({ token: next });
   const setScenario = (next: MockScenario) => updateCompanionSettings({ scenario: next });
@@ -151,6 +163,11 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
     if (activityRef.current !== 'idle') {
       return;
     }
+    if (getCompanionSettings().status === null) {
+      // First Ask after pairing: learn whether the answer is live before choosing the scenario.
+      await refreshCompanionStatus();
+    }
+    const asked = isLiveCompanion() ? 'success' : getCompanionSettings().scenario;
     const generation = ++askGeneration.current;
     setActivity('asking');
     setError(null);
@@ -171,7 +188,7 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
       setStatus('running');
       const outcome = await fulfillQuestion(harnessExecutor(database), prepared, {
         chunks: pool,
-        scenario,
+        scenario: asked,
         purpose,
         provider: companionProvider({ baseUrl: companionUrl.trim(), token: token.trim() }),
         signal: controller.signal,
@@ -296,6 +313,7 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
             void onAsk(true, text);
           }}
           onOpenSource={onOpenCitation}
+          providerLabel={providerLabel}
           problems={sheetCitations?.problems.map((problem) => problem.message) ?? []}
           proposal={
             proposal
@@ -336,7 +354,7 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
         </Pressable>
       ) : null}
       <Text style={styles.runtime} testID="harness-runtime">
-        Mock companion. A confirmed answer is saved on the chunk. An edit replaces one whole note and stays marked AI. Older demo pins stay in the harness file and are not copied.
+        {live ? `${providerLabel}. Questions go to ${companionStatus ? PROVIDER_NAMES[companionStatus.provider] : 'the provider'} from the companion and cost money.` : 'Mock companion.'} A confirmed answer is saved on the chunk. An edit replaces one whole note and stays marked AI. Older demo pins stay in the harness file and are not copied.
       </Text>
       <Text style={styles.help}>Tick chunks in this room. Paste the pairing token here; it is not saved in browser storage.</Text>
       {chunks.length === 0 ? <Text style={styles.help}>Add a note in this room before asking.</Text> : null}
@@ -362,6 +380,7 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
         );
       })}
       <Text style={styles.label}>Companion</Text>
+      {providerLabel ? <Text style={styles.help} testID="companion-provider-label">{providerLabel}</Text> : null}
       <TextInput
         accessibilityLabel="Companion URL"
         autoCapitalize="none"
@@ -376,6 +395,9 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
         accessibilityLabel="Pairing token"
         autoCapitalize="none"
         autoCorrect={false}
+        onBlur={() => {
+          if (token.trim()) void refreshCompanionStatus();
+        }}
         onChangeText={setToken}
         style={styles.input}
         testID="pairing-token"
@@ -413,7 +435,7 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
         testID="ask-input"
         value={prompt}
       />
-      <View style={styles.scenarios}>
+      {live ? null : <View style={styles.scenarios}>
         {MOCK_SCENARIOS.map((item) => {
           const selected = item === scenario;
           return (
@@ -429,7 +451,7 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
             </Pressable>
           );
         })}
-      </View>
+      </View>}
       <Text testID="harness-state">{`Session: ${status}`}</Text>
       <View style={styles.actions}>
         <Pressable
