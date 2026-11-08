@@ -20,7 +20,6 @@ import { MarkButtons } from '../features/review/MarkButtons';
 import { reviewMarkController } from '../features/review/mark-attempt';
 import { AnchoredChunkText, PinnedAnswer } from '../features/ask/AnchoredChunkText';
 import type { ChunkFocus } from '../features/ask/citations';
-import { watchRoomCaptureRefresh } from '../features/capture/commitSignal';
 import { ChunkEditor, type EditResult } from '../features/chunks/ChunkEditor';
 import { readDraft } from '../features/chunks/draft-store';
 import { pastedParagraphs } from '../features/chunks/paste';
@@ -197,9 +196,9 @@ export function RoomScreen() {
     setLoading(false);
     clearLoadError();
   }, [clearLoadError]);
-  // Focus loads, saves and quick-capture refreshes all read the same room.
-  // The reader serialises refreshes and applies only the newest read, so a
-  // later failure cannot discard an earlier successful capture refresh.
+  // Focus loads and saves all read the same room. The reader serialises
+  // refreshes and applies only the newest read, so a later failure cannot
+  // discard an earlier successful save refresh.
   const reader = useMemo(() => createRoomReader({
     read: load,
     apply: applyRoom,
@@ -208,13 +207,8 @@ export function RoomScreen() {
   const refresh = reader.refresh;
   useFocusEffect(useCallback(() => {
     void reader.focus();
-    // A capture from the global panel commits outside this screen; reload so the
-    // note list and the Ask chunk selection see it without a reload. It is scoped
-    // to focus so a retained, unfocused room does not keep reading the database.
-    const stop = watchRoomCaptureRefresh(id ?? null, reader.refresh);
     const unsubscribe = reviewMarkController.subscribe(() => { void reader.refresh(); });
     return () => {
-      stop();
       unsubscribe();
       // Blur drops reads and queued refreshes so they cannot apply after leaving.
       reader.blur();
