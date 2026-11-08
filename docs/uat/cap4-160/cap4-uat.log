@@ -10,8 +10,8 @@ PASS phone-390x844-dark: tab-search present
 PASS phone-390x844-dark: Alt+N opens nothing
 PASS phone-390x844-dark: Ctrl+Alt+N opens nothing
 PASS phone-390x844-dark: key presses do not change the page
-created room UAT phone-390x844-dark cap4mw766o11
-opened room UAT phone-390x844-dark cap4mw766o11 at http://127.0.0.1:8091/rooms/16a142ba-c65d-473a-8dc0-aea4209e6336
+created room UAT phone-390x844-dark cap4mw77bt1c
+opened room UAT phone-390x844-dark cap4mw77bt1c at http://127.0.0.1:8091/rooms/8a211cb5-bc6f-41a0-a87a-67362048e708
 PASS phone-390x844-dark room: no capture testIDs
 PASS phone-390x844-dark room: no "Quick capture" copy
 PASS phone-390x844-dark room: no Alt+N hint
@@ -46,8 +46,8 @@ PASS desktop-1280x900-dark: sidebar shows Companion
 PASS desktop-1280x900-dark: Alt+N opens nothing
 PASS desktop-1280x900-dark: Ctrl+Alt+N opens nothing
 PASS desktop-1280x900-dark: key presses do not change the page
-created room UAT desktop-1280x900-dark cap4mw766o11
-opened room UAT desktop-1280x900-dark cap4mw766o11 at http://127.0.0.1:8091/rooms/67f89f73-ee0b-4143-be87-588bbd82a018
+created room UAT desktop-1280x900-dark cap4mw77bt1c
+opened room UAT desktop-1280x900-dark cap4mw77bt1c at http://127.0.0.1:8091/rooms/8cf2847a-f565-4257-a047-6c44e8719abf
 PASS desktop-1280x900-dark room: no capture testIDs
 PASS desktop-1280x900-dark room: no "Quick capture" copy
 PASS desktop-1280x900-dark room: no Alt+N hint
@@ -85,8 +85,8 @@ PASS phone-390x844-light: tab-search present
 PASS phone-390x844-light: Alt+N opens nothing
 PASS phone-390x844-light: Ctrl+Alt+N opens nothing
 PASS phone-390x844-light: key presses do not change the page
-created room UAT phone-390x844-light cap4mw766o11
-opened room UAT phone-390x844-light cap4mw766o11 at http://127.0.0.1:8091/rooms/55cdcc6e-59e7-4c55-9d99-a9e8a0f6d4b7
+created room UAT phone-390x844-light cap4mw77bt1c
+opened room UAT phone-390x844-light cap4mw77bt1c at http://127.0.0.1:8091/rooms/553b52ff-6a55-4f4f-a75c-6890a030bcd0
 PASS phone-390x844-light room: no capture testIDs
 PASS phone-390x844-light room: no "Quick capture" copy
 PASS phone-390x844-light room: no Alt+N hint
@@ -121,8 +121,8 @@ PASS desktop-1280x900-light: sidebar shows Companion
 PASS desktop-1280x900-light: Alt+N opens nothing
 PASS desktop-1280x900-light: Ctrl+Alt+N opens nothing
 PASS desktop-1280x900-light: key presses do not change the page
-created room UAT desktop-1280x900-light cap4mw766o11
-opened room UAT desktop-1280x900-light cap4mw766o11 at http://127.0.0.1:8091/rooms/f0b5cc05-da9e-4b90-89b7-2024f972bb52
+created room UAT desktop-1280x900-light cap4mw77bt1c
+opened room UAT desktop-1280x900-light cap4mw77bt1c at http://127.0.0.1:8091/rooms/2b16301a-ba31-434e-bf6a-500ef898ebcf
 PASS desktop-1280x900-light room: no capture testIDs
 PASS desktop-1280x900-light room: no "Quick capture" copy
 PASS desktop-1280x900-light room: no Alt+N hint

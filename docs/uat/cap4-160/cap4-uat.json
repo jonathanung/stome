@@ -1,33 +1,33 @@
 {
   "issue": 160,
-  "commit": "d46e5fdbe9d50541df888fae662e9338803c4a24",
+  "commit": "be446fa280f06a17b8093e651a796ee9869d75d7",
   "branch": "chore/remove-quick-capture",
   "url": "http://127.0.0.1:8091/",
   "chrome": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-  "startedAt": "2026-11-08T01:45:48.498Z",
+  "startedAt": "2026-11-08T02:17:49.842Z",
   "results": [
     {
       "lane": "phone-390x844-dark",
-      "roomName": "UAT phone-390x844-dark cap4mw766o11",
-      "noteText": "photosynthesis cap4mw766o11 phone-390x844-dark",
+      "roomName": "UAT phone-390x844-dark cap4mw77bt1c",
+      "noteText": "photosynthesis cap4mw77bt1c phone-390x844-dark",
       "video": "/tmp/stome-browser/artifacts/cap4/cap4-phone-390x844-dark.webm"
     },
     {
       "lane": "desktop-1280x900-dark",
-      "roomName": "UAT desktop-1280x900-dark cap4mw766o11",
-      "noteText": "photosynthesis cap4mw766o11 desktop-1280x900-dark",
+      "roomName": "UAT desktop-1280x900-dark cap4mw77bt1c",
+      "noteText": "photosynthesis cap4mw77bt1c desktop-1280x900-dark",
       "video": "/tmp/stome-browser/artifacts/cap4/cap4-desktop-1280x900-dark.webm"
     },
     {
       "lane": "phone-390x844-light",
-      "roomName": "UAT phone-390x844-light cap4mw766o11",
-      "noteText": "photosynthesis cap4mw766o11 phone-390x844-light",
+      "roomName": "UAT phone-390x844-light cap4mw77bt1c",
+      "noteText": "photosynthesis cap4mw77bt1c phone-390x844-light",
       "video": "/tmp/stome-browser/artifacts/cap4/cap4-phone-390x844-light.webm"
     },
     {
       "lane": "desktop-1280x900-light",
-      "roomName": "UAT desktop-1280x900-light cap4mw766o11",
-      "noteText": "photosynthesis cap4mw766o11 desktop-1280x900-light",
+      "roomName": "UAT desktop-1280x900-light cap4mw77bt1c",
+      "noteText": "photosynthesis cap4mw77bt1c desktop-1280x900-light",
       "video": "/tmp/stome-browser/artifacts/cap4/cap4-desktop-1280x900-light.webm"
     }
   ],
