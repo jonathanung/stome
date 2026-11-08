@@ -4,15 +4,13 @@
  * (#32), is one of these.
  */
 
-import type { AnnotationType } from '../db/schema.ts';
+import type { AnnotationType, ReviewState, RoomStage } from '../db/schema.ts';
 import type { AnnotationAnchors } from './models.ts';
-import type { BoardItem } from '../whiteboard/model.ts';
 
 export const SOURCES = ['human', 'import', 'ai'] as const;
 export type Source = (typeof SOURCES)[number];
 
 export interface Payloads {
-  'board.save': { roomId: string; items: BoardItem[] };
   /** One reviewed source note, saved atomically with its provenance. */
   'import.note': {
     sourceId: string;
@@ -48,10 +46,16 @@ export interface Payloads {
     payload?: Record<string, unknown>;
   };
   'annotation.delete': { annotationId: string };
+  /**
+   * Latest human review of one chunk for one local calendar day.
+   * A second mark that day replaces the row and earns no extra credit.
+   * It does not change the chunk. The third distinct chunk-day in a room
+   * promotes that room to brick in the same commit.
+   */
+  'review.mark': { chunkId: string; state: ReviewState; timeZone: string };
 }
 
 export interface Results {
-  'board.save': { roomId: string; revision: number };
   'import.note': { roomId: string; chunkIds: string[]; skipped: boolean };
   'room.create': { roomId: string; revision: number };
   'room.rename': { roomId: string; revision: number };
@@ -62,12 +66,20 @@ export interface Results {
   'chunk.delete': { chunkId: string };
   'annotation.create': { annotationId: string };
   'annotation.delete': { annotationId: string };
+  'review.mark': {
+    chunkId: string;
+    state: ReviewState;
+    localDay: string;
+    markedAt: number;
+    dueAt: number;
+    timeZone: string;
+    stage: RoomStage;
+  };
 }
 
 export type OpKind = keyof Payloads;
 
 export const OP_KINDS = [
-  'board.save',
   'import.note',
   'room.create',
   'room.rename',
@@ -78,6 +90,7 @@ export const OP_KINDS = [
   'chunk.delete',
   'annotation.create',
   'annotation.delete',
+  'review.mark',
 ] as const satisfies readonly OpKind[];
 
 export type Operation<K extends OpKind = OpKind> = {
@@ -101,13 +114,14 @@ export const NEEDS_REVISION: ReadonlySet<OpKind> = new Set<OpKind>([
   'chunk.update',
   'chunk.move',
   'chunk.delete',
+  'review.mark',
 ]);
 
 /** Which sources may run which ops. Humans may do anything. */
 export const PERMISSIONS: Record<Source, ReadonlySet<OpKind>> = {
   human: new Set<OpKind>(OP_KINDS),
   import: new Set<OpKind>(['room.create', 'chunk.create', 'import.note']),
-  ai: new Set<OpKind>(['annotation.create', 'board.save']),
+  ai: new Set<OpKind>(['annotation.create', 'chunk.update']),
 };
 
 export type CommitErrorCode =

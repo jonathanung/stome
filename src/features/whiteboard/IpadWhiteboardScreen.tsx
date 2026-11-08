@@ -1,4 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
+import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   PanResponder,
@@ -12,6 +13,8 @@ import {
 import Svg, { Circle, Defs, Path, Pattern, Rect } from 'react-native-svg';
 
 import { useStoneTheme } from '../../../design-theme/src/primitives';
+import { getRoom } from '../../data/queries';
+import { expoDriver } from '../../db/expo-driver';
 import { Icon, type IconName } from '../../ui/Icon';
 import type { BoardCheck, BoardStroke, InkColor, WhiteboardTool } from './types';
 
@@ -122,6 +125,20 @@ export function IpadWhiteboardScreen({ check = null }: { check?: BoardCheck | nu
   const theme = useStoneTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { width } = useWindowDimensions();
+  const sqlite = useSQLiteContext();
+  const db = useMemo(() => expoDriver(sqlite), [sqlite]);
+  const [roomName, setRoomName] = useState<string | null>(null);
+  useEffect(() => {
+    if (!id) return;
+    let live = true;
+    getRoom(db, id).then(
+      (room) => live && setRoomName(room?.name ?? null),
+      () => live && setRoomName(null),
+    );
+    return () => {
+      live = false;
+    };
+  }, [db, id]);
   const [tool, setTool] = useState<WhiteboardTool>('pen');
   const [ink, setInk] = useState<InkColor>('stone');
   const [strokes, setStrokes] = useState<BoardStroke[]>([]);
@@ -196,6 +213,15 @@ export function IpadWhiteboardScreen({ check = null }: { check?: BoardCheck | nu
   const all = live ? [...strokes, live] : strokes;
   const wide = width >= 700;
   const showLasso = tool === 'lasso' && strokes.length > 0;
+  // Dashed selection box around everything drawn (lasso selects the whole board for now).
+  const bounds = useMemo(() => {
+    if (strokes.length === 0) return null;
+    const xs = strokes.flatMap((s) => s.points.map((p) => p[0]));
+    const ys = strokes.flatMap((s) => s.points.map((p) => p[1]));
+    const x = Math.min(...xs) - 12;
+    const y = Math.min(...ys) - 12;
+    return { x, y, w: Math.max(...xs) + 12 - x, h: Math.max(...ys) + 12 - y };
+  }, [strokes]);
   const showCheck = check !== null && !noteDismissed;
 
   return (
@@ -224,16 +250,28 @@ export function IpadWhiteboardScreen({ check = null }: { check?: BoardCheck | nu
               strokeLinejoin="round"
             />
           ))}
+          {showLasso && bounds ? (
+            <Rect
+              x={bounds.x + pan.x}
+              y={bounds.y + pan.y}
+              width={bounds.w}
+              height={bounds.h}
+              fill="none"
+              stroke={theme.color.text.secondary}
+              strokeWidth={1.5}
+              strokeDasharray="6 6"
+            />
+          ) : null}
         </Svg>
       </View>
 
       <View style={[pill, { left: 20, top: 24, paddingRight: 14, paddingLeft: 4, paddingVertical: 4 }]}>
-        <Pressable accessibilityRole="button" accessibilityLabel="Back to room" onPress={() => (id ? router.replace(`/rooms/${id}`) : router.back())} style={iconBtn(false)}>
+        <Pressable accessibilityRole="button" accessibilityLabel={roomName ? `back to ${roomName}` : 'back to room'} onPress={() => (id ? router.replace(`/rooms/${id}`) : router.back())} style={iconBtn(false)}>
           <Icon name="chevronLeft" color={iconColor(false)} />
         </Pressable>
         <View>
           <Text style={[theme.text('actionTitle'), { color: theme.color.text.primary }]}>whiteboard</Text>
-          <Text style={[theme.text('fine'), { color: theme.color.text.tertiary }]}>sketch</Text>
+          {roomName ? <Text style={[theme.text('fine'), { color: theme.color.text.tertiary }]}>{roomName}</Text> : null}
         </View>
       </View>
 
@@ -251,7 +289,8 @@ export function IpadWhiteboardScreen({ check = null }: { check?: BoardCheck | nu
 
       {showLasso ? (
         <View
-          accessibilityLabel="Lasso selection"
+          accessibilityRole="none"
+          accessibilityLabel="lasso selection"
           style={{
             position: 'absolute',
             alignSelf: 'center',

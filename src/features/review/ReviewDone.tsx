@@ -1,7 +1,9 @@
 import { Pressable, Text, View } from 'react-native';
 
 import { Eyebrow, useStoneTheme } from '../../../design-theme/src/primitives';
+import { Icon } from '../../ui/Icon';
 import { StageGlyph } from '../../ui/StageGlyph';
+import { BRICK_CREDITS } from '../stone/stone-progress';
 import type { RoomStage } from '../../data/models';
 import type { ReviewState } from '../../db/schema';
 import { REVIEW_LABEL } from './session';
@@ -9,6 +11,9 @@ import { REVIEW_LABEL } from './session';
 export type ReviewTally = Record<ReviewState, number>;
 
 export const EMPTY_TALLY: ReviewTally = { got_it: 0, unclear: 0, missed: 0 };
+
+const CREDIT_WORDS: Record<number, string> = { 1: 'one', 2: 'two', 3: 'three', 4: 'four' };
+const ORDINALS: Record<number, string> = { 1: 'first', 2: 'second', 3: 'third', 4: 'fourth' };
 
 const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
@@ -38,6 +43,7 @@ export function ReviewDone({
   tally,
   minutes,
   nextUp,
+  unsaved = null,
   onToday,
   onHome,
 }: {
@@ -47,6 +53,8 @@ export function ReviewDone({
   tally: ReviewTally;
   minutes: number;
   nextUp: string | null;
+  /** A mark that has not saved yet; kept on screen with a retry until it does. */
+  unsaved?: { count: number; busy?: boolean; onRetry: () => void } | null;
   onToday: () => void;
   onHome: () => void;
 }) {
@@ -79,7 +87,7 @@ export function ReviewDone({
             {promoted ? `${roomName.toLowerCase()} is brick` : 'nothing left to review'}
           </Text>
           <Text style={[theme.text('body'), { color: theme.color.text.secondary }]}>
-            {promoted ? "that's the credit for reviews you did yourself." : `${roomName.toLowerCase()} stays ${stage}.`}
+            {promoted ? `${CREDIT_WORDS[BRICK_CREDITS] ?? BRICK_CREDITS} reviews you did yourself. that's the ${ORDINALS[BRICK_CREDITS] ?? 'last'} credit.` : `${roomName.toLowerCase()} stays ${stage}.`}
           </Text>
         </View>
       </View>
@@ -99,6 +107,29 @@ export function ReviewDone({
         </View>
         {nextUp ? <Text style={[theme.text('bodySmall'), { color: theme.color.text.tertiary }]}>{nextUp}</Text> : null}
       </View>
+
+      {unsaved ? (
+        <View
+          accessibilityRole="alert"
+          accessibilityLabel="unsaved mark"
+          testID="review-done-unsaved"
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingLeft: 14, paddingRight: 12, borderRadius: 16, backgroundColor: theme.color.status.danger.wash }}
+        >
+          <Icon name="cross" size={18} strokeWidth={2.5} color={theme.color.status.danger.text} />
+          <Text style={[theme.text('bodySmall'), { flex: 1, color: theme.color.status.danger.text, fontWeight: '500' }]}>
+            {`${unsaved.count} mark${unsaved.count === 1 ? '' : 's'} didn't save. it's kept on this screen until it does.`}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            testID="review-done-retry"
+            disabled={unsaved.busy}
+            onPress={unsaved.onRetry}
+            style={{ minHeight: 44, paddingHorizontal: 14, borderRadius: 12, backgroundColor: theme.color.status.danger.fill, alignItems: 'center', justifyContent: 'center', opacity: unsaved.busy ? 0.5 : 1 }}
+          >
+            <Text style={[theme.text('buttonCompact'), { color: theme.color.text.onFill }]}>retry</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <Pressable
         accessibilityRole="button"

@@ -13,22 +13,34 @@ import { reviewMarkController } from '../features/review/mark-attempt';
 import { reviewHref } from '../features/review/session';
 import { TodaySummary } from './TodaySummary';
 import { StatusMark } from '../ui/StatusMark';
-import { BackButton, EmptyState, Group, Notice, RoundAction, Row, ScreenHeader, useColumn } from '../ui/kit';
+import { EmptyState, Notice, RoundAction, Row, ScreenHeader, useColumn } from '../ui/kit';
 
 const STATE_LABEL = {
-  missed: 'Missed',
-  unclear: 'Unclear',
-  got_it: 'Got it',
+  missed: 'missed',
+  unclear: 'unclear',
+  got_it: 'got it',
 } as const;
 
+const dayStart = (t: number) => new Date(t).setHours(0, 0, 0, 0);
+
+/** When the mark was made: "today 9:40", "yesterday", or a short weekday. */
+export function markedLabel(markedAt: number, now = Date.now()): string {
+  const days = Math.round((dayStart(now) - dayStart(markedAt)) / 86_400_000);
+  if (days <= 0) {
+    return `today ${new Date(markedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: false })}`;
+  }
+  if (days === 1) return 'yesterday';
+  if (days < 7) return new Date(markedAt).toLocaleDateString(undefined, { weekday: 'short' }).toLowerCase();
+  return new Date(markedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }).toLowerCase();
+}
+
 function todayLabel(): string {
-  return new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+  return new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }).toLowerCase();
 }
 
 function dueLabel(dueAt: number): string {
-  const day = (t: number) => new Date(t).setHours(0, 0, 0, 0);
-  if (day(dueAt) < day(Date.now())) return 'earlier';
-  return 'today';
+  if (dayStart(dueAt) < dayStart(Date.now())) return 'earlier';
+  return `today ${new Date(dueAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: false })}`;
 }
 
 export function TodayScreen() {
@@ -82,17 +94,14 @@ export function TodayScreen() {
     return [...byRoom].map(([roomId, list]) => ({ roomId, items: list }));
   }, [items]);
 
-  const back = () => (router.canGoBack() ? router.back() : router.replace('/'));
-
   return (
     <Screen>
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'left', 'right']}>
         <ScrollView contentContainerStyle={{ flexGrow: 1, paddingBottom: 120 }}>
         <View style={[column, { gap: theme.space.section }]} testID="today-screen">
           <ScreenHeader
-            back={<BackButton label="Rooms" onPress={back} />}
             kicker={todayLabel()}
-            title="Today"
+            title="today"
             action={<RoundAction
               icon="refresh"
               label="Refresh"
@@ -114,32 +123,55 @@ export function TodayScreen() {
             </EmptyState>
           ) : null}
           {items.length ? <TodaySummary items={items} /> : null}
-          {groups.map((group) => (
-            <View key={group.roomId} style={{ gap: theme.space.xs }}>
-              <Text style={[theme.text('label'), { color: theme.color.text.tertiary, letterSpacing: 0.8, textTransform: 'lowercase' }]}>
-                {roomNames[group.roomId] ?? 'Room'}
-              </Text>
-              <Group>
-                {group.items.map((item) => {
-                  const title = item.chunk.body.split('\n')[0]?.slice(0, 80) || 'Empty chunk';
-                  return (
-                    <Row
-                      key={item.chunk.id}
-                      title={title}
-                      subtitle={`${STATE_LABEL[item.mark.state]} · due ${dueLabel(item.mark.dueAt)}`}
-                      leading={<StatusMark state={item.mark.state} />}
-                      accessibilityLabel={`Review ${title}`}
-                      onPress={() => router.push(reviewHref(item.chunk.roomId, item.chunk.id))}
-                      testID={`today-item-${item.chunk.id}`}
-                    />
-                  );
-                })}
-              </Group>
+          {groups.length ? (
+            <View
+              testID="today-list"
+              style={{
+                backgroundColor: theme.color.bg.surface,
+                borderRadius: theme.radius.float,
+                borderWidth: 1,
+                borderColor: theme.color.border.hairline,
+                overflow: 'hidden',
+                paddingHorizontal: theme.space.xs,
+                ...theme.shadow.card,
+              }}
+            >
+              {groups.map((group) => (
+                <View key={group.roomId}>
+                  <Text
+                    accessibilityRole="header"
+                    style={[theme.text('label'), {
+                      color: theme.color.text.tertiary,
+                      letterSpacing: 0.8,
+                      textTransform: 'lowercase',
+                      paddingHorizontal: theme.space.base,
+                      paddingTop: theme.space.xl,
+                      paddingBottom: theme.space.xxs,
+                    }]}
+                  >
+                    {roomNames[group.roomId] ?? 'Room'}
+                  </Text>
+                  {group.items.map((item) => {
+                    const title = item.chunk.body.split('\n')[0]?.slice(0, 80) || 'Empty chunk';
+                    return (
+                      <Row
+                        key={item.chunk.id}
+                        title={title}
+                        subtitle={`${STATE_LABEL[item.mark.state]} ${markedLabel(item.mark.markedAt)} · due ${dueLabel(item.mark.dueAt)}`}
+                        leading={<StatusMark state={item.mark.state} />}
+                        accessibilityLabel={`Review ${title}`}
+                        onPress={() => router.push(reviewHref(item.chunk.roomId, item.chunk.id))}
+                        testID={`today-item-${item.chunk.id}`}
+                      />
+                    );
+                  })}
+                </View>
+              ))}
             </View>
-          ))}
+          ) : null}
           {items.length ? (
             <Button
-              label={`Review all ${items.length}`}
+              label={`review all ${items.length}`}
               onPress={() => router.push(reviewHref(items[0].chunk.roomId, items[0].chunk.id))}
             />
           ) : null}
