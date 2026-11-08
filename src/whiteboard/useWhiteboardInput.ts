@@ -55,6 +55,7 @@ type Refs = {
   setTransform: (t: CanvasTransform) => void;
   setElements: React.Dispatch<React.SetStateAction<WhiteboardElement[]>>;
   canvasOriginRef: React.RefObject<{ x: number; y: number }>;
+  acceptInputRef: React.RefObject<boolean>;
 };
 
 export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
@@ -71,8 +72,8 @@ export function createWhiteboardPanResponder(refs: Refs): PanResponderInstance {
   }
 
   return PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: () => true,
+    onStartShouldSetPanResponder: () => refs.acceptInputRef.current,
+    onMoveShouldSetPanResponder: () => refs.acceptInputRef.current,
 
     onPanResponderGrant: (evt) => {
       const { nativeEvent } = evt;

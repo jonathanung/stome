@@ -126,6 +126,16 @@ export interface Payloads {
     sourceChunkIds: string[];
     sourceRevision: number;
   };
+  /**
+   * The one whiteboard for a room. The first save inserts revision 1.
+   * A later save must carry the revision it read, or it is rejected and the
+   * stored document is left as it was. Elements are the canvas shapes, not an image.
+   */
+  'whiteboard.save': {
+    boardId?: string;
+    roomId: string;
+    elements: unknown[];
+  };
 }
 
 export interface Results {
@@ -156,6 +166,7 @@ export interface Results {
   'study.question.create': { questionId: string };
   'study.attempt.save': { attemptId: string };
   'study.slide-outline.create': { outlineId: string };
+  'whiteboard.save': { boardId: string; revision: number; updatedAt: number };
 }
 
 export type OpKind = keyof Payloads;
@@ -178,6 +189,7 @@ export const OP_KINDS = [
   'study.question.create',
   'study.attempt.save',
   'study.slide-outline.create',
+  'whiteboard.save',
 ] as const satisfies readonly OpKind[];
 
 export type Operation<K extends OpKind = OpKind> = {
@@ -264,4 +276,6 @@ export const LIMITS = {
   studySlides: 50,
   studyBullets: 12,
   studyBullet: 1_000,
+  whiteboardElements: 500,
+  whiteboardChars: 1_000_000,
 } as const;

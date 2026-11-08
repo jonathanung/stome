@@ -202,6 +202,28 @@ function studySlides(v: unknown): SlideItem[] {
   });
 }
 
+const BOARD_TYPES = new Set(['freedraw', 'rectangle', 'diamond', 'ellipse', 'line', 'arrow', 'text']);
+
+function whiteboardElements(input: unknown): unknown[] {
+  if (!Array.isArray(input)) reject('invalid', 'elements must be a list');
+  const v = input as unknown[];
+  if (v.length > LIMITS.whiteboardElements) reject('invalid', `at most ${LIMITS.whiteboardElements} whiteboard elements`);
+  if (JSON.stringify(v).length > LIMITS.whiteboardChars) reject('invalid', 'whiteboard is too large');
+  v.forEach((item, i) => {
+    if (!isObject(item)) reject('invalid', `elements[${i}] must be an object`);
+    const el = item as Record<string, unknown>;
+    requireId(el.id, `elements[${i}].id`);
+    if (typeof el.type !== 'string' || !BOARD_TYPES.has(el.type)) reject('invalid', `elements[${i}].type is not a whiteboard shape`);
+    if (el.type === 'freedraw' || el.type === 'line' || el.type === 'arrow') {
+      const points = el.points;
+      if (!Array.isArray(points) || points.length > LIMITS.strokePoints) {
+        reject('invalid', `elements[${i}].points must be at most ${LIMITS.strokePoints} points`);
+      }
+    }
+  });
+  return v;
+}
+
 type Normalized = { [K in OpKind]: { kind: K; payload: Payloads[K] } }[OpKind];
 
 function normalize(op: Operation): Normalized {
@@ -399,6 +421,15 @@ function normalize(op: Operation): Normalized {
           slides: studySlides(p.slides),
           sourceChunkIds: sourceChunkIds(p.sourceChunkIds),
           sourceRevision: sourceRevision(p.sourceRevision),
+        },
+      };
+    case 'whiteboard.save':
+      return {
+        kind: op.kind,
+        payload: {
+          boardId: optionalId(p.boardId, 'boardId'),
+          roomId: requireId(p.roomId, 'roomId'),
+          elements: whiteboardElements(p.elements),
         },
       };
   }
@@ -843,6 +874,33 @@ async function apply(db: Db, op: Operation, n: Normalized, deps: CommitDeps): Pr
         [outlineId, roomId, title, JSON.stringify(slides), JSON.stringify(sourceChunkIds), sourceRevision, now, now],
       );
       return { outlineId };
+    }
+    case 'whiteboard.save': {
+      const { roomId, elements } = n.payload;
+      if (!await db.get('SELECT 1 FROM rooms WHERE id = ?', [roomId])) reject('not_found', 'room does not exist');
+      const existing = await db.get<{ id: string; revision: number }>('SELECT id, revision FROM room_whiteboards WHERE room_id = ?', [roomId]);
+      const document = JSON.stringify(elements);
+      if (!existing) {
+        if (op.expectedRevision !== undefined) {
+          reject('stale_revision', `whiteboard changed elsewhere (now unsaved, expected ${op.expectedRevision})`);
+        }
+        const boardId = n.payload.boardId ?? deps.newId();
+        if (await db.get('SELECT 1 FROM room_whiteboards WHERE id = ?', [boardId])) reject('conflict', 'a whiteboard with that id already exists');
+        await run(
+          'INSERT INTO room_whiteboards (id, room_id, elements, revision, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)',
+          [boardId, roomId, document, now, now],
+        );
+        return { boardId, revision: 1, updatedAt: now };
+      }
+      if (op.expectedRevision !== existing.revision) {
+        reject('stale_revision', `whiteboard changed elsewhere (now revision ${existing.revision}, expected ${op.expectedRevision ?? 'none'})`);
+      }
+      const revision = existing.revision + 1;
+      await run(
+        'UPDATE room_whiteboards SET elements = ?, revision = ?, updated_at = ? WHERE room_id = ?',
+        [document, revision, now, roomId],
+      );
+      return { boardId: existing.id, revision, updatedAt: now };
     }
   }
 }
