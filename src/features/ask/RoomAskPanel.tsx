@@ -52,7 +52,7 @@ export function RoomAskPanel({ subtitle, providerLabel, messages, proposal, onSe
   const control = theme.layout.control;
   return (
     <View accessibilityLabel="ask" testID="room-ask-panel" style={{
-      width: ASK_PANEL_WIDTH, backgroundColor: theme.color.bg.surface,
+      width: ASK_PANEL_WIDTH, backgroundColor: theme.color.bg.canvas,
       borderLeftWidth: 1, borderLeftColor: theme.color.border.hairline,
     }}>
       <View style={{
