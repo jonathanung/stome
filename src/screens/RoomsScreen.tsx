@@ -116,6 +116,8 @@ export function RoomsScreen() {
     setDeletingId(null);
   }
 
+  const bricks = rooms.filter((r) => r.stage === 'brick').length;
+  const roomsSummary = `${rooms.length} ${rooms.length === 1 ? 'room' : 'rooms'}, ${bricks} ${bricks === 1 ? 'brick' : 'bricks'}. Your notes stay on this device.`;
   const cols = gridColumns(width);
   if (cols > 1) {
     const gap = theme.space.base;
@@ -128,7 +130,7 @@ export function RoomsScreen() {
           <View style={{ gap: theme.space.sm, flexShrink: 1 }}>
             <Text style={[theme.text('label'), { color: theme.color.text.tertiary, letterSpacing: 0.8 }]}>{todayLabel()}</Text>
             <Text accessibilityRole="header" style={[theme.text('screenTitle'), { color: theme.color.text.primary }]}>Your rooms</Text>
-            <Text style={[theme.text('bodySmall'), { color: theme.color.text.secondary }]}>Your rooms and notes stay on this device.</Text>
+            <Text style={[theme.text('bodySmall'), { color: theme.color.text.secondary }]}>{roomsSummary}</Text>
           </View>
           <View style={{ flexDirection: 'row', gap: theme.space.md }}>
             <Button label="Import Markdown" variant="outline" onPress={() => router.push('/import')} />
