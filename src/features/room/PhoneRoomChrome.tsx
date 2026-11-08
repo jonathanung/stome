@@ -1,4 +1,6 @@
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { MotionPressable as Pressable, useReduceMotion } from '../../../design-theme/src/motion';
+import { Animated, Platform, ScrollView, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
 import { useStoneTheme } from '../../../design-theme/src/primitives';
@@ -44,14 +46,26 @@ export function PhoneRoomHeader({ name, status, onBack, onReview, onOptions }: {
 
 export function RoomTabs({ value, onChange }: { value: RoomTab; onChange: (tab: RoomTab) => void }) {
   const theme = useStoneTheme();
+  const reduced = useReduceMotion();
+  const [width, setWidth] = useState(0);
+  const [position] = useState(() => new Animated.Value(0));
+  const tabWidth = Math.max(0, width - 6) / ROOM_TABS.length;
+  useEffect(() => {
+    const toValue = ROOM_TABS.indexOf(value) * tabWidth;
+    if (reduced) { position.setValue(toValue); return; }
+    const animation = Animated.spring(position, { toValue, stiffness: 320, damping: 30, mass: 0.8, useNativeDriver: Platform.OS !== 'web' });
+    animation.start();
+    return () => animation.stop();
+  }, [position, reduced, tabWidth, value]);
   return (
-    <View accessibilityRole="tablist" style={{ flexDirection: 'row', padding: 3, borderRadius: theme.radius.control, backgroundColor: theme.color.bg.inset }}>
+    <View accessibilityRole="tablist" onLayout={(event) => setWidth(event.nativeEvent.layout.width)} style={{ flexDirection: 'row', padding: 3, borderRadius: theme.radius.control, backgroundColor: theme.color.bg.inset }}>
+      {width > 0 ? <Animated.View pointerEvents="none" style={{ position: 'absolute', top: 3, bottom: 3, left: 3, width: tabWidth, borderRadius: theme.radius.md, backgroundColor: theme.color.bg.surface, ...theme.shadow.segment, transform: [{ translateX: position }] }} /> : null}
       {ROOM_TABS.map((tab) => {
         const on = tab === value;
         return (
           <Pressable key={tab} accessibilityRole="tab" accessibilityState={{ selected: on }} onPress={() => onChange(tab)}
             style={{ flex: 1, minHeight: 36, borderRadius: theme.radius.md, alignItems: 'center', justifyContent: 'center',
-              backgroundColor: on ? theme.color.bg.surface : 'transparent', ...(on ? theme.shadow.segment : null) }}>
+              backgroundColor: 'transparent' }}>
             <Text style={{ ...theme.text('bodySmall'), fontSize: 14, lineHeight: 18, fontWeight: on ? '600' : '500',
               color: on ? theme.color.text.primary : theme.color.text.secondary }}>{tab}</Text>
           </Pressable>
