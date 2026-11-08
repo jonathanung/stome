@@ -47,12 +47,18 @@ export interface Payloads {
   };
   'annotation.delete': { annotationId: string };
   /**
-   * Latest human review of one chunk for one local calendar day.
-   * A second mark that day replaces the row and earns no extra credit.
-   * It does not change the chunk. The third distinct chunk-day in a room
-   * promotes that room to brick in the same commit.
+   * Latest human review of one chunk — or of one pinned AI answer — for one
+   * local calendar day. A second mark that day replaces the row and earns no
+   * extra credit. It does not change the chunk. The third distinct reviewed
+   * day in a room promotes that room to brick in the same commit.
+   *
+   * REV.3 (#127): when `annotationId` is present the mark targets that
+   * `ai_answer` annotation (annotation-keyed due; the annotation owns its
+   * `dueAt`). `chunkId` is still required as the anchor chunk: its revision
+   * is checked and its room earns the credit. Without `annotationId` this is
+   * the original chunk mark and the chunk owns its `dueAt`.
    */
-  'review.mark': { chunkId: string; state: ReviewState; timeZone: string };
+  'review.mark': { chunkId: string; annotationId?: string; state: ReviewState; timeZone: string };
   /**
    * Study materials (STUDY.1 #130). Generated rows are never source notes:
    * every op carries the single-room `roomId`, the `sourceChunkIds` it was
@@ -135,6 +141,8 @@ export interface Results {
   'annotation.delete': { annotationId: string };
   'review.mark': {
     chunkId: string;
+    /** Present only when the mark targets a pinned AI answer (#127). */
+    annotationId: string | null;
     state: ReviewState;
     localDay: string;
     markedAt: number;

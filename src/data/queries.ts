@@ -4,7 +4,9 @@ import type { Db } from '../db/driver.ts';
 import type { ReviewState } from '../db/schema.ts';
 import type {
   Annotation,
+  AnswerMark,
   Chunk,
+  DueAnswer,
   DueChunk,
   RecentChunk,
   ReviewMark,
@@ -122,6 +124,11 @@ export async function listAnnotations(db: Db, chunkId: string): Promise<Annotati
   return rows.map(toAnnotation);
 }
 
+export async function getAnnotation(db: Db, annotationId: string): Promise<Annotation | null> {
+  const row = await db.get<AnnotationRow>('SELECT * FROM annotations WHERE id = ?', [annotationId]);
+  return row ? toAnnotation(row) : null;
+}
+
 interface ReviewRow {
   chunk_id: string;
   state: ReviewState;
@@ -186,6 +193,142 @@ export async function listRoomAnnotations(db: Db, roomId: string): Promise<Annot
     [roomId],
   );
   return rows.map(toAnnotation);
+}
+
+interface AnswerMarkRow {
+  annotation_id: string;
+  chunk_id: string;
+  state: ReviewState;
+  local_day: string;
+  marked_at: number;
+  due_at: number;
+  time_zone: string;
+}
+
+const toAnswerMark = (row: AnswerMarkRow): AnswerMark => ({
+  annotationId: row.annotation_id,
+  chunkId: row.chunk_id,
+  state: row.state,
+  localDay: row.local_day,
+  markedAt: row.marked_at,
+  dueAt: row.due_at,
+  timeZone: row.time_zone,
+});
+
+/** The answer mark that currently sets this pin's due time, if it has been marked. */
+export async function latestAnswerMark(db: Db, annotationId: string): Promise<AnswerMark | null> {
+  const row = await db.get<AnswerMarkRow>(
+    `SELECT m.annotation_id, a.chunk_id AS chunk_id, m.state, m.local_day, m.marked_at, m.due_at, m.time_zone
+       FROM answer_marks m
+       JOIN annotations a ON a.id = m.annotation_id
+      WHERE m.annotation_id = ?
+      ORDER BY m.marked_at DESC, m.local_day DESC
+      LIMIT 1`,
+    [annotationId],
+  );
+  return row ? toAnswerMark(row) : null;
+}
+
+type DueAnswerRow = ChunkRow & {
+  annotation_id: string;
+  annotation_chunk_id: string;
+  annotation_type: Annotation['type'];
+  annotation_anchor: string;
+  annotation_payload: string;
+  annotation_created: number;
+  annotation_updated: number;
+  mark_state: ReviewState | null;
+  mark_day: string | null;
+  mark_marked: number | null;
+  mark_due: number | null;
+  mark_zone: string | null;
+};
+
+const ANSWER_COLUMNS = `
+  a.id AS annotation_id, a.chunk_id AS annotation_chunk_id, a.type AS annotation_type,
+  a.anchor AS annotation_anchor, a.payload AS annotation_payload,
+  a.created_at AS annotation_created, a.updated_at AS annotation_updated`;
+
+function toDueAnswer(row: DueAnswerRow): DueAnswer {
+  const mark =
+    row.mark_state === null || row.mark_day === null || row.mark_marked === null || row.mark_due === null || row.mark_zone === null
+      ? null
+      : {
+          annotationId: row.annotation_id,
+          chunkId: row.annotation_chunk_id,
+          state: row.mark_state,
+          localDay: row.mark_day,
+          markedAt: row.mark_marked,
+          dueAt: row.mark_due,
+          timeZone: row.mark_zone,
+        };
+  return {
+    chunk: toChunk(row),
+    annotation: {
+      id: row.annotation_id,
+      chunkId: row.annotation_chunk_id,
+      type: row.annotation_type,
+      anchor: JSON.parse(row.annotation_anchor),
+      payload: JSON.parse(row.annotation_payload),
+      createdAt: row.annotation_created,
+      updatedAt: row.annotation_updated,
+    },
+    mark,
+  };
+}
+
+/**
+ * Pinned `ai_answer` annotations that are due at `now` (#127). An answer with
+ * no mark is due as soon as it is pinned; a marked answer is due when its
+ * latest answer mark is due. Staleness is not filtered here — marking rejects
+ * a stale anchor or passage with a message and writes nothing.
+ */
+export async function listDueAnswers(db: Db, now: number): Promise<DueAnswer[]> {
+  return dueAnswers(db, now);
+}
+
+/** Due pinned answers in one room, for the review session. */
+export async function listRoomDueAnswers(db: Db, roomId: string, now: number): Promise<DueAnswer[]> {
+  return dueAnswers(db, now, roomId);
+}
+
+async function dueAnswers(db: Db, now: number, roomId?: string): Promise<DueAnswer[]> {
+  const roomFilter = roomId === undefined ? '' : 'AND c.room_id = ?';
+  const roomParams = roomId === undefined ? [] : [roomId];
+  const marked = await db.all<DueAnswerRow>(
+    `SELECT ${CHUNK_COLUMNS}, ${ANSWER_COLUMNS},
+            m.state AS mark_state, m.local_day AS mark_day, m.marked_at AS mark_marked,
+            m.due_at AS mark_due, m.time_zone AS mark_zone
+       FROM answer_marks m
+       JOIN annotations a ON a.id = m.annotation_id
+       JOIN chunks c ON c.id = a.chunk_id
+      WHERE a.type = 'ai_answer'
+        AND m.due_at <= ?
+        AND NOT EXISTS (
+          SELECT 1 FROM answer_marks newer
+           WHERE newer.annotation_id = m.annotation_id
+             AND (newer.marked_at > m.marked_at
+                  OR (newer.marked_at = m.marked_at AND newer.local_day > m.local_day))
+        )
+        ${roomFilter}
+      ORDER BY m.due_at, a.id`,
+    [now, ...roomParams],
+  );
+  const fresh = await db.all<DueAnswerRow>(
+    `SELECT ${CHUNK_COLUMNS}, ${ANSWER_COLUMNS},
+            NULL AS mark_state, NULL AS mark_day, NULL AS mark_marked,
+            NULL AS mark_due, NULL AS mark_zone
+       FROM annotations a
+       JOIN chunks c ON c.id = a.chunk_id
+      WHERE a.type = 'ai_answer'
+        AND NOT EXISTS (
+          SELECT 1 FROM answer_marks m WHERE m.annotation_id = a.id
+        )
+        ${roomFilter}
+      ORDER BY a.created_at, a.id`,
+    [...roomParams],
+  );
+  return [...fresh.map(toDueAnswer), ...marked.map(toDueAnswer)];
 }
 
 /* ------------------------------------------------ study materials (#130) */
