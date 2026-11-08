@@ -4,8 +4,8 @@
  * (#32), is one of these.
  */
 
-import type { AnnotationType, ReviewState, RoomStage } from '../db/schema.ts';
-import type { AnnotationAnchors } from './models.ts';
+import type { AnnotationType, ReviewState, RoomStage, StudyQuestionKind } from '../db/schema.ts';
+import type { AnnotationAnchors, SlideItem } from './models.ts';
 
 export const SOURCES = ['human', 'import', 'ai'] as const;
 export type Source = (typeof SOURCES)[number];
@@ -59,6 +59,73 @@ export interface Payloads {
    * the original chunk mark and the chunk owns its `dueAt`.
    */
   'review.mark': { chunkId: string; annotationId?: string; state: ReviewState; timeZone: string };
+  /**
+   * Study materials (STUDY.1 #130). Generated rows are never source notes:
+   * every op carries the single-room `roomId`, the `sourceChunkIds` it was
+   * grounded on, and the `sourceRevision` snapshot. All study ops need
+   * `confirmed: true`; `import` may not write study tables.
+   */
+  'study.deck.create': {
+    deckId?: string;
+    roomId: string;
+    title: string;
+    sourceChunkIds: string[];
+    sourceRevision: number;
+  };
+  'study.card.create': {
+    cardId?: string;
+    deckId: string;
+    roomId: string;
+    front: string;
+    back: string;
+    position?: number;
+    sourceChunkIds: string[];
+    sourceRevision: number;
+  };
+  'study.quiz.create': {
+    quizId?: string;
+    roomId: string;
+    title: string;
+    sourceChunkIds: string[];
+    sourceRevision: number;
+  };
+  'study.question.create': {
+    questionId?: string;
+    quizId: string;
+    roomId: string;
+    kind: StudyQuestionKind;
+    stem: string;
+    /** Required for `mcq` (2–6 options); empty otherwise. */
+    choices?: string[];
+    answer: string;
+    explanation?: string;
+    position?: number;
+    sourceChunkIds: string[];
+    sourceRevision: number;
+  };
+  /**
+   * One immutable quiz run: score %, per-question right/wrong, duration.
+   * History, never edited; replaying an op id adds no row. No source refs:
+   * provenance lives on the quiz.
+   */
+  'study.attempt.save': {
+    attemptId?: string;
+    quizId: string;
+    roomId: string;
+    scorePct: number;
+    correct: number;
+    total: number;
+    results: { questionId: string; correct: boolean }[];
+    durationMs: number;
+  };
+  'study.slide-outline.create': {
+    outlineId?: string;
+    roomId: string;
+    title: string;
+    slides: SlideItem[];
+    sourceChunkIds: string[];
+    sourceRevision: number;
+  };
 }
 
 export interface Results {
@@ -83,6 +150,12 @@ export interface Results {
     timeZone: string;
     stage: RoomStage;
   };
+  'study.deck.create': { deckId: string };
+  'study.card.create': { cardId: string };
+  'study.quiz.create': { quizId: string };
+  'study.question.create': { questionId: string };
+  'study.attempt.save': { attemptId: string };
+  'study.slide-outline.create': { outlineId: string };
 }
 
 export type OpKind = keyof Payloads;
@@ -99,6 +172,12 @@ export const OP_KINDS = [
   'annotation.create',
   'annotation.delete',
   'review.mark',
+  'study.deck.create',
+  'study.card.create',
+  'study.quiz.create',
+  'study.question.create',
+  'study.attempt.save',
+  'study.slide-outline.create',
 ] as const satisfies readonly OpKind[];
 
 export type Operation<K extends OpKind = OpKind> = {
@@ -110,7 +189,7 @@ export type Operation<K extends OpKind = OpKind> = {
     /** Revision of the target the caller last saw. Required for ops on an existing row. */
     expectedRevision?: number;
     source: Source;
-    /** Must be true for AI changes and for room deletion. */
+    /** Must be true for AI changes, room deletion, imports, and study writes. */
     confirmed: boolean;
   };
 }[K];
@@ -129,8 +208,28 @@ export const NEEDS_REVISION: ReadonlySet<OpKind> = new Set<OpKind>([
 export const PERMISSIONS: Record<Source, ReadonlySet<OpKind>> = {
   human: new Set<OpKind>(OP_KINDS),
   import: new Set<OpKind>(['room.create', 'chunk.create', 'import.note']),
-  ai: new Set<OpKind>(['annotation.create', 'chunk.update']),
+  ai: new Set<OpKind>([
+    'annotation.create',
+    'chunk.update',
+    'study.deck.create',
+    'study.card.create',
+    'study.quiz.create',
+    'study.question.create',
+    'study.slide-outline.create',
+  ]),
 };
+
+/** Ops that always need `confirmed: true`, whatever the source. */
+export const NEEDS_CONFIRMATION: ReadonlySet<OpKind> = new Set<OpKind>([
+  'room.delete',
+  'import.note',
+  'study.deck.create',
+  'study.card.create',
+  'study.quiz.create',
+  'study.question.create',
+  'study.attempt.save',
+  'study.slide-outline.create',
+]);
 
 export type CommitErrorCode =
   | 'invalid'
@@ -158,4 +257,11 @@ export const LIMITS = {
   bodiesPerOp: 200,
   strokePoints: 5_000,
   payloadChars: 20_000,
+  studyTitle: 120,
+  studyText: 10_000,
+  studyChoice: 500,
+  studyChoices: 6,
+  studySlides: 50,
+  studyBullets: 12,
+  studyBullet: 1_000,
 } as const;

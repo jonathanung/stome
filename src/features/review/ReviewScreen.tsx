@@ -100,6 +100,12 @@ function toAnswerCard(
   return { kind: 'answer', answer };
 }
 
+function stageSummary(roomName: string, card: ReviewCard, lastState: Record<string, ReviewState>): string {
+  const last = lastState[reviewCardId(card)];
+  if (last) return `${roomName} · ${REVIEW_LABEL[last].toLowerCase()} last time`;
+  return `${roomName} · ${card.kind === 'answer' ? 'saved answer' : 'new note'}`;
+}
+
 export function ReviewScreen() {
   const params = useLocalSearchParams<{ id?: string | string[]; chunk?: string | string[] }>();
   const roomId = one(params.id);
@@ -118,6 +124,7 @@ export function ReviewScreen() {
   const [done, setDone] = useState(0);
   const [outcomes, setOutcomes] = useState<(ReviewState | 'skipped')[]>([]);
   const [scheduled, setScheduled] = useState<Scheduled[]>([]);
+  const [lastState, setLastState] = useState<Record<string, ReviewState>>({});
   const [saved, setSaved] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [missing, setMissing] = useState(false);
@@ -190,7 +197,12 @@ export function ReviewScreen() {
           : [],
       ),
     ].sort((left, right) => left.dueAt - right.dueAt || left.key.localeCompare(right.key));
-    return { missing: false, room: found, cards, scheduled };
+    const last: Record<string, ReviewState> = {};
+    latest.forEach((mark, id) => { last[id] = mark.state; });
+    answerMarks.forEach((mark) => {
+      if (mark) last[mark.annotationId] = mark.state;
+    });
+    return { missing: false, room: found, cards, scheduled, last };
   }, [db, roomId, startChunkId]);
 
   useFocusEffect(useCallback(() => {
@@ -211,6 +223,7 @@ export function ReviewScreen() {
         setSessionDue([]);
         setStartedAt(Date.now());
         setScheduled(next.scheduled);
+        setLastState(next.last ?? {});
         setSaved(null);
         setError(null);
         setLoading(false);
@@ -245,6 +258,10 @@ export function ReviewScreen() {
   const shownError = error ?? (pending
     ? `The previous ${REVIEW_LABEL[pending.payload.state]} mark did not finish. Retry that choice. It will not be counted twice.`
     : null);
+
+  // The last note's mark did not save: stay on the summary and offer a retry.
+  const reviewedAny = tally.got_it + tally.unclear + tally.missed > 0;
+  const showDone = reviewedAny && (!card ? total > 0 && done > 0 : cards.length === 1 && pending !== null);
 
   async function mark(state: ReviewState) {
     if (!card || !roomId || marking.current) return;
@@ -420,14 +437,12 @@ export function ReviewScreen() {
               </View>
               {card ? (
                 <Text testID="review-progress" style={[theme.text('caption'), { color: tertiary, minWidth: 44, textAlign: 'center', fontVariant: ['tabular-nums'] }]}>
-                  {card.kind === 'answer'
-                    ? `Answer ${Math.min(done + 1, total)} of ${total}`
-                    : `Note ${Math.min(done + 1, total)} of ${total}`}
+                  {`${Math.min(done + 1, total)} / ${total}`}
                 </Text>
               ) : null}
             </View>
             {loading ? <ActivityIndicator color={theme.color.accent.bg} /> : null}
-            {shownError ? <Notice tone="danger" testID="review-error">{shownError}</Notice> : null}
+            {shownError && !(showDone && !error) ? <Notice tone="danger" testID="review-error">{shownError}</Notice> : null}
             {!loading && missing ? (
               <EmptyState title="This room was not found." body="It may have been deleted on this device.">
                 <Button label="Back to rooms" size="compact" onPress={() => router.replace('/')} />
@@ -436,17 +451,18 @@ export function ReviewScreen() {
             {!loading && room ? (
               <View style={{ flexGrow: 1, gap: theme.space.base }}>
                 {saved ? <Notice tone="success" testID="review-saved">{saved}</Notice> : null}
-                {card && asked ? (
+                {card && asked && !showDone ? (
                   <>
                     <View accessibilityLabel="Question" style={[cardStyle, theme.shadow.card]}>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: theme.space.md }}>
                         <Text testID="review-stage" numberOfLines={1} style={[theme.text('eyebrow'), { flex: 1, color: tertiary }]}>
-                          {`${room.name} · Stone stage: ${stage}`}
+                          {stageSummary(room.name, card, lastState)}
                         </Text>
                         <Text testID="review-revision" style={[theme.text('caption'), { color: tertiary }]}>
                           {card.kind === 'answer' ? `Revision ${card.answer.chunkRevision}` : `Revision ${card.chunk.revision}`}
                         </Text>
                       </View>
+                      <Text style={[theme.text('caption'), { color: tertiary }]}>Practice question</Text>
                       {asked.ok ? (
                         <Text testID="review-question" accessibilityRole="header" style={[theme.text('actionTitle'), { color: ink, fontSize: 22, lineHeight: 28, letterSpacing: -0.4 }]}>
                           {asked.question.split('\n')[0]}
@@ -480,7 +496,8 @@ export function ReviewScreen() {
                       <Text style={[theme.text('nav'), { color: muted }]}>{card.kind === 'answer' ? 'Skip this answer' : 'Skip this note'}</Text>
                     </Pressable>
                   </>
-                ) : total > 0 && done > 0 && tally.got_it + tally.unclear + tally.missed > 0 ? (
+                ) : null}
+                {showDone ? (
                   <ReviewDone
                     roomName={room.name}
                     stage={stage}
@@ -488,16 +505,17 @@ export function ReviewScreen() {
                     tally={tally}
                     minutes={Math.round((finishedAt - startedAt) / 60000)}
                     nextUp={nextUpSummary(sessionDue, finishedAt)}
+                    unsaved={pending ? { count: 1, busy, onRetry: () => void mark(pending.payload.state) } : null}
                     onToday={() => router.replace('/today')}
                     onHome={() => router.replace('/stone')}
                   />
-                ) : (
+                ) : !(card && asked) ? (
                   <EmptyState
                     testID="review-empty"
                     title={total === 0 && scheduled.length === 0 ? 'No notes to review.' : 'Nothing is due right now.'}
                     body={total === 0 && scheduled.length === 0 ? 'Add notes to this room, then come back to review them.' : 'Marked notes come back on the day shown below.'}
                   />
-                )}
+                ) : null}
                 {scheduled.length ? (
                   <View style={{ gap: theme.space.xl }} testID="review-schedule">
                     <SectionTitle>Coming up</SectionTitle>

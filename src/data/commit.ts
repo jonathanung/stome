@@ -10,9 +10,10 @@
  */
 
 import type { Db, SqlValue } from '../db/driver.ts';
-import { ANNOTATION_TYPES, REVIEW_STATES, type ReviewState } from '../db/schema.ts';
+import { ANNOTATION_TYPES, REVIEW_STATES, STUDY_QUESTION_KINDS, type ReviewState } from '../db/schema.ts';
 import {
   LIMITS,
+  NEEDS_CONFIRMATION,
   NEEDS_REVISION,
   OP_KINDS,
   PERMISSIONS,
@@ -25,6 +26,7 @@ import {
   type Payloads,
   type Results,
 } from './operations.ts';
+import type { SlideItem } from './models.ts';
 
 export interface CommitDeps {
   now(): number;
@@ -92,6 +94,112 @@ export function normalizeSubjects(v: unknown): string[] {
   }
   if (out.length > LIMITS.subjects) reject('invalid', `at most ${LIMITS.subjects} subjects`);
   return out;
+}
+
+/* ------------------------------------------------------- study shapes */
+
+function studyTitle(v: unknown, field = 'title'): string {
+  if (typeof v !== 'string') return reject('invalid', `${field} must be text`);
+  const title = v.trim().replace(/\s+/g, ' ');
+  if (title.length === 0) reject('invalid', `${field} cannot be empty`);
+  if (title.length > LIMITS.studyTitle) reject('invalid', `${field} is longer than ${LIMITS.studyTitle} characters`);
+  return title;
+}
+
+function studyText(v: unknown, field: string): string {
+  if (typeof v !== 'string') return reject('invalid', `${field} must be text`);
+  if (v.trim().length === 0) reject('invalid', `${field} cannot be empty`);
+  if (v.length > LIMITS.studyText) reject('invalid', `${field} is longer than ${LIMITS.studyText} characters`);
+  return v;
+}
+
+/** Non-empty unique chunk ids that ground one generated row. */
+function sourceChunkIds(v: unknown): string[] {
+  if (!Array.isArray(v) || v.length === 0) reject('invalid', 'sourceChunkIds must be a non-empty list');
+  const ids = (v as unknown[]).map((id) => requireId(id, 'sourceChunkIds[]'));
+  if (new Set(ids).size !== ids.length) reject('invalid', 'sourceChunkIds must be unique');
+  return ids;
+}
+
+/** Caller-taken revision snapshot. Presence is validated here; staleness is read-time. */
+function sourceRevision(v: unknown): number {
+  if (!isInt(v) || (v as number) < 1) reject('invalid', 'sourceRevision must be a positive integer');
+  return v as number;
+}
+
+function studyPosition(v: unknown): number | undefined {
+  if (v !== undefined && (!isInt(v) || (v as number) < 0)) reject('invalid', 'position must be a non-negative integer');
+  return v as number | undefined;
+}
+
+function studyChoices(kind: string, v: unknown): string[] {
+  if (kind !== 'mcq') {
+    if (v !== undefined && (!Array.isArray(v) || (v as unknown[]).length !== 0)) {
+      reject('invalid', 'only mcq questions take choices');
+    }
+    return [];
+  }
+  if (!Array.isArray(v) || v.length < 2 || v.length > LIMITS.studyChoices) {
+    reject('invalid', `mcq needs 2 to ${LIMITS.studyChoices} choices`);
+  }
+  return (v as unknown[]).map((choice, i) => {
+    if (typeof choice !== 'string' || choice.trim().length === 0) reject('invalid', `choice ${i + 1} cannot be empty`);
+    if ((choice as string).length > LIMITS.studyChoice) reject('invalid', `choice ${i + 1} is too long`);
+    return choice as string;
+  });
+}
+
+function studyAnswer(kind: string, v: unknown, choices: string[]): string {
+  if (typeof v !== 'string' || v.trim().length === 0) reject('invalid', 'answer cannot be empty');
+  const answer = v as string;
+  if (answer.length > LIMITS.studyChoice) reject('invalid', 'answer is too long');
+  if (kind === 'true_false' && answer !== 'true' && answer !== 'false') {
+    reject('invalid', 'a true_false answer must be "true" or "false"');
+  }
+  if (kind === 'mcq' && !choices.includes(answer)) reject('invalid', 'an mcq answer must be one of the choices');
+  return answer;
+}
+
+function studyResults(v: unknown, total: number): { questionId: string; correct: boolean }[] {
+  if (!Array.isArray(v) || v.length !== total) reject('invalid', 'results must cover every question exactly once');
+  const seen = new Set<string>();
+  return (v as unknown[]).map((entry) => {
+    if (!isObject(entry)) reject('invalid', 'each result needs a questionId and a correct flag');
+    const questionId = requireId((entry as Record<string, unknown>).questionId, 'results[].questionId');
+    if (typeof (entry as Record<string, unknown>).correct !== 'boolean') reject('invalid', 'each result needs a correct flag');
+    if (seen.has(questionId)) reject('invalid', 'results must not repeat a question');
+    seen.add(questionId);
+    return { questionId, correct: (entry as Record<string, unknown>).correct as boolean };
+  });
+}
+
+function studySlides(v: unknown): SlideItem[] {
+  if (!Array.isArray(v) || v.length === 0 || v.length > LIMITS.studySlides) {
+    reject('invalid', `slides must be 1 to ${LIMITS.studySlides} items`);
+  }
+  return (v as unknown[]).map((slide, i) => {
+    if (!isObject(slide)) reject('invalid', `slide ${i + 1} must be an object`);
+    const s = slide as Record<string, unknown>;
+    const title = studyTitle(s.title, `slides[${i}].title`);
+    if (!Array.isArray(s.bullets) || s.bullets.length === 0 || s.bullets.length > LIMITS.studyBullets) {
+      reject('invalid', `slides[${i}].bullets must be 1 to ${LIMITS.studyBullets} items`);
+    }
+    const bullets = (s.bullets as unknown[]).map((bullet, j) => {
+      if (typeof bullet !== 'string' || bullet.trim().length === 0) reject('invalid', `slides[${i}].bullets[${j}] cannot be empty`);
+      if ((bullet as string).length > LIMITS.studyBullet) reject('invalid', `slides[${i}].bullets[${j}] is too long`);
+      return bullet as string;
+    });
+    const notes = s.notes === undefined || (typeof s.notes === 'string' && s.notes.trim().length === 0)
+      ? ''
+      : studyText(s.notes, `slides[${i}].notes`);
+    return {
+      title,
+      bullets,
+      notes,
+      sourceChunkIds: sourceChunkIds(s.sourceChunkIds),
+      sourceRevision: sourceRevision(s.sourceRevision),
+    };
+  });
 }
 
 type Normalized = { [K in OpKind]: { kind: K; payload: Payloads[K] } }[OpKind];
@@ -198,6 +306,101 @@ function normalize(op: Operation): Normalized {
         },
       };
     }
+    case 'study.deck.create':
+      return {
+        kind: op.kind,
+        payload: {
+          deckId: optionalId(p.deckId, 'deckId'),
+          roomId: requireId(p.roomId, 'roomId'),
+          title: studyTitle(p.title),
+          sourceChunkIds: sourceChunkIds(p.sourceChunkIds),
+          sourceRevision: sourceRevision(p.sourceRevision),
+        },
+      };
+    case 'study.card.create':
+      return {
+        kind: op.kind,
+        payload: {
+          cardId: optionalId(p.cardId, 'cardId'),
+          deckId: requireId(p.deckId, 'deckId'),
+          roomId: requireId(p.roomId, 'roomId'),
+          front: studyText(p.front, 'front'),
+          back: studyText(p.back, 'back'),
+          position: studyPosition(p.position),
+          sourceChunkIds: sourceChunkIds(p.sourceChunkIds),
+          sourceRevision: sourceRevision(p.sourceRevision),
+        },
+      };
+    case 'study.quiz.create':
+      return {
+        kind: op.kind,
+        payload: {
+          quizId: optionalId(p.quizId, 'quizId'),
+          roomId: requireId(p.roomId, 'roomId'),
+          title: studyTitle(p.title),
+          sourceChunkIds: sourceChunkIds(p.sourceChunkIds),
+          sourceRevision: sourceRevision(p.sourceRevision),
+        },
+      };
+    case 'study.question.create': {
+      if (!(STUDY_QUESTION_KINDS as readonly string[]).includes(p.kind as string)) {
+        reject('invalid', `unknown question kind "${String(p.kind)}"`);
+      }
+      const kind = p.kind as Payloads['study.question.create']['kind'];
+      const choices = studyChoices(kind, p.choices);
+      const answer = studyAnswer(kind, p.answer, choices);
+      return {
+        kind: op.kind,
+        payload: {
+          questionId: optionalId(p.questionId, 'questionId'),
+          quizId: requireId(p.quizId, 'quizId'),
+          roomId: requireId(p.roomId, 'roomId'),
+          kind,
+          stem: studyText(p.stem, 'stem'),
+          choices,
+          answer,
+          explanation: p.explanation === undefined ? '' : studyText(p.explanation, 'explanation'),
+          position: studyPosition(p.position),
+          sourceChunkIds: sourceChunkIds(p.sourceChunkIds),
+          sourceRevision: sourceRevision(p.sourceRevision),
+        },
+      };
+    }
+    case 'study.attempt.save': {
+      if (typeof p.scorePct !== 'number' || !Number.isFinite(p.scorePct) || p.scorePct < 0 || p.scorePct > 100) {
+        reject('invalid', 'scorePct must be between 0 and 100');
+      }
+      const scorePct = p.scorePct as number;
+      if (!isInt(p.correct) || (p.correct as number) < 0) reject('invalid', 'correct must be a non-negative integer');
+      if (!isInt(p.total) || (p.total as number) < 1) reject('invalid', 'total must be a positive integer');
+      if ((p.correct as number) > (p.total as number)) reject('invalid', 'correct cannot exceed total');
+      if (!isInt(p.durationMs) || (p.durationMs as number) < 0) reject('invalid', 'durationMs must be a non-negative integer');
+      return {
+        kind: op.kind,
+        payload: {
+          attemptId: optionalId(p.attemptId, 'attemptId'),
+          quizId: requireId(p.quizId, 'quizId'),
+          roomId: requireId(p.roomId, 'roomId'),
+          scorePct,
+          correct: p.correct as number,
+          total: p.total as number,
+          results: studyResults(p.results, p.total as number),
+          durationMs: p.durationMs as number,
+        },
+      };
+    }
+    case 'study.slide-outline.create':
+      return {
+        kind: op.kind,
+        payload: {
+          outlineId: optionalId(p.outlineId, 'outlineId'),
+          roomId: requireId(p.roomId, 'roomId'),
+          title: studyTitle(p.title),
+          slides: studySlides(p.slides),
+          sourceChunkIds: sourceChunkIds(p.sourceChunkIds),
+          sourceRevision: sourceRevision(p.sourceRevision),
+        },
+      };
   }
 }
 
@@ -349,6 +552,32 @@ async function expectRevision(found: RevisionRow | null, expected: number | unde
   if (expected !== undefined && found!.revision !== expected) {
     reject('stale_revision', `${what} changed elsewhere (now revision ${found!.revision}, expected ${expected})`);
   }
+}
+
+/**
+ * Every generated row is grounded in chunks from one room. A missing chunk
+ * is `not_found`; a chunk from another room rejects the op as `invalid` so a
+ * cross-room generation can never be saved.
+ */
+async function expectSourcesInRoom(db: Db, roomId: string, sourceChunkIds: string[]): Promise<void> {
+  for (const chunkId of sourceChunkIds) {
+    const row = await db.get<{ room_id: string }>('SELECT room_id FROM chunks WHERE id = ?', [chunkId]);
+    if (!row) reject('not_found', `source chunk ${chunkId} does not exist`);
+    if (row!.room_id !== roomId) reject('invalid', 'study materials must come from a single room');
+  }
+}
+
+/** A child study row (card, question, attempt) must live in its parent's room. */
+async function expectStudyParent(
+  db: Db,
+  table: 'study_decks' | 'study_quizzes',
+  parentId: string,
+  what: string,
+  roomId: string,
+): Promise<void> {
+  const row = await db.get<{ room_id: string }>(`SELECT room_id FROM ${table} WHERE id = ?`, [parentId]);
+  if (!row) reject('not_found', `${what} does not exist`);
+  if (row!.room_id !== roomId) reject('invalid', `a study row must live in its parent's room`);
 }
 
 async function apply(db: Db, op: Operation, n: Normalized, deps: CommitDeps): Promise<Results[OpKind]> {
@@ -525,6 +754,96 @@ async function apply(db: Db, op: Operation, n: Normalized, deps: CommitDeps): Pr
       const stage = await creditRoom(db, run, chunk!.room_id, now);
       return { chunkId, annotationId: null, state, localDay: day, markedAt: now, dueAt, timeZone: zone, stage };
     }
+    case 'study.deck.create': {
+      const { roomId, title, sourceChunkIds, sourceRevision } = n.payload;
+      if (!await db.get('SELECT 1 FROM rooms WHERE id = ?', [roomId])) reject('not_found', 'room does not exist');
+      await expectSourcesInRoom(db, roomId, sourceChunkIds);
+      const deckId = n.payload.deckId ?? deps.newId();
+      if (await db.get('SELECT 1 FROM study_decks WHERE id = ?', [deckId])) reject('conflict', 'a deck with that id already exists');
+      await run(
+        'INSERT INTO study_decks (id, room_id, title, source_chunk_ids, source_revision, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [deckId, roomId, title, JSON.stringify(sourceChunkIds), sourceRevision, now, now],
+      );
+      return { deckId };
+    }
+    case 'study.card.create': {
+      const { deckId, roomId, front, back, sourceChunkIds, sourceRevision } = n.payload;
+      await expectStudyParent(db, 'study_decks', deckId, 'deck', roomId);
+      await expectSourcesInRoom(db, roomId, sourceChunkIds);
+      const count = (await db.get<{ n: number }>('SELECT COUNT(*) AS n FROM study_cards WHERE deck_id = ?', [deckId]))!.n;
+      const position = Math.min(n.payload.position ?? count, count);
+      const cardId = n.payload.cardId ?? deps.newId();
+      if (await db.get('SELECT 1 FROM study_cards WHERE id = ?', [cardId])) reject('conflict', 'a card with that id already exists');
+      if (position < count) {
+        await run('UPDATE study_cards SET position = position + 1 WHERE deck_id = ? AND position >= ?', [deckId, position]);
+      }
+      await run(
+        'INSERT INTO study_cards (id, deck_id, room_id, position, front, back, source_chunk_ids, source_revision, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [cardId, deckId, roomId, position, front, back, JSON.stringify(sourceChunkIds), sourceRevision, now, now],
+      );
+      return { cardId };
+    }
+    case 'study.quiz.create': {
+      const { roomId, title, sourceChunkIds, sourceRevision } = n.payload;
+      if (!await db.get('SELECT 1 FROM rooms WHERE id = ?', [roomId])) reject('not_found', 'room does not exist');
+      await expectSourcesInRoom(db, roomId, sourceChunkIds);
+      const quizId = n.payload.quizId ?? deps.newId();
+      if (await db.get('SELECT 1 FROM study_quizzes WHERE id = ?', [quizId])) reject('conflict', 'a quiz with that id already exists');
+      await run(
+        'INSERT INTO study_quizzes (id, room_id, title, source_chunk_ids, source_revision, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [quizId, roomId, title, JSON.stringify(sourceChunkIds), sourceRevision, now, now],
+      );
+      return { quizId };
+    }
+    case 'study.question.create': {
+      const { quizId, roomId, kind, stem, choices, answer, explanation = '', sourceChunkIds, sourceRevision } = n.payload;
+      await expectStudyParent(db, 'study_quizzes', quizId, 'quiz', roomId);
+      await expectSourcesInRoom(db, roomId, sourceChunkIds);
+      const count = (await db.get<{ n: number }>('SELECT COUNT(*) AS n FROM study_questions WHERE quiz_id = ?', [quizId]))!.n;
+      const position = Math.min(n.payload.position ?? count, count);
+      const questionId = n.payload.questionId ?? deps.newId();
+      if (await db.get('SELECT 1 FROM study_questions WHERE id = ?', [questionId])) reject('conflict', 'a question with that id already exists');
+      if (position < count) {
+        await run('UPDATE study_questions SET position = position + 1 WHERE quiz_id = ? AND position >= ?', [quizId, position]);
+      }
+      await run(
+        'INSERT INTO study_questions (id, quiz_id, room_id, position, kind, stem, choices, answer, explanation, source_chunk_ids, source_revision, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [questionId, quizId, roomId, position, kind, stem, JSON.stringify(choices), answer, explanation, JSON.stringify(sourceChunkIds), sourceRevision, now, now],
+      );
+      return { questionId };
+    }
+    case 'study.attempt.save': {
+      const { quizId, roomId, scorePct, correct, total, results, durationMs } = n.payload;
+      await expectStudyParent(db, 'study_quizzes', quizId, 'quiz', roomId);
+      const known = new Set(
+        (await db.all<{ id: string }>('SELECT id FROM study_questions WHERE quiz_id = ?', [quizId])).map((row) => row.id),
+      );
+      for (const result of results) {
+        if (!known.has(result.questionId)) reject('not_found', `question ${result.questionId} is not part of this quiz`);
+      }
+      const attemptId = n.payload.attemptId ?? deps.newId();
+      if (await db.get('SELECT 1 FROM study_attempts WHERE id = ?', [attemptId])) reject('conflict', 'an attempt with that id already exists');
+      await run(
+        'INSERT INTO study_attempts (id, quiz_id, room_id, score_pct, correct, total, results, duration_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [attemptId, quizId, roomId, scorePct, correct, total, JSON.stringify(results), durationMs, now],
+      );
+      return { attemptId };
+    }
+    case 'study.slide-outline.create': {
+      const { roomId, title, slides, sourceChunkIds, sourceRevision } = n.payload;
+      if (!await db.get('SELECT 1 FROM rooms WHERE id = ?', [roomId])) reject('not_found', 'room does not exist');
+      await expectSourcesInRoom(db, roomId, sourceChunkIds);
+      for (const slide of slides) {
+        await expectSourcesInRoom(db, roomId, slide.sourceChunkIds);
+      }
+      const outlineId = n.payload.outlineId ?? deps.newId();
+      if (await db.get('SELECT 1 FROM slide_outlines WHERE id = ?', [outlineId])) reject('conflict', 'an outline with that id already exists');
+      await run(
+        'INSERT INTO slide_outlines (id, room_id, title, slides, source_chunk_ids, source_revision, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [outlineId, roomId, title, JSON.stringify(slides), JSON.stringify(sourceChunkIds), sourceRevision, now, now],
+      );
+      return { outlineId };
+    }
   }
 }
 
@@ -548,8 +867,17 @@ export function createCommit(db: Db, deps: CommitDeps): Commit {
     try {
       normalized = normalize(op);
       if (!PERMISSIONS[op.source].has(op.kind)) reject('forbidden', `${op.source} changes cannot ${op.kind}`);
-      if ((op.source === 'ai' || op.kind === 'room.delete' || op.kind === 'import.note') && !op.confirmed) {
-        reject('unconfirmed', op.kind === 'import.note' ? 'importing needs review and confirmation' : op.source === 'ai' ? 'AI changes need confirmation' : 'deleting a room needs confirmation');
+      if ((op.source === 'ai' || NEEDS_CONFIRMATION.has(op.kind)) && !op.confirmed) {
+        reject(
+          'unconfirmed',
+          op.kind === 'import.note'
+            ? 'importing needs review and confirmation'
+            : op.source === 'ai'
+              ? 'AI changes need confirmation'
+              : op.kind === 'room.delete'
+                ? 'deleting a room needs confirmation'
+                : 'confirm this change before saving it',
+        );
       }
     } catch (error) {
       return failure(error);
