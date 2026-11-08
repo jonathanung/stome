@@ -104,7 +104,11 @@ async function addNote(text) {
 
 try {
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 });
-  await page.waitForSelector('[aria-label="New room name"]', { timeout: 90000 });
+  await page.waitForFunction(() => /Your rooms|Study rooms|\brooms\b/.test(document.body.innerText), { timeout: 90000 });
+  if (!(await page.$('[aria-label="New room name"]'))) {
+    await clickButton('New room');
+  }
+  await page.waitForSelector('[aria-label="New room name"]', { timeout: 15000 });
   const failure = await page.$('[role="alert"]');
   if (failure) {
     const message = await page.evaluate((element) => element.textContent, failure);
@@ -114,7 +118,10 @@ try {
   await page.click('[aria-label="New room name"]');
   await page.type('[aria-label="New room name"]', 'Biology');
   await clickButton('Create');
-  await page.waitForFunction(() => document.body.innerText.includes('Stone stage: stonehenge'), { timeout: 20000 });
+  await page.waitForFunction(() => {
+    const text = document.body.innerText;
+    return text.includes('Biology') && text.includes('Add note');
+  }, { timeout: 20000 });
   const roomUrl = page.url();
 
   await addNote('recover me');
@@ -173,7 +180,7 @@ try {
   await clickButton('Got it');
   await page.waitForFunction(() => {
     const text = document.body.innerText;
-    return text.includes('Saved Got it.') && text.includes('Stone stage: brick') && text.includes('Nothing is due right now.');
+    return text.includes('Saved Got it.') && text.includes('is brick') && text.includes('Coming up');
   }, { timeout: 15000 });
   await assertNoPairingToken('review-screen');
   const scheduled = await page.$eval('[data-testid="review-schedule"]', (element) => element.innerText);
@@ -187,8 +194,7 @@ try {
   await page.waitForFunction(() => {
     const text = document.body.innerText;
     return !location.pathname.includes('/review')
-      && text.includes('Stone stage: brick')
-      && text.includes('Review notes')
+      && text.includes('Brick')
       && text.includes('Add note');
   }, { timeout: 15000 });
   const token = await page.$('[data-testid="pairing-token"]');
@@ -201,8 +207,11 @@ try {
   await page.waitForSelector('[data-testid="review-schedule"]', { timeout: 15000 });
 
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('[data-testid="review-stage"]', { timeout: 20000 });
-  await page.waitForFunction(() => document.body.innerText.includes('Nothing is due right now.') && document.body.innerText.includes('Stone stage: brick'), { timeout: 15000 });
+  await page.waitForSelector('[data-testid="review-screen"]', { timeout: 20000 });
+  await page.waitForFunction(() => {
+    const text = document.body.innerText;
+    return text.includes('Coming up') && text.includes('Nothing is due right now.');
+  }, { timeout: 15000 });
   const reloaded = await page.$eval('[data-testid="review-schedule"]', (element) => element.innerText);
   if (reloaded !== scheduled) throw new Error(`schedule changed after reload\n${reloaded}\n${scheduled}`);
   await assertNoPairingToken('review-screen');

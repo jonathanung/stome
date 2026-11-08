@@ -3,9 +3,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { pathToFileURL } from 'node:url';
 
 import { COMPANION_RAW_BODY_LIMIT, companionOriginAllowed, devWebPorts } from '../src/harness/companionAddress.ts';
-import { PAIRING_TTL_MS, HarnessError, type HarnessErrorCode } from '../src/harness/contract.ts';
+import { ALLOWED_TOOL_NAMES, PAIRING_TTL_MS, HarnessError, type HarnessErrorCode } from '../src/harness/contract.ts';
 import { createProvider, type Provider, type ProviderRequest } from '../src/harness/provider.ts';
-import { ALLOWED_TOOL_NAMES } from '../src/harness/contract.ts';
 import type { CompanionStatus } from '../src/harness/tools.ts';
 
 const LOOPBACK_HOST = '127.0.0.1';
@@ -143,8 +142,17 @@ export function startCompanion(options: CompanionOptions): Promise<CompanionHand
 }
 
 async function handle(request: IncomingMessage, response: ServerResponse, options: CompanionOptions): Promise<void> {
-  const origin = request.headers.origin;
-  const cors = corsHeaders(typeof origin === 'string' ? origin : undefined, options);
+  const rawOrigin = request.headers.origin;
+  const origin = typeof rawOrigin === 'string' && rawOrigin.length > 0 ? rawOrigin : undefined;
+  // Expo Go on Android does not send Origin. A loopback client with no Origin
+  // is not a foreign web page. A present Origin still has to match the configured
+  // origin or a local web origin.
+  const cors = origin === undefined
+    ? {
+        'access-control-allow-methods': 'GET, POST, OPTIONS',
+        'access-control-allow-headers': 'content-type, x-stome-token',
+      }
+    : corsHeaders(origin, options);
   const remote = request.socket.remoteAddress;
   if (!isLoopback(remote)) {
     sendJson(response, 403, { ok: false, error: { code: 'forbidden', message: 'The companion accepts loopback clients only' } }, {});

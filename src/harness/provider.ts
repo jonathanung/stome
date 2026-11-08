@@ -28,14 +28,14 @@ import {
   type StudyQuizDraft,
   type StudySlideOutlineDraft,
   type StudyToolName,
-} from './contract';
+} from './contract.ts';
 import {
   StudyGeneratorError,
   generateDeck,
   generateQuiz,
   generateSlideOutline,
 } from '../features/study/generator.ts';
-import { isReadTool, mockReadToolOutput, parseReadToolInput, parseReadToolOutput, type ReadToolName } from './tools';
+import { isReadTool, mockReadToolOutput, parseReadToolInput, parseReadToolOutput, type ReadToolName } from './tools.ts';
 
 export type NoteToolName = typeof TOOL_NAME | typeof EDIT_TOOL_NAME | typeof STROKE_TOOL_NAME;
 
@@ -221,13 +221,34 @@ export async function mockComplete(
   if (request.tool !== TOOL_NAME && request.tool !== EDIT_TOOL_NAME && request.tool !== STROKE_TOOL_NAME) {
     throw new HarnessError('invalid_shape', 'The mock provider only runs the allowed tools');
   }
-  const editing = request.tool === EDIT_TOOL_NAME;
-  const stroking = request.tool === STROKE_TOOL_NAME;
   if (!MOCK_SCENARIOS.includes(request.scenario)) {
     throw new HarnessError('invalid_shape', 'The mock scenario is unknown');
   }
   if (signal.aborted) {
     throw abortError(signal);
+  }
+  if (request.scenario === 'cancel') {
+    const input = parseProposeInput(request.input);
+    if (requestCharCount(input) > PROVIDER_LIMITS.maxRequestChars) {
+      throw new HarnessError('request_limit', 'The question and selected notes are over the request limit');
+    }
+    return await waitForCancel(signal);
+  }
+  return settleMockRequest(request);
+}
+
+/**
+ * One deterministic mock result. `cancel` is a terminal error here.
+ * `mockComplete` waits for the abort signal instead of settling immediately.
+ */
+export function settleMockRequest(request: ProviderRequest): unknown {
+  if (request.tool !== TOOL_NAME && request.tool !== EDIT_TOOL_NAME && request.tool !== STROKE_TOOL_NAME) {
+    throw new HarnessError('invalid_shape', 'The mock provider only runs the allowed tools');
+  }
+  const editing = request.tool === EDIT_TOOL_NAME;
+  const stroking = request.tool === STROKE_TOOL_NAME;
+  if (!MOCK_SCENARIOS.includes(request.scenario)) {
+    throw new HarnessError('invalid_shape', 'The mock scenario is unknown');
   }
   const input = parseProposeInput(request.input);
   if (requestCharCount(input) > PROVIDER_LIMITS.maxRequestChars) {
@@ -240,7 +261,7 @@ export async function mockComplete(
     throw new HarnessError('provider_error', 'The mock provider failed before answering');
   }
   if (request.scenario === 'cancel') {
-    return await waitForCancel(signal);
+    throw new HarnessError('cancelled', 'The provider call was cancelled');
   }
   if (request.scenario === 'oversize') {
     const body = 'x'.repeat(PROVIDER_LIMITS.maxOutputChars + 1);

@@ -1,10 +1,12 @@
 /**
- * Pure review-session helpers. Writes stay in createCommit; this file only
- * decides which note to show and builds the human review.mark operation.
+ * Review-session helpers. Writes stay in createCommit. A question is the
+ * deterministic mock provider's answer and is not saved.
  */
 
 import type { Operation } from '../../data/operations.ts';
 import type { ReviewState } from '../../db/schema.ts';
+import { HarnessError, TOOL_NAME, parseProposeOutput, type MockScenario } from '../../harness/contract.ts';
+import { settleMockRequest } from '../../harness/provider.ts';
 
 export const REVIEW_LABEL: Record<ReviewState, string> = {
   missed: 'Missed',
@@ -105,6 +107,8 @@ export function orderReviewQueue<T extends { id: string }>(
   return requested ? [requested, ...ready] : [...ready];
 }
 
+const REVIEW_QUESTION_PROMPT = 'What should you remember from this note?';
+
 /**
  * Pinned `ai_answer` annotations with no mark, plus pins whose latest answer
  * mark is already due. Input order is kept (room annotations arrive in room
@@ -186,20 +190,50 @@ export function reviewQueueForRoom(input: {
 }
 
 /**
- * Local fallback question, used when the companion is not paired or fails.
- * The same note text always yields the same local prompt. An empty note errors.
+ * Question for one note from the HAR.3 mock provider (`notes.proposeAnnotation`).
+ * There is no review-question tool and no live model. The same chunk id and
+ * trimmed text always settle to the same answer. A provider error is a message
+ * the screen can skip or mark past.
  */
-export function localReviewQuestion(chunk: { id: string; body: string }):
+export function mockReviewQuestion(
+  chunk: { id: string; roomId: string; body: string },
+  scenario: MockScenario = 'success',
+):
   | { ok: true; question: string }
   | { ok: false; message: string } {
   const text = chunk.body.trim();
-  if (!text) {
+  try {
+    const output = settleMockRequest({
+      tool: TOOL_NAME,
+      scenario,
+      input: {
+        roomId: chunk.roomId,
+        prompt: REVIEW_QUESTION_PROMPT,
+        chunks: [{ id: chunk.id, roomId: chunk.roomId, text }],
+        priorMessages: [],
+      },
+    });
+    return { ok: true, question: parseProposeOutput(output).body };
+  } catch (error) {
+    if (text.length === 0) {
+      return {
+        ok: false,
+        message: 'Could not make a question for this empty note. You can mark it or skip to the next one.',
+      };
+    }
+    if (error instanceof HarnessError) return { ok: false, message: error.message };
     return {
       ok: false,
-      message: 'Could not make a question for this empty note. You can mark it or skip to the next one.',
+      message: 'Could not make a question for this note. You can mark it or skip to the next one.',
     };
   }
-  return { ok: true, question: `What should you remember from this note?\n\n${text}` };
+}
+
+/** Unpaired review uses the same HAR.3 mock answer. It does not call a live model. */
+export function localReviewQuestion(chunk: { id: string; body: string; roomId?: string }):
+  | { ok: true; question: string }
+  | { ok: false; message: string } {
+  return mockReviewQuestion({ id: chunk.id, roomId: chunk.roomId ?? chunk.id, body: chunk.body });
 }
 
 export function deviceTimeZone(): string {

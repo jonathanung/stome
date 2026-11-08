@@ -3,9 +3,9 @@
  * local fallback. No writes here: a question never changes a note or a mark.
  */
 
-import { HarnessError, type MockScenario } from '../../harness/contract';
-import { completeReadTool, type Provider } from '../../harness/provider';
-import { REVIEW_TOOL_NAME, type ReviewQuestionOutput } from '../../harness/tools';
+import { HarnessError, type MockScenario } from '../../harness/contract.ts';
+import { completeReadTool, type Provider } from '../../harness/provider.ts';
+import { REVIEW_TOOL_NAME, type ReviewQuestionOutput } from '../../harness/tools.ts';
 
 export type CompanionQuestion = { source: 'companion'; question: string; answer: string };
 

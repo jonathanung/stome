@@ -12,7 +12,7 @@ import {
   exactKeys,
   isRecord,
   requireString,
-} from './contract';
+} from './contract.ts';
 
 export const REVIEW_TOOL_NAME = 'review.generateQuestion' as const;
 export const BOARD_TOOL_NAME = 'board.proposeStickies' as const;

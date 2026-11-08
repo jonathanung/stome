@@ -6,6 +6,7 @@ import {
   useFonts,
 } from '@expo-google-fonts/inter';
 import { Outfit_700Bold, Outfit_800ExtraBold, Outfit_900Black } from '@expo-google-fonts/outfit';
+import { getRandomBytes } from 'expo-crypto';
 import { SQLiteProvider, type SQLiteDatabase } from 'expo-sqlite';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -18,9 +19,12 @@ import { migrateDb } from '../db/migrate';
 import { DATABASE_NAME } from '../db/schema';
 import { classifyStorageFailure, createStorageRetryGate, finishStartup } from '../db/storage-startup';
 import { QuickCapture } from '../features/capture/QuickCapture';
+import { installHarnessRandomBytes } from '../harness/ids';
 import { AppShell } from '../ui/shell/AppShell';
 import { StorageOpening, StorageStartupScreen } from '../screens/StorageStartup';
 import { stackHeaderOptions } from '../theme/stack-header';
+
+installHarnessRandomBytes((size) => getRandomBytes(size));
 
 function prepareDatabase(db: SQLiteDatabase): Promise<void> {
   return finishStartup(

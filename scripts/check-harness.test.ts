@@ -1225,6 +1225,9 @@ test('companion allows the configured origin, local app origins, the token, and 
 
   const wrongOrigin = await post(companion.url, { origin: 'http://evil.example', token: companion.token, body });
   assert.equal(wrongOrigin.status, 403);
+  const noOrigin = await post(companion.url, { token: companion.token, body });
+  assert.equal(noOrigin.status, 200);
+  assert.match(noOrigin.text, /Mock answer/);
   const suffix = await post(companion.url, {
     origin: 'http://localhost:8081.evil.example',
     token: companion.token,
@@ -2247,3 +2250,4 @@ function rawPost(
     req.end(input.body);
   });
 }
+

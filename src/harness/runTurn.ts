@@ -43,6 +43,7 @@ import {
   type StudyQuizProposal,
   type StudySlideOutlineDraft,
 } from './contract';
+import { createHarnessId } from './ids';
 import { completeStudyWithLimits, completeWithLimits, type Provider, type StudyProvider } from './provider';
 import {
   cancelRun,
@@ -94,7 +95,7 @@ function nowMs(now?: number): number {
 }
 
 function newId(): string {
-  return globalThis.crypto.randomUUID();
+  return createHarnessId();
 }
 
 export async function beginQuestion(
@@ -484,7 +485,7 @@ export async function confirmFoundationQuestion(
   const quote = current.body.slice(request.payload.anchorStart, request.payload.anchorEnd);
   const commit = createCommit(app, {
     now: () => now,
-    newId: () => globalThis.crypto.randomUUID(),
+    newId,
   });
   const saved = await commit(operationFromAssessment(request, quote));
   if (!saved.ok) {
@@ -551,7 +552,7 @@ async function confirmStroke(
   });
   const commit = createCommit(app, {
     now: () => now,
-    newId: () => globalThis.crypto.randomUUID(),
+    newId: () => createHarnessId(),
   });
   const saved = await commit(operationFromStrokeAssessment(request));
   if (!saved.ok) {
@@ -621,7 +622,7 @@ async function confirmChunkEdit(
   }
   const commit = createCommit(app, {
     now: () => now,
-    newId: () => globalThis.crypto.randomUUID(),
+    newId,
   });
   const saved = await commit({
     opId: operationId,
@@ -896,7 +897,7 @@ export async function confirmStudyProposal(
   }
   const commit = createCommit(app, {
     now: () => now,
-    newId: () => globalThis.crypto.randomUUID(),
+    newId: () => createHarnessId(),
   });
   let confirmation: StudyConfirmation & { replayed: boolean };
   if (isStudyDeckProposal(proposal)) {
