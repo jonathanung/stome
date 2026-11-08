@@ -2,27 +2,32 @@ import { randomUUID } from 'expo-crypto';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
 import {
-  ActivityIndicator, FlatList, KeyboardAvoidingView, Platform,
-  Text, View,
+  ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Platform,
+  Text, TextInput, View, useWindowDimensions,
 } from 'react-native';
 
 import { Button, Screen, useStoneTheme } from '../../design-theme/src/primitives';
 import { createCommit } from '../data/commit';
 import type { Annotation, Chunk, Room } from '../data/models';
 import type { CommitError, CommitResult, OpKind } from '../data/operations';
-import { getRoom, listChunks, listRoomAnnotations } from '../data/queries';
+import { getRoom, listChunks, listDueChunks, listRoomAnnotations } from '../data/queries';
 import { expoDriver } from '../db/expo-driver';
 import { AnchoredChunkText, PinnedAnswer } from '../features/ask/AnchoredChunkText';
 import type { ChunkFocus } from '../features/ask/citations';
 import { ChunkEditor, type EditResult } from '../features/chunks/ChunkEditor';
 import { pastedParagraphs } from '../features/chunks/paste';
-import { ReviewEntry } from '../features/review/ReviewEntry';
+import { InkLassoActions } from '../features/ask/InkLassoActions';
+import { PencilToolbar, type PencilTool } from '../features/ask/PencilToolbar';
+import { RoomAskPanel, type AskMessage } from '../features/ask/RoomAskPanel';
+import { RoomSidePanel } from '../features/room/RoomSidePanel';
+import { PhoneRoomActions, PhoneRoomHeader, RoomTabs, SubjectChips, roomSubjects, type RoomTab } from '../features/room/PhoneRoomChrome';
 import { Icon } from '../ui/Icon';
-import { StageGlyph, stageName } from '../ui/StageGlyph';
-import { BackButton, EmptyState, Field, Notice, SectionTitle, useColumn } from '../ui/kit';
+import { stageName } from '../ui/StageGlyph';
+import { EmptyState, Field, Notice, SectionTitle, useColumn } from '../ui/kit';
 import { HarnessPanel } from './HarnessPanel';
+import { RoomHeader } from './RoomHeader';
 
 function readable(error: CommitError): string {
   if (error.code === 'stale_revision') return 'This chunk was changed somewhere else. Reload to see the latest.';
@@ -98,6 +103,7 @@ export function RoomScreen() {
   const column = useColumn();
   const listRef = useRef<FlatList<ChunkWithAnnotations>>(null);
   const scrollY = useRef(0);
+  const composerRef = useRef<ComponentRef<typeof TextInput>>(null);
   const [focus, setFocus] = useState<ChunkFocus | null>(null);
   const [room, setRoom] = useState<Room | null>(null);
   const [chunks, setChunks] = useState<ChunkWithAnnotations[]>([]);
@@ -110,11 +116,25 @@ export function RoomScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pasteNotice, setPasteNotice] = useState<string | null>(null);
+  const { width } = useWindowDimensions();
+  const phone = width < 600;
+  const splitView = width >= 900 && width < 1300;
+  const wide = width >= 1300;
+  const [dueToday, setDueToday] = useState(0);
+  const [askOpen, setAskOpen] = useState(true);
+  const [askMessages, setAskMessages] = useState<AskMessage[]>([]);
+  const [penTool, setPenTool] = useState<PencilTool>('pen');
+  const [inkSelected, setInkSelected] = useState(true);
+  const [tab, setTab] = useState<RoomTab>('notes');
+  const [subject, setSubject] = useState<string | null>(null);
+  const subjects = useMemo(() => roomSubjects(chunks), [chunks]);
+  const activeSubject = subject && subjects.includes(subject) ? subject : null;
+  const visible = useMemo(() => tab !== 'notes' ? [] : activeSubject ? chunks.filter((chunk) => chunk.subjects.includes(activeSubject)) : chunks, [tab, chunks, activeSubject]);
 
   const load = useCallback(async () => {
-    if (!id) return { room: null, chunks: [] as ChunkWithAnnotations[] };
-    const [nextRoom, notes, annotations] = await Promise.all([
-      getRoom(db, id), listChunks(db, id), listRoomAnnotations(db, id),
+    if (!id) return { room: null, chunks: [] as ChunkWithAnnotations[], due: 0 };
+    const [nextRoom, notes, annotations, due] = await Promise.all([
+      getRoom(db, id), listChunks(db, id), listRoomAnnotations(db, id), listDueChunks(db, Date.now()),
     ]);
     const byChunk = new Map<string, Annotation[]>();
     for (const annotation of annotations) {
@@ -122,7 +142,7 @@ export function RoomScreen() {
       group.push(annotation);
       byChunk.set(annotation.chunkId, group);
     }
-    return { room: nextRoom, chunks: notes.map((chunk) => ({
+    return { room: nextRoom, due: due.filter((d) => d.chunk.roomId === id).length, chunks: notes.map((chunk) => ({
       ...chunk, annotations: byChunk.get(chunk.id) ?? [],
     })) };
   }, [db, id]);
@@ -130,11 +150,12 @@ export function RoomScreen() {
     const next = await load();
     setRoom(next.room);
     setChunks(next.chunks);
+    setDueToday(next.due);
   }, [load]);
   useFocusEffect(useCallback(() => {
     let active = true;
     load().then((next) => {
-      if (active) { setRoom(next.room); setChunks(next.chunks); setLoading(false); }
+      if (active) { setRoom(next.room); setChunks(next.chunks); setDueToday(next.due); setLoading(false); }
     }).catch((reason: unknown) => {
       if (active) { setError(reason instanceof Error ? reason.message : 'Could not load room'); setLoading(false); }
     });
@@ -145,7 +166,7 @@ export function RoomScreen() {
   }, []);
   useEffect(() => {
     if (!focus || focus.end <= focus.start) return;
-    const index = chunks.findIndex((chunk) => chunk.id === focus.chunkId);
+    const index = visible.findIndex((chunk) => chunk.id === focus.chunkId);
     let cancelled = false;
     let attempt = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -169,7 +190,7 @@ export function RoomScreen() {
       cancelAnimationFrame(frame);
       clearTimeout(timer);
     };
-  }, [chunks, focus]);
+  }, [chunks, visible, phone, focus]);
   async function action(run: () => Promise<void>) {
     if (busy) return;
     setBusy(true);
@@ -214,9 +235,9 @@ export function RoomScreen() {
     </EmptyState>
   </View></SafeAreaView></Screen>;
 
-  return <Screen><SafeAreaView style={{ flex: 1 }}>
+  const roomList = <Screen><SafeAreaView style={{ flex: 1 }}>
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-      <FlatList ref={listRef} data={chunks} extraData={focus} keyExtractor={(chunk) => chunk.id} keyboardShouldPersistTaps="handled" testID="chunk-list"
+      <FlatList ref={listRef} data={visible} extraData={focus} keyExtractor={(chunk) => chunk.id} keyboardShouldPersistTaps="handled" testID="chunk-list"
         initialNumToRender={1} maxToRenderPerBatch={1} windowSize={1}
         onScroll={(event) => { scrollY.current = event.nativeEvent.contentOffset.y; }}
         scrollEventThrottle={16}
@@ -228,25 +249,29 @@ export function RoomScreen() {
         }}
         contentContainerStyle={[column, { paddingTop: theme.space.md, paddingBottom: 120, gap: theme.space.xl }]}
         ListHeaderComponent={<View style={{ gap: theme.space.section, marginBottom: theme.space.base }}>
-          <View style={{ gap: theme.space.xs }}>
-            <BackButton label="Rooms" accessibilityLabel="All rooms" onPress={() => router.replace('/')} />
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.base }}>
-              <StageGlyph stage={room.stage} size={56} onCanvas />
-              <View style={{ flex: 1, gap: theme.space.xxs }}>
-                <Text accessibilityRole="header" style={[theme.text('screenTitle'), { color: theme.color.text.primary }]}>{room.name}</Text>
-                <Text style={[theme.text('bodySmall'), { color: theme.color.text.tertiary }]}>
-                  {`${stageName(room.stage)} · ${chunks.length} ${chunks.length === 1 ? 'chunk' : 'chunks'}`}
-                </Text>
-              </View>
-            </View>
-          </View>
-          <ReviewEntry roomId={room.id} />
-          <View style={{ gap: theme.space.xl, backgroundColor: theme.color.bg.surface, borderRadius: theme.radius.float, borderWidth: 1, borderColor: theme.color.border.hairline, padding: theme.space.base, ...theme.shadow.card }}>
+          {phone ? <View style={{ gap: theme.space.lg }}>
+            <PhoneRoomHeader name={room.name} status={`${stageName(room.stage)} · saved`}
+              onBack={() => router.replace('/')} onReview={() => router.push(`/rooms/${room.id}/review`)}
+              onOptions={() => Alert.alert(room.name, undefined, [
+                { text: 'Review this room', onPress: () => router.push(`/rooms/${room.id}/review`) },
+                { text: 'Slides', onPress: () => router.push(`/rooms/${room.id}/slides`) },
+                { text: 'Whiteboard', onPress: () => router.push(`/rooms/${room.id}/whiteboard`) },
+                { text: 'Cancel', style: 'cancel' },
+              ])} />
+            <RoomTabs value={tab} onChange={setTab} />
+            {tab === 'notes' ? <SubjectChips subjects={subjects} value={activeSubject} onChange={setSubject} /> : null}
+          </View> : <>
+            <RoomHeader room={room} chunkCount={chunks.length}
+              onBack={() => router.replace('/')}
+              onAsk={() => listRef.current?.scrollToEnd({ animated: true })}
+              onNewNote={() => { listRef.current?.scrollToOffset({ offset: 0, animated: true }); composerRef.current?.focus(); }} />
+          </>}
+          {phone && tab !== 'notes' ? null : <View style={{ gap: theme.space.xl, backgroundColor: theme.color.bg.surface, borderRadius: theme.radius.float, borderWidth: 1, borderColor: theme.color.border.hairline, padding: theme.space.base, ...theme.shadow.card }}>
             <SectionTitle>New note</SectionTitle>
-            <Field accessibilityLabel="Note content" placeholder="Write a note chunk"
+            <Field ref={composerRef} accessibilityLabel="Note content" placeholder="Write a note chunk"
               multiline value={content} onChangeText={onContentChange} style={{ minHeight: 112 }} />
             <Text style={[theme.text('label'), { color: pasteNotice ? theme.color.status.success.text : theme.color.text.tertiary }]}>
-              {pasteNotice ?? 'Paste paragraphs separated by a blank line to add one chunk per paragraph.'}
+              {pasteNotice ?? 'add a note chunk · or paste, it splits on blank lines'}
             </Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.space.md }}>
               <View style={{ flexGrow: 1, flexBasis: 200 }}>
@@ -263,15 +288,18 @@ export function RoomScreen() {
               if (!result.ok) throw new Error(result.error.message);
               setContent(''); setTags(''); setSource('');
             })} /></View>
-          </View>
+          </View>}
           {error ? <Notice tone="danger">{error}</Notice> : null}
-          {chunks.length ? <SectionTitle>Notes</SectionTitle> : null}
+          {chunks.length && !phone ? <SectionTitle>{activeSubject ? `Notes · ${activeSubject}` : 'Notes'}</SectionTitle> : null}
         </View>}
-        ListEmptyComponent={<EmptyState title="No notes in this room yet" body="Write your first chunk above, or paste a few paragraphs at once." />}
-        ListFooterComponent={<HarnessPanel roomId={room.id} chunks={chunks} appDb={sqlite} onOpenCitation={openCitation} onSaved={() => { void refresh(); }} />}
+        ListEmptyComponent={phone && tab !== 'notes'
+          ? <EmptyState title={`No ${tab} in this room yet`} body={`${tab === 'slides' ? 'Slides' : 'Boards'} will show up here once they are added.`} />
+          : chunks.length ? <EmptyState title="No notes with this subject" body="Pick another subject, or choose all." />
+          : <EmptyState title="No notes in this room yet" body="Write your first chunk above, or paste a few paragraphs at once." />}
+        ListFooterComponent={phone && tab !== 'notes' ? undefined : <HarnessPanel roomId={room.id} chunks={chunks} appDb={sqlite} onOpenCitation={openCitation} onSaved={() => { void refresh(); }} />}
         renderItem={({ item, index }) => {
           const cited = focus?.chunkId === item.id ? focus : null;
-          return <ChunkEditor chunk={item} index={index} count={chunks.length} onError={setError}
+          return <ChunkEditor chunk={item} index={chunks.indexOf(item)} count={chunks.length} onError={setError}
             nativeID={`chunk-${item.id}`} testID={`chunk-${item.id}`} highlighted={Boolean(cited)}
             // While a citation points into this chunk, show the highlighted passage; "Edit text" closes it.
             readView={cited ? <AnchoredChunkText body={item.body} focus={cited} /> : undefined}
@@ -315,6 +343,35 @@ export function RoomScreen() {
         </ChunkEditor>;
         }}
       />
+      {phone ? <PhoneRoomActions
+        onAsk={() => { setTab('notes'); setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 0); }}
+        onAddNote={() => { setTab('notes'); setTimeout(() => listRef.current?.scrollToOffset({ offset: 0, animated: true }), 0); }} /> : null}
     </KeyboardAvoidingView>
   </SafeAreaView></Screen>;
+
+  // iPad: the room beside an ask column, with a floating pencil tool bar.
+  // The ask backend is not wired to this panel yet; questions stay local.
+  if (wide) return <View style={{ flex: 1, flexDirection: 'row' }} testID="room-wide-view">
+    <View style={{ flex: 1, minWidth: 0 }}>{roomList}</View>
+    <View style={{ paddingTop: theme.space.page, paddingRight: theme.space.page }}>
+      <RoomSidePanel roomId={room.id} subjects={subjects} chunks={chunks} dueToday={dueToday}
+        activeSubject={activeSubject} onSubject={setSubject} />
+    </View>
+  </View>;
+  if (!splitView) return roomList;
+  return <View style={{ flex: 1, flexDirection: 'row' }} testID="room-split-view">
+    <View style={{ flex: 1, minWidth: 0 }}>
+      {roomList}
+      {penTool === 'lasso' && inkSelected ? <InkLassoActions
+        onAsk={() => { setAskOpen(true); setAskMessages((prev) => [...prev, { id: randomUUID(), text: 'ask about this ink', note: 'from your ink' }]); setInkSelected(false); }}
+        onConvert={() => setInkSelected(false)} /> : null}
+      <PencilToolbar onChange={(tool) => { setPenTool(tool); if (tool === 'lasso') setInkSelected(true); }} />
+    </View>
+    {askOpen ? <RoomAskPanel
+      subtitle={`your ink + ${chunks.length} ${chunks.length === 1 ? 'chunk' : 'chunks'}`}
+      messages={askMessages} proposal={null}
+      onSend={(text) => setAskMessages((prev) => [...prev, { id: randomUUID(), text }])}
+      onPin={() => undefined} onDecline={() => undefined}
+      onClose={() => setAskOpen(false)} /> : null}
+  </View>;
 }

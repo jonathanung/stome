@@ -11,6 +11,7 @@ npx expo start
 
 - `npm run web` starts the Expo web dev server. `metro.config.js` adds the COOP and COEP headers on bundled requests. In this SDK the HTML document from `expo start --web` does not include those headers.
 - `npm run web:sqlite` serves that same dev server through `http://127.0.0.1:8081` and adds `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: credentialless` to the document. Browser SQLite needs those document headers. Expo itself listens on port 8082 in this mode.
+- `npm run web:lan` is the same proxy for other devices on your network, such as an iPad. Browsers only give browser SQLite its storage on https or on `localhost`, so `http://<lan-ip>:8081` fails with "navigator.storage not available". This mode serves `https://<lan-ip>:8081` with a self-signed certificate written to `.expo/web-cert/cert.pem`, and sends `Cross-Origin-Embedder-Policy: require-corp` because Safari does not support `credentialless`. Trust the certificate on the device: AirDrop it, install the profile, then turn it on under Settings > General > About > Certificate Trust Settings. Set `EXPO_INTERNAL_PORT` if port 8082 is already taken.
 - `npm run companion` starts the laptop-local mock AI companion. See `HARNESS.md` for the ask, confirm, and reload path. The companion does not call a live model.
 - `npm run ios` and `npm run android` open a simulator or Expo Go when that tooling is installed.
 

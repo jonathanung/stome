@@ -126,3 +126,46 @@ export async function finishStartup<T>(
     throw error;
   }
 }
+
+export const AUTO_RETRY_LIMIT = 5;
+export const AUTO_RETRY_DELAY_SECONDS = 3;
+
+/**
+ * Attempt bookkeeping for the busy screen. Recovery reloads the page, so the
+ * count lives in a key-value store that survives a reload (sessionStorage).
+ * Auto retry only ever reloads; it never deletes, writes or steals a lock.
+ */
+export type AttemptStore = { getItem(key: string): string | null; setItem(key: string, value: string): void; removeItem(key: string): void };
+
+const ATTEMPT_KEY = 'stome.storage.attempts';
+/** An attempt count older than this belongs to an earlier episode and is ignored. */
+const ATTEMPT_TTL_MS = 60_000;
+
+export function readAttempt(store: AttemptStore | null, now: number = Date.now()): number {
+  const [count, at] = (store?.getItem(ATTEMPT_KEY) ?? '').split(':').map((part) => Number.parseInt(part, 10));
+  if (!Number.isFinite(count) || count < 1 || !Number.isFinite(at) || now - at > ATTEMPT_TTL_MS) return 1;
+  return count;
+}
+
+/** Called right before a reload so the next load knows it is a later attempt. */
+export function recordRetry(store: AttemptStore | null, now: number = Date.now()): void {
+  store?.setItem(ATTEMPT_KEY, `${readAttempt(store, now) + 1}:${now}`);
+}
+
+const FIRST_AT_KEY = 'stome.storage.first-at';
+
+/** Wall-clock time of the first failed attempt in this episode; recorded once, ignored once stale. */
+export function readFirstAttemptAt(store: AttemptStore | null, now: number = Date.now()): number {
+  const saved = Number.parseInt(store?.getItem(FIRST_AT_KEY) ?? '', 10);
+  if (Number.isFinite(saved) && now - saved <= ATTEMPT_TTL_MS * AUTO_RETRY_LIMIT) return saved;
+  store?.setItem(FIRST_AT_KEY, String(now));
+  return now;
+}
+
+export function clearAttempts(store: AttemptStore | null): void {
+  store?.removeItem(ATTEMPT_KEY);
+}
+
+export function canAutoRetry(failure: StorageFailure, attempt: number): boolean {
+  return failure.kind === 'busy' && failure.canRetry && attempt < AUTO_RETRY_LIMIT;
+}
