@@ -581,11 +581,11 @@ const styles = StyleSheet.create({
   noticeButton: { alignSelf: 'flex-start', borderRadius: 8, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 6 },
   saveState: {
     borderRadius: 10,
-    left: 16,
+    left: 124,
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 8,
     position: 'absolute',
-    top: 64,
+    top: 20,
   },
   backButton: {
     alignItems: 'center',
