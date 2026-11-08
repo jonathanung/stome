@@ -22,8 +22,10 @@ import {
   SCAFFOLD_ROOM_ID,
   TOOL_REGISTRY,
   chunkViewFromFoundation,
+  isStudyProposal,
   noteToChunk,
   type ChunkView,
+  type StoredProposal,
 } from '../src/harness/contract.ts';
 import { createProvider, mockEditOutput, mockProvider, mockSuccessOutput } from '../src/harness/provider.ts';
 import {
@@ -55,6 +57,16 @@ import {
 } from '../src/db/schema.ts';
 
 const SECRET = 'sk-test-do-not-leak-stome';
+
+/** Notes-test helper: these sessions only ever propose notes answers or edits. */
+function notesBody(proposal: StoredProposal | null | undefined): string | undefined {
+  return proposal && !isStudyProposal(proposal) ? proposal.body : undefined;
+}
+
+/** Notes-test helper: the revision a notes proposal was grounded on. */
+function notesRevision(proposal: StoredProposal | null | undefined): number | undefined {
+  return proposal && !isStudyProposal(proposal) ? proposal.chunkRevision : undefined;
+}
 
 function openMemory(file = ':memory:'): SqlExecutor & { close(): void } {
   const raw = new DatabaseSync(file);
@@ -261,7 +273,7 @@ test('restart fails a running session, continuation uses saved context, and late
   });
   assert.equal(outcome.status, 'proposal');
   assert.ok(seen >= 1);
-  assert.match(outcome.proposal?.body ?? '', /messages=1/);
+  assert.match(notesBody(outcome.proposal) ?? '', /messages=1/);
   db.close();
 });
 
@@ -486,7 +498,7 @@ test('operation id dedupe returns the first annotation and a failed commit rolls
   assert.equal(replay.annotationId, first.annotationId);
   const rows = await listAnnotations(app, savedChunk.id);
   assert.equal(rows.length, 1);
-  assert.equal(rows[0]?.payload.answer, proposed.proposal?.body);
+  assert.equal(rows[0]?.payload.answer, notesBody(proposed.proposal));
   assert.equal((await getSession(db, prepared.sessionId))?.confirmedOperationId, operationId);
 
   await assert.rejects(
@@ -707,7 +719,7 @@ test('a second confirmed turn survives reopen and the first operation id still r
   });
   assert.equal(second.status, 'proposal');
   assert.notEqual(second.proposal?.id, proposed.proposal?.id);
-  assert.match(second.proposal?.body ?? '', /Second question/);
+  assert.match(notesBody(second.proposal) ?? '', /Second question/);
   const secondId = second.session?.pendingOperationId ?? '';
   const savedAgain = await confirmFoundationQuestion(reopened, reopenedApp, {
     sessionId: continued.sessionId,
@@ -720,7 +732,7 @@ test('a second confirmed turn survives reopen and the first operation id still r
   assert.equal(rows.length, 2);
   assert.deepEqual(
     rows.map((row) => row.payload.answer),
-    [proposed.proposal?.body, second.proposal?.body],
+    [notesBody(proposed.proposal), notesBody(second.proposal)],
   );
   const replay = await confirmFoundationQuestion(reopened, reopenedApp, {
     sessionId: continued.sessionId,
@@ -1339,7 +1351,7 @@ test('a confirmed chunk answer is one ai annotation and the same operation id ad
   assert.equal(pins.length, 1);
   assert.equal(pins[0]?.type, 'ai_answer');
   assert.deepEqual(pins[0]?.anchor, { start: 0, end: 12 });
-  assert.equal(pins[0]?.payload.answer, outcome.proposal?.body);
+  assert.equal(pins[0]?.payload.answer, notesBody(outcome.proposal));
   assert.equal(pins[0]?.payload.quote, 'photosynthes');
   assert.equal(pins[0]?.payload.chunkRevision, savedChunk.revision);
   const after = await getChunk(app, savedChunk.id);
@@ -1540,7 +1552,7 @@ test('confirm keeps the proposal revision and does not adopt a newer chunk revis
     provider: mockProvider,
     signal: new AbortController().signal,
   });
-  assert.equal(outcome.proposal?.chunkRevision, savedChunk.revision);
+  assert.equal(notesRevision(outcome.proposal), savedChunk.revision);
   const operationId = outcome.session?.pendingOperationId ?? '';
   const edited = await commit({
     opId: 'edit-stale',
@@ -1762,7 +1774,7 @@ test('a completed proposal and its operation id reopen together', async () => {
   });
   const operationId = outcome.session?.pendingOperationId ?? '';
   assert.ok(operationId);
-  assert.equal(outcome.proposal?.chunkRevision, savedChunk.revision);
+  assert.equal(notesRevision(outcome.proposal), savedChunk.revision);
   harness.close();
   const reopened = openMemory(path);
   const session = await getSession(reopened, prepared.sessionId);
@@ -1773,9 +1785,11 @@ test('a completed proposal and its operation id reopen together', async () => {
   const stable = repairOperationId(prepared.sessionId, outcome.proposal?.id ?? '');
   assert.equal(repaired.pendingOperationId, stable);
   reopened.close();
-  const persisted = await getSession(openMemory(path), prepared.sessionId);
+  const persistedDb = openMemory(path);
+  const persisted = await getSession(persistedDb, prepared.sessionId);
   assert.equal(persisted?.pendingOperationId, stable);
-  assert.equal(persisted?.proposal?.chunkRevision, savedChunk.revision);
+  assert.equal(notesRevision(persisted?.proposal), savedChunk.revision);
+  persistedDb.close();
   app.close();
   rmSync(dir, { recursive: true, force: true });
 });
@@ -1880,7 +1894,7 @@ test('a confirmed note edit replaces the chunk once and stays source ai', async 
   assert.equal(saved.replayed, false);
   assert.equal(saved.revision, savedChunk.revision + 1);
   const edited = await getChunk(app, savedChunk.id);
-  assert.equal(edited?.body, againOutcome.proposal?.body);
+  assert.equal(edited?.body, notesBody(againOutcome.proposal));
   assert.equal(edited?.revision, savedChunk.revision + 1);
   const applied = await app.get<{ source: string; kind: string }>('SELECT source, kind FROM applied_ops WHERE op_id = ?', [
     againId,
@@ -1895,7 +1909,7 @@ test('a confirmed note edit replaces the chunk once and stays source ai', async 
   });
   assert.equal(replayed.replayed, true);
   assert.equal((await getChunk(app, savedChunk.id))?.revision, savedChunk.revision + 1);
-  assert.equal((await getChunk(app, savedChunk.id))?.body, againOutcome.proposal?.body);
+  assert.equal((await getChunk(app, savedChunk.id))?.body, notesBody(againOutcome.proposal));
 
   const both = await beginQuestion(harness, {
     chunks: [view, chunkViewFromFoundation(other)],
@@ -1930,7 +1944,7 @@ test('a confirmed note edit replaces the chunk once and stays source ai', async 
       }),
     /demo note/,
   );
-  assert.equal((await getChunk(app, savedChunk.id))?.body, againOutcome.proposal?.body);
+  assert.equal((await getChunk(app, savedChunk.id))?.body, notesBody(againOutcome.proposal));
   app.close();
   harness.close();
 });
@@ -1971,7 +1985,7 @@ test('a stale note edit writes nothing and keeps the newer text', async () => {
     signal: new AbortController().signal,
   });
   assert.equal(outcome.status, 'proposal');
-  assert.equal(outcome.proposal?.chunkRevision, savedChunk.revision);
+  assert.equal(notesRevision(outcome.proposal), savedChunk.revision);
   const operationId = outcome.session?.pendingOperationId ?? '';
   const human = await commit({
     opId: 'human-before-confirm',
@@ -2063,7 +2077,7 @@ test('a committed note edit repairs its session after a later human edit', async
   });
   assert.equal(outcome.status, 'proposal');
   const operationId = outcome.session?.pendingOperationId ?? '';
-  const proposedBody = outcome.proposal?.body ?? '';
+  const proposedBody = notesBody(outcome.proposal) ?? '';
   let failRecord = false;
   const failing: SqlExecutor = {
     exec: (sql) => harness.exec(sql),

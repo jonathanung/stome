@@ -2,17 +2,22 @@ import { randomUUID } from 'expo-crypto';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { PanResponder, Pressable, Text, View, useWindowDimensions, type GestureResponderHandlers, type ViewStyle } from 'react-native';
+import { PanResponder, Pressable, Text, TextInput, View, useWindowDimensions, type GestureResponderHandlers, type ViewStyle } from 'react-native';
 import Svg, { Circle, Defs, Marker, Path, Pattern, Rect } from 'react-native-svg';
 
 import { iconColor, useStoneTheme } from '../../../design-theme/src/primitives';
 import { getRoom } from '../../data/queries';
 import { expoDriver } from '../../db/expo-driver';
+import { companionProvider } from '../../harness/companionClient';
+import { getCompanionSettings } from '../../harness/companionSettings';
+import { HarnessError } from '../../harness/contract';
+import { completeReadTool } from '../../harness/provider';
+import { BOARD_TOOL_NAME, type BoardStickiesOutput } from '../../harness/tools';
 import { Icon } from '../../ui/Icon';
+import { stickiesToProposal, toBoardItemView } from './ask';
 import { ImageProposalGlyph, ToolGlyph } from './glyphs';
 import {
   SAMPLE_BOARD,
-  SAMPLE_PROPOSAL,
   TOOLS,
   acceptableCount,
   acceptedItems,
@@ -50,11 +55,23 @@ export function WhiteboardScreen() {
 
   const [roomName, setRoomName] = useState<string | null>(null);
   const [items, setItems] = useState<BoardItem[]>(SAMPLE_BOARD);
-  const [proposal, setProposal] = useState<Proposal | null>(SAMPLE_PROPOSAL);
+  const [proposal, setProposal] = useState<Proposal | null>(null);
   const [tool, setTool] = useState<Tool>('pen');
   const [selected, setSelected] = useState<string | null>(null);
   const [draft, setDraft] = useState<Point[] | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [promptOpen, setPromptOpen] = useState(false);
+  const [promptText, setPromptText] = useState('');
+  const [asking, setAsking] = useState(false);
+  const askAbort = useRef<AbortController | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      askAbort.current?.abort();
+    };
+  }, []);
 
   useEffect(() => {
     if (!roomId) return;
@@ -143,6 +160,61 @@ export function WhiteboardScreen() {
       }).panHandlers,
     );
   }, []);
+
+  const selectedItem = selected ? items.find((item) => item.id === selected) ?? null : null;
+
+  const startAsk = () => {
+    if (!getCompanionSettings().token) {
+      setNotice('pair the companion first, then ask about a selection');
+      router.push('/companion');
+      return;
+    }
+    if (!selectedItem) return;
+    setNotice(null);
+    setPromptOpen(true);
+  };
+
+  const submitAsk = async () => {
+    const prompt = promptText.trim();
+    const { url, token, scenario } = getCompanionSettings();
+    if (!prompt || !selectedItem || asking) return;
+    if (!roomId) {
+      setNotice('open this board from a room to ask about it');
+      return;
+    }
+    if (!token) {
+      setNotice('pair the companion first, then ask about a selection');
+      return;
+    }
+    const selection = [selectedItem];
+    const controller = new AbortController();
+    askAbort.current = controller;
+    setAsking(true);
+    setNotice(null);
+    try {
+      const output = await completeReadTool<BoardStickiesOutput>(
+        companionProvider({ baseUrl: url, token }),
+        { tool: BOARD_TOOL_NAME, input: { roomId, prompt, items: selection.map(toBoardItemView) }, scenario },
+        controller.signal,
+      );
+      if (!mounted.current || controller.signal.aborted) return;
+      setProposal(stickiesToProposal(output, prompt, selection, randomUUID));
+      setPromptOpen(false);
+      setPromptText('');
+    } catch (error) {
+      if (!mounted.current) return;
+      if (controller.signal.aborted) setNotice('asking was cancelled');
+      else setNotice(error instanceof HarnessError ? `${error.code}: ${error.message}` : 'the companion could not answer');
+    } finally {
+      if (askAbort.current === controller) askAbort.current = null;
+      if (mounted.current) setAsking(false);
+    }
+  };
+
+  const cancelAsk = () => {
+    askAbort.current?.abort();
+    setPromptOpen(false);
+  };
 
   const accept = () => {
     if (!proposal) return;
@@ -275,7 +347,7 @@ export function WhiteboardScreen() {
           </View>
         </View>
         <View style={{ flexDirection: 'row', gap: 8 }}>
-          {compact ? null : <BarButton label="ask about selection" variant="outline" disabled={!selected} onPress={() => setNotice('asking the companion about a selection is not wired up yet')} />}
+          {compact ? null : <BarButton label="ask about selection" variant="outline" disabled={!selected || asking} onPress={startAsk} />}
           <BarButton label="done" variant="accent" onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
         </View>
       </View>
@@ -318,8 +390,39 @@ export function WhiteboardScreen() {
         </View>
       ) : null}
 
+      {/* Ask prompt: opens for a selection, then waits on the companion. */}
+      {promptOpen || asking ? (
+        <View
+          accessibilityLabel="ask the companion"
+          style={[barStyle, { right: 16, bottom: 24, width: compact ? undefined : 340, left: compact ? 16 : undefined, flexDirection: 'column', alignItems: 'stretch', gap: 10, padding: 16 }]}
+        >
+          <Text style={[theme.text('eyebrow'), { color: theme.color.text.tertiary }]}>ask about selection</Text>
+          {asking ? (
+            <Text accessibilityLiveRegion="polite" style={[theme.text('bodySmall'), { color: ink }]}>asking…</Text>
+          ) : (
+            <TextInput
+              accessibilityLabel="question about the selection"
+              autoFocus
+              value={promptText}
+              onChangeText={setPromptText}
+              onSubmitEditing={() => void submitAsk()}
+              placeholder="what do you want to know?"
+              placeholderTextColor={theme.color.text.tertiary}
+              returnKeyType="send"
+              style={[theme.text('bodySmall'), { color: ink, minHeight: theme.layout.control, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: theme.color.border.strong }]}
+            />
+          )}
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <View style={{ flex: 1 }}>
+              <BarButton label="ask" variant="accent" disabled={asking || !promptText.trim()} onPress={() => void submitAsk()} fill />
+            </View>
+            <BarButton label="cancel" variant="outline" onPress={cancelAsk} />
+          </View>
+        </View>
+      ) : null}
+
       {/* Companion proposal: nothing here is on the board until accepted. */}
-      {proposal ? (
+      {proposal && !promptOpen && !asking ? (
         <View
           accessibilityLabel="companion proposal"
           style={[barStyle, { right: 16, bottom: 24, width: compact ? undefined : 340, left: compact ? 16 : undefined, flexDirection: 'column', alignItems: 'stretch', gap: 10, padding: 16 }]}

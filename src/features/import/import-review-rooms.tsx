@@ -45,13 +45,15 @@ export function isSettled(note: ReviewNote): boolean {
 }
 
 export function ImportReviewRooms({
-  notes, rooms, busy, errors, onChangeMapping, onSkip, onKeepBoth, onBack, onSave,
+  notes, rooms, busy, errors, onChangeMapping, onAssignAll, onSkip, onKeepBoth, onBack, onSave,
 }: {
   notes: readonly ReviewNote[];
   rooms: readonly Room[];
   busy: boolean;
   errors: readonly string[];
   onChangeMapping(id: string, mapping: RoomMapping): void;
+  /** Gives every note that still needs a room the same room. */
+  onAssignAll(mapping: RoomMapping): void;
   onSkip(id: string, skipped: boolean): void;
   onKeepBoth(id: string): void;
   onBack(): void;
@@ -88,6 +90,23 @@ export function ImportReviewRooms({
         </View>
         <ImportSteps current={2} />
       </View>
+
+      {needs > 0 && rooms.length > 0 ? (
+        <View style={styles.card} accessibilityLabel="room for every note">
+          <Text style={styles.eyebrow}>{`PUT ${needs === 1 ? 'THE NOTE' : `ALL ${needs} NOTES`} THAT NEED A ROOM INTO`}</Text>
+          <View style={styles.chips}>
+            {rooms.map((room) => (
+              <Pressable
+                key={room.id} accessibilityRole="button" accessibilityLabel={`Put every note that needs a room into ${room.name}`}
+                disabled={busy} onPress={() => onAssignAll(chooseExistingRoom(room.id))} style={[styles.chip, busy && styles.disabled]}
+              >
+                <Text style={styles.secondaryText} numberOfLines={1}>{room.name}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={styles.meta}>notes that already have a room keep it. you can still change any single note below.</Text>
+        </View>
+      ) : null}
 
       <View style={[styles.cols, wide && styles.colsWide]}>
         <View style={[styles.card, wide && styles.listCol]} accessibilityLabel="notes">
@@ -266,6 +285,8 @@ const useStyles = createStyles((theme) => StyleSheet.create({
   choice: { minHeight: 48, justifyContent: 'center', gap: 2, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1, borderColor: theme.color.border.hairline },
   choiceOn: { borderWidth: 2, borderColor: theme.color.text.primary, paddingHorizontal: 11, paddingVertical: 7 },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: { minHeight: 44, maxWidth: 240, borderRadius: 12, paddingHorizontal: 14, justifyContent: 'center', borderWidth: 1, borderColor: theme.color.border.strong },
   primary: { minHeight: 44, borderRadius: 12, paddingHorizontal: 16, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.color.accent.bg },
   primaryText: { ...theme.text('buttonCompact'), color: theme.color.accent.fg },
   secondary: { minHeight: 44, borderRadius: 12, paddingHorizontal: 16, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: theme.color.border.strong },

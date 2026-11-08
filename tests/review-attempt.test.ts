@@ -127,6 +127,7 @@ test('a second tap during a mark does not start a second operation', async () =>
   const request = { chunkId: 'chunk', state: 'missed' as const, expectedRevision: 1 };
   const value = {
     chunkId: 'chunk',
+    annotationId: null as string | null,
     state: 'missed' as const,
     localDay: '2026-11-07',
     markedAt: 1,
@@ -372,6 +373,7 @@ test('a rejected held mark can be followed by a mark of the new revision', async
         duplicate: false,
         value: {
           chunkId: 'chunk',
+          annotationId: null as string | null,
           state: 'got_it' as const,
           localDay: '2026-11-07',
           markedAt: 1,

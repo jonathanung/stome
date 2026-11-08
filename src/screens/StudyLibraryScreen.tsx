@@ -18,7 +18,8 @@ import {
   listRooms,
 } from '../data/queries';
 import { expoDriver } from '../db/expo-driver';
-import { isStudyStale, revisionMap } from '../features/study/library';
+import { isStudyStale } from '../features/study/scheduling';
+import { revisionMap } from '../features/study/library';
 import { BackButton, EmptyState, Notice, Row, ScreenHeader, SectionTitle, useColumn } from '../ui/kit';
 
 interface DeckEntry {
@@ -82,13 +83,13 @@ export function StudyLibraryScreen() {
     const deckEntries = await Promise.all(rawDecks.map(async (deck) => ({
       deck,
       cards: (await listStudyCards(db, deck.id)).length,
-      stale: isStudyStale(deck.sourceChunkIds, deck.sourceRevision, revisions),
+      stale: isStudyStale(deck.sourceRevision, deck.sourceChunkIds, revisions),
     })));
     const quizEntries = await Promise.all(rawQuizzes.map(async (quiz) => ({
       quiz,
       questions: (await listStudyQuestions(db, quiz.id)).length,
       attempts: (await listStudyAttempts(db, quiz.id)).length,
-      stale: isStudyStale(quiz.sourceChunkIds, quiz.sourceRevision, revisions),
+      stale: isStudyStale(quiz.sourceRevision, quiz.sourceChunkIds, revisions),
     })));
     setRooms(allRooms);
     setRoom(nextRoom);
@@ -96,7 +97,7 @@ export function StudyLibraryScreen() {
     setQuizzes(quizEntries);
     setOutlines(rawOutlines.map((outline) => ({
       outline,
-      stale: isStudyStale(outline.sourceChunkIds, outline.sourceRevision, revisions),
+      stale: isStudyStale(outline.sourceRevision, outline.sourceChunkIds, revisions),
     })));
   }, [db, roomId]);
 

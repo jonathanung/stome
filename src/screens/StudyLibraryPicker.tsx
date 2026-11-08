@@ -1,5 +1,5 @@
 import { randomUUID } from 'expo-crypto';
-import { Link, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useMemo, useState } from 'react';
 import {
@@ -59,19 +59,19 @@ function SourceRefs({ roomId, chunks, ids }: { roomId: string; chunks: Chunk[]; 
       {ids.map((id) => {
         const chunk = chunks.find((c) => c.id === id);
         return (
-          <Link key={id} href={`/rooms/${roomId}`} asChild>
-            <Pressable
-              accessibilityRole="link"
-              accessibilityLabel={`Open source ${chunk ? `chunk ${chunkPosition(chunks, id)}` : 'chunk'} in room`}
-              testID={`draft-source-${id}`}
-              style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.xs }}
-            >
-              <Icon name="link" size={12} color={theme.color.text.tertiary} />
-              <Text numberOfLines={1} style={[theme.text('label'), { flex: 1, color: theme.color.text.tertiary }]}>
-                {sourceLabel(chunk, chunks)}
-              </Text>
-            </Pressable>
-          </Link>
+          <Pressable
+            key={id}
+            accessibilityRole="link"
+            accessibilityLabel={`Open source ${chunk ? `chunk ${chunkPosition(chunks, id)}` : 'chunk'} in room`}
+            testID={`draft-source-${id}`}
+            onPress={() => router.push(`/rooms/${roomId}`)}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.xs }}
+          >
+            <Icon name="link" size={12} color={theme.color.text.tertiary} />
+            <Text numberOfLines={1} style={[theme.text('label'), { flex: 1, color: theme.color.text.tertiary }]}>
+              {sourceLabel(chunk, chunks)}
+            </Text>
+          </Pressable>
         );
       })}
     </View>
@@ -308,16 +308,15 @@ export function StudyLibraryPicker() {
                 kicker="study"
                 title={room.name}
                 action={
-                  <Link href={`/study?roomId=${room.id}`} asChild>
-                    <Pressable
-                      accessibilityRole="link"
-                      accessibilityLabel="Open study library"
-                      testID="study-open-library"
-                      style={{ minHeight: theme.layout.control, justifyContent: 'center' }}
-                    >
-                      <Text style={[theme.text('buttonCompact'), { color: theme.color.text.secondary }]}>library</Text>
-                    </Pressable>
-                  </Link>
+                  <Pressable
+                    accessibilityRole="link"
+                    accessibilityLabel="Open study library"
+                    testID="study-open-library"
+                    onPress={() => router.replace(`/study?roomId=${room.id}`)}
+                    style={{ minHeight: theme.layout.control, justifyContent: 'center' }}
+                  >
+                    <Text style={[theme.text('buttonCompact'), { color: theme.color.text.secondary }]}>library</Text>
+                  </Pressable>
                 }
               >
                 <Text style={[theme.text('bodySmall'), { color: theme.color.text.secondary }]}>

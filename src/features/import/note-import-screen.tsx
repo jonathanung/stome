@@ -1,4 +1,5 @@
 import { randomUUID } from 'expo-crypto';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, ScrollView, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -13,12 +14,20 @@ import { freeformPathSubjects, freeformSourceIdentity } from '../../import/freef
 import { sourceIdentity } from '../../import/markdown';
 import { onenotePathSubjects, onenoteSourceIdentity } from '../../import/onenote/parse';
 import { pdfPathSubjects, pdfSourceIdentity } from '../../import/pdf/parse';
+import { assignRoomToUnmapped, batchLimitMessage, mergeBatch, remainingCapacity } from '../../import/batch';
 import { pickNotes, type PickedNote } from '../../import/pick-notes';
-import { destinationForMapping, unsetRoomMapping, type RoomMapping } from '../../import/room-map';
+import { chooseExistingRoom, destinationForMapping, unsetRoomMapping, type RoomMapping } from '../../import/room-map';
 import { changeSourcePath, changeSubjects, createSubjectReview, type SubjectReview } from '../../import/review-draft';
 import { ImportChooseFiles } from './import-choose-files';
 import { ImportReviewRooms, groupOf, type DuplicateState } from './import-review-rooms';
 import { RoomMappingControl } from './room-mapping';
+import { HarnessError } from '../../harness/contract';
+import { companionProvider } from '../../harness/companionClient';
+import { getCompanionSettings, useCompanionSettings } from '../../harness/companionSettings';
+import { completeReadTool } from '../../harness/provider';
+import { IMPORT_TOOL_NAME, type ImportSuggestOutput, type ImportSuggestion } from '../../harness/tools';
+import { applySuggestion, buildSuggestBatches } from '../../import/suggest';
+import { SuggestControls, SuggestionRow } from './suggest-ui';
 
 interface Draft extends SubjectReview {
   id: string;
@@ -73,6 +82,62 @@ export default function NoteImportScreen() {
   const busyRef = useRef(false);
   const [stage, setStage] = useState<'choose' | 'review'>('choose');
   const [preview, setPreview] = useState<{ title: string; bodies: string[] } | null>(null);
+  const paired = useCompanionSettings().token.trim() !== '';
+  const [suggestions, setSuggestions] = useState<Record<string, ImportSuggestion>>({});
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
+  const suggestAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => suggestAbort.current?.abort(), []);
+
+  const suggestRooms = async () => {
+    if (suggestAbort.current) return;
+    const open = drafts.filter((draft) => !draft.done);
+    if (!open.length) return;
+    const controller = new AbortController();
+    suggestAbort.current = controller;
+    setSuggesting(true);
+    setSuggestError(null);
+    try {
+      const settings = getCompanionSettings();
+      const provider = companionProvider({ baseUrl: settings.url, token: settings.token });
+      const batches = buildSuggestBatches(open.map((draft) => ({ id: draft.id, title: draft.note.title, bodies: draft.note.bodies })), rooms);
+      const found: Record<string, ImportSuggestion> = {};
+      for (const batch of batches) {
+        const out = await completeReadTool<ImportSuggestOutput>(
+          provider, { tool: IMPORT_TOOL_NAME, input: batch, scenario: settings.scenario }, controller.signal,
+        );
+        for (const suggestion of out.suggestions) found[suggestion.noteId] = suggestion;
+      }
+      if (!controller.signal.aborted) setSuggestions((current) => ({ ...current, ...found }));
+    } catch (error) {
+      if (controller.signal.aborted && error instanceof HarnessError && error.code === 'cancelled') setSuggestError(null);
+      else if (!controller.signal.aborted) setSuggestError(error instanceof Error ? error.message : 'Suggestions failed');
+    } finally {
+      if (suggestAbort.current === controller) suggestAbort.current = null;
+      if (!controller.signal.aborted || suggestAbort.current === null) setSuggesting(false);
+    }
+  };
+  const cancelSuggest = () => suggestAbort.current?.abort();
+  const dropSuggestion = (id: string) => setSuggestions((current) => { const { [id]: _removed, ...rest } = current; return rest; });
+  const applyOne = (id: string) => {
+    const suggestion = suggestions[id];
+    if (!suggestion) return;
+    setDrafts((items) => items.map((item) => {
+      if (item.id !== id || item.done) return item;
+      const applied = applySuggestion(suggestion, item.subjects);
+      return { ...changeSubjects(item, applied.subjects), mapping: applied.mapping, result: undefined };
+    }));
+    dropSuggestion(id);
+  };
+  const applyAll = () => {
+    const ids = Object.keys(suggestions).filter((id) => drafts.some((draft) => draft.id === id && !draft.done));
+    ids.forEach(applyOne);
+  };
+  const params = useLocalSearchParams<{ roomId?: string | string[] }>();
+  const rawRoomId = Array.isArray(params.roomId) ? params.roomId[0] : params.roomId;
+  // Opened from a room: every picked note starts in that room. The commit rejects a room that no longer exists.
+  const targetRoomId = rawRoomId?.trim() || undefined;
+  const targetRoom = targetRoomId ? rooms.find((room) => room.id === targetRoomId) : undefined;
 
   const mapped = drafts.filter((draft) => destinationForMapping(draft.mapping)).length;
   const needRoom = drafts.length - mapped;
@@ -106,10 +171,19 @@ export default function NoteImportScreen() {
     busyRef.current = true;
     setBusy(true);
     try {
-      const result = await pickNotes();
+      // Row edits are disabled while busy, so `drafts` is still current after the picker closes.
+      const limit = remainingCapacity(drafts.length);
+      if (limit === 0) { setErrors([batchLimitMessage(1)]); return; }
+      const result = await pickNotes(limit);
       if (result) {
-        setErrors(result.errors);
-        setDrafts(result.notes.map((note) => ({ id: randomUUID(), note, ...applyOnenoteFolders(note, createSubjectReview(note.path, note.subjects)), mapping: unsetRoomMapping() })));
+        const mapping = targetRoomId ? chooseExistingRoom(targetRoomId) : unsetRoomMapping();
+        const picked: Draft[] = result.notes.map((note) => ({ id: randomUUID(), note, ...applyOnenoteFolders(note, createSubjectReview(note.path, note.subjects)), mapping }));
+        const merged = mergeBatch(drafts, picked);
+        const notices = [...result.errors];
+        if (merged.duplicates) notices.push(`${merged.duplicates} ${merged.duplicates === 1 ? 'file was' : 'files were'} already in this batch and not added again.`);
+        if (merged.dropped) notices.push(batchLimitMessage(merged.dropped));
+        setErrors(notices);
+        setDrafts(merged.items);
       }
     } catch (error) { setErrors([String(error)]); }
     finally { busyRef.current = false; setBusy(false); }
@@ -159,7 +233,7 @@ export default function NoteImportScreen() {
         <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.wide}>
             <ImportChooseFiles
-              collection={collection} onCollection={setCollection} busy={busy}
+              collection={collection} onCollection={setCollection} busy={busy} targetRoom={targetRoom?.name}
               rows={drafts.map((d) => ({ id: d.id, name: d.note.path, path: d.path, disabled: d.done }))}
               onPath={(id, path) => changeReview(id, (draft) => applyOnenoteFolders(draft.note, changeSourcePath(draft, path)))}
               onRemove={(id) => setDrafts((items) => items.filter((item) => item.id !== id))}
@@ -177,10 +251,17 @@ export default function NoteImportScreen() {
   return (
     <SafeAreaView edges={['bottom']} style={styles.root}>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.wide}>
+        {drafts.length ? <View style={styles.section}>
+          <SuggestControls paired={paired} running={suggesting} error={suggestError} pending={Object.keys(suggestions).length} onSuggest={suggestRooms} onCancel={cancelSuggest} onApplyAll={applyAll} />
+          {drafts.filter((d) => suggestions[d.id] && !d.done).map((d) => (
+            <SuggestionRow key={d.id} title={d.note.title} suggestion={suggestions[d.id]} rooms={rooms} disabled={busy} onApply={() => applyOne(d.id)} onIgnore={() => dropSuggestion(d.id)} />
+          ))}
+        </View> : null}
         <ImportReviewRooms
           notes={drafts.map((d) => ({ id: d.id, title: d.note.title, path: d.path, bodies: d.note.bodies, warnings: [...d.note.warnings, ...(d.folderWarning ? [d.folderWarning] : [])], subjects: d.subjects, mapping: d.mapping, skipped: d.skipped === true, done: d.done === true, duplicate: d.duplicate, result: d.result }))}
           rooms={rooms} busy={busy} errors={errors}
           onChangeMapping={(id, mapping) => update(id, { mapping, skipped: false, result: undefined })}
+          onAssignAll={(mapping) => setDrafts((items) => assignRoomToUnmapped(items, mapping))}
           onSkip={(id, skipped) => update(id, { skipped, result: undefined })}
           onKeepBoth={(id) => changeReview(id, (draft) => applyOnenoteFolders(draft.note, changeSourcePath(draft, draft.path.replace(/(\.[^./]+)?$/, ' (copy)$1'))))}
           onBack={() => setStage('choose')}

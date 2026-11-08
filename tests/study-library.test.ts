@@ -18,7 +18,6 @@ import {
 import {
   distinctSubjects,
   draftItemCount,
-  isStudyStale,
   previewStudyDraft,
   revisionMap,
   saveStudyDraft,
@@ -26,6 +25,7 @@ import {
   type SaveContext,
   type StudyDraft,
 } from '../src/features/study/library.ts';
+import { isStudyStale } from '../src/features/study/scheduling.ts';
 import { migrateDb } from '../src/db/migrate.ts';
 import { nodeDb } from './support/node-db.ts';
 
@@ -82,12 +82,14 @@ test('more than 200 chunks are rejected', () => {
   assert.equal(result.error.code, 'too_large');
 });
 
-test('every preview item carries its source chunk id and revision', () => {
+test('every preview item carries its source chunk id and the selection snapshot', () => {
   const chunks = [chunk('c1', roomA, bodyA), chunk('c2', roomA, bodyB, 3)];
   const deck = previewStudyDraft('deck', 'Cells', chunks);
   assert.ok(deck.ok && deck.draft.kind === 'deck');
+  // Same stamping as the STUDY.2 generator: every item carries the maximum,
+  // so the shared STUDY.6 rule reads both provenances identically.
   assert.deepEqual(deck.draft.cards.map((c) => [c.sourceChunkIds, c.sourceRevision]), [
-    [['c1'], 1],
+    [['c1'], 3],
     [['c2'], 3],
   ]);
   const quiz = previewStudyDraft('quiz', 'Cells', chunks);
@@ -117,10 +119,13 @@ test('distinctSubjects keeps first-seen order', () => {
 
 test('a saved row is fresh until a source chunk revision moves', () => {
   const revisions = revisionMap([chunk('c1', roomA, bodyA, 1), chunk('c2', roomA, bodyB, 1)]);
-  assert.equal(isStudyStale(['c1', 'c2'], 1, revisions), false);
+  assert.equal(isStudyStale(1, ['c1', 'c2'], revisions), false);
   revisions.set('c1', 2);
-  assert.equal(isStudyStale(['c1', 'c2'], 1, revisions), true);
-  assert.equal(isStudyStale(['missing'], 1, revisions), true);
+  assert.equal(isStudyStale(1, ['c1', 'c2'], revisions), true);
+  assert.equal(isStudyStale(1, ['missing'], revisions), true);
+  // Shared STUDY.6 rule: the snapshot is the maximum, so a source saved
+  // below it already reads stale. The library badge matches the due queue.
+  assert.equal(isStudyStale(2, ['c1', 'c2'], new Map([['c1', 2], ['c2', 1]])), true);
 });
 
 /* -------------------------------------------------------------------- save */

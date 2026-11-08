@@ -120,15 +120,11 @@ function firstLongWord(body: string): string | null {
   return word ?? null;
 }
 
-function chunkRef(chunk: Chunk): { sourceChunkIds: string[]; sourceRevision: number } {
-  return { sourceChunkIds: [chunk.id], sourceRevision: chunk.revision };
-}
-
 /**
  * Deterministic mock preview of one deck: one recall card per chunk.
  * Shape only — the STUDY.2 generator replaces the wording, not the flow.
  */
-function previewDeck(title: string, chunks: Chunk[]): StudyDraft {
+function previewDeck(title: string, chunks: Chunk[], snapshot: number): StudyDraft {
   return {
     kind: 'deck',
     title,
@@ -136,7 +132,8 @@ function previewDeck(title: string, chunks: Chunk[]): StudyDraft {
       key: `card-${index}`,
       front: clip(`Recall: ${leadSentence(chunk.body)}`, LIMITS.studyText),
       back: clip(chunk.body.trim() || '(empty chunk)', LIMITS.studyText),
-      ...chunkRef(chunk),
+      sourceChunkIds: [chunk.id],
+      sourceRevision: snapshot,
     })),
   };
 }
@@ -145,7 +142,7 @@ function previewDeck(title: string, chunks: Chunk[]): StudyDraft {
  * Deterministic mock preview of one quiz: one question per chunk, cycling
  * through the three supported kinds so the review sheet exercises each shape.
  */
-function previewQuiz(title: string, chunks: Chunk[]): StudyDraft {
+function previewQuiz(title: string, chunks: Chunk[], snapshot: number): StudyDraft {
   const kinds: DraftQuestionKind[] = ['mcq', 'true_false', 'fill'];
   return {
     kind: 'quiz',
@@ -153,7 +150,7 @@ function previewQuiz(title: string, chunks: Chunk[]): StudyDraft {
     questions: chunks.map((chunk, index) => {
       const kind = kinds[index % kinds.length]!;
       const lead = leadSentence(chunk.body);
-      const ref = chunkRef(chunk);
+      const ref = { sourceChunkIds: [chunk.id], sourceRevision: snapshot };
       if (kind === 'mcq') {
         const answer = clip(lead, LIMITS.studyChoice);
         return {
@@ -195,7 +192,7 @@ function previewQuiz(title: string, chunks: Chunk[]): StudyDraft {
 }
 
 /** Deterministic mock preview of one slide outline: one slide per chunk. */
-function previewOutline(title: string, chunks: Chunk[]): StudyDraft {
+function previewOutline(title: string, chunks: Chunk[], snapshot: number): StudyDraft {
   return {
     kind: 'outline',
     title,
@@ -204,7 +201,8 @@ function previewOutline(title: string, chunks: Chunk[]): StudyDraft {
       title: clip(leadSentence(chunk.body), LIMITS.studyTitle),
       bullets: tailSentences(chunk.body, LIMITS.studyBullets),
       notes: '',
-      ...chunkRef(chunk),
+      sourceChunkIds: [chunk.id],
+      sourceRevision: snapshot,
     })),
   };
 }
@@ -224,10 +222,14 @@ export function previewStudyDraft(kind: StudyDraftKind, title: string, chunks: C
   if (bytes > MAX_PREVIEW_BYTES) return { ok: false, error: { code: 'too_large' } };
   const cleanTitle = title.trim().replace(/\s+/g, ' ');
   if (!cleanTitle) return { ok: false, error: { code: 'empty_selection' } };
+  // One snapshot for the whole selection — the maximum source revision, exactly
+  // like the STUDY.2 generator stamps it, so the shared STUDY.6 staleness rule
+  // reads generator-built and library-built rows identically.
+  const snapshot = snapshotRevision(chunks);
   const draft =
-    kind === 'deck' ? previewDeck(cleanTitle, chunks)
-    : kind === 'quiz' ? previewQuiz(cleanTitle, chunks)
-    : previewOutline(cleanTitle, chunks);
+    kind === 'deck' ? previewDeck(cleanTitle, chunks, snapshot)
+    : kind === 'quiz' ? previewQuiz(cleanTitle, chunks, snapshot)
+    : previewOutline(cleanTitle, chunks, snapshot);
   return { ok: true, draft };
 }
 
@@ -243,25 +245,13 @@ export function draftItemCount(draft: StudyDraft): number {
 }
 
 /**
- * Read-time staleness for one derived row. Stale when a source chunk is gone
- * (defensive: chunk delete usually cascades the row away) or when any source
- * chunk's revision moved past the snapshot taken at save time.
- *
- * One number per row is all STUDY.1 stores, so an edit to a non-newest chunk
- * that stays below the snapshot is not detected. The newest-source snapshot
- * is still the best single reading: any edit that pushes a chunk past it —
- * the common case — shows the badge.
+ * Read-time staleness is owned by STUDY.6 (`scheduling.ts`): a derived row is
+ * stale when any grounding chunk is gone or its current revision no longer
+ * equals the snapshot taken at generation. The library lists use that same
+ * rule so badges never disagree with the due queue. Note the snapshot is the
+ * maximum source revision, so sources saved at mixed revisions read stale —
+ * that conservative reading is pinned by STUDY.6 and shared here.
  */
-export function isStudyStale(
-  sourceChunkIds: string[],
-  sourceRevision: number,
-  revisionByChunkId: Map<string, number>,
-): boolean {
-  return sourceChunkIds.some((id) => {
-    const current = revisionByChunkId.get(id);
-    return current === undefined || current > sourceRevision;
-  });
-}
 
 /** Revision lookup for every chunk in one room, for stale badges. */
 export function revisionMap(chunks: Chunk[]): Map<string, number> {
