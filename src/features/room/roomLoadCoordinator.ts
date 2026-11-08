@@ -56,6 +56,8 @@ export function createRoomLoadCoordinator(): RoomLoadCoordinator {
     },
     invalidate() {
       latest += 1;
+      focusPending = false;
+      deferred = false;
     },
   };
 }
@@ -81,4 +83,51 @@ export async function settleLatest<T>(
     onError(reason instanceof Error ? reason.message : 'Could not load room');
     return 'failed';
   }
+}
+
+export type RoomReader<T> = {
+  /** Load once for the current focus, then run any capture refresh that waited. */
+  focus: () => Promise<LoadOutcome>;
+  /** Queue a reload. Refreshes run one at a time so an older success is applied before a newer failure. */
+  refresh: () => Promise<void>;
+  /** Drop in-flight reads and queued refreshes when the screen loses focus. */
+  blur: () => void;
+};
+
+/**
+ * The room screen's load lifecycle in one place: focus loads and capture
+ * refreshes share the coordinator, and refreshes are serialised. A later
+ * refresh that fails therefore cannot discard an earlier successful read.
+ */
+export function createRoomReader<T>(deps: {
+  read: () => Promise<T>;
+  apply: (value: T) => void;
+  onError: (message: string) => void;
+}): RoomReader<T> {
+  const loads = createRoomLoadCoordinator();
+  let chain: Promise<void> = Promise.resolve();
+  const runRefresh = async (): Promise<void> => {
+    const plan = loads.startRefresh();
+    if (!plan.run) return;
+    await settleLatest(loads, plan.token, deps.read, deps.apply, deps.onError);
+  };
+  const refresh = (): Promise<void> => {
+    chain = chain.then(runRefresh, runRefresh);
+    return chain;
+  };
+  return {
+    async focus() {
+      const token = loads.startFocus();
+      const outcome = await settleLatest(loads, token, deps.read, deps.apply, (message) => {
+        loads.focusFailed();
+        deps.onError(message);
+      });
+      if (outcome === 'applied' && loads.focusSucceeded()) await refresh();
+      return outcome;
+    },
+    refresh,
+    blur() {
+      loads.invalidate();
+    },
+  };
 }

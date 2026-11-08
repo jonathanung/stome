@@ -15,7 +15,8 @@ import {
   createCaptureController,
   type CaptureStorage,
 } from '../src/features/capture/session.ts';
-import { createRoomLoadCoordinator, settleLatest } from '../src/features/room/roomLoadCoordinator.ts';
+import { actionError, clearLoadError, loadError } from '../src/features/room/errorOrigin.ts';
+import { createRoomLoadCoordinator, createRoomReader, settleLatest } from '../src/features/room/roomLoadCoordinator.ts';
 import { migrateDb } from '../src/db/migrate.ts';
 import { nodeDb } from './support/node-db.ts';
 
@@ -53,7 +54,7 @@ test('the capture panel and room screen use the production wiring', () => {
   // guard fails if either side stops calling the functions exercised above.
   const read = (file: string) => readFileSync(path.join(import.meta.dirname, '..', file), 'utf8');
   assert.match(read('src/features/capture/QuickCapture.tsx'), /commit:\s*\(operation\)\s*=>\s*commitCapture\(/);
-  assert.match(read('src/screens/RoomScreen.tsx'), /watchRoomCaptureRefresh\(id \?\? null, refresh\)/);
+  assert.match(read('src/screens/RoomScreen.tsx'), /watchRoomCaptureRefresh\(id \?\? null, reader.refresh\)/);
 });
 
 test('a capture during the focus load waits for it and then refreshes', async () => {
@@ -257,4 +258,50 @@ test('a rejected room refresh never becomes an unhandled rejection', async () =>
   );
   await new Promise((resolve) => setTimeout(resolve, 0));
   stop();
+});
+
+test('a failed newer refresh keeps the older successful capture refresh', async () => {
+  const reads: Array<ReturnType<typeof deferred<string>>> = [];
+  const applied: string[] = [];
+  const errors: string[] = [];
+  const reader = createRoomReader<string>({
+    read: () => {
+      const read = deferred<string>();
+      reads.push(read);
+      return read.promise;
+    },
+    apply: (value) => { applied.push(value); },
+    onError: (message) => { errors.push(message); },
+  });
+
+  const focus = reader.focus();
+  reads[0].resolve('empty room');
+  await focus;
+
+  const firstRefresh = reader.refresh();
+  const secondRefresh = reader.refresh();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(reads.length, 2, 'refreshes must run one at a time');
+
+  // The older refresh sees the captured note and applies it.
+  reads[1].resolve('the captured note');
+  await firstRefresh;
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(reads.length, 3, 'the queued refresh starts only after the previous one settles');
+
+  // The newer refresh fails; it must not undo the successful read.
+  reads[2].reject(new Error('database locked'));
+  await secondRefresh;
+
+  assert.deepEqual(applied, ['empty room', 'the captured note']);
+  assert.deepEqual(errors, ['database locked']);
+});
+
+test('a successful load clears only a load error, even when the messages match', () => {
+  const fromLoad = loadError('database locked');
+  assert.equal(clearLoadError(fromLoad), null);
+
+  const fromAction = actionError('database locked');
+  assert.deepEqual(clearLoadError(fromAction), fromAction, 'an action error must survive a successful load');
+  assert.equal(actionError(null), null);
 });

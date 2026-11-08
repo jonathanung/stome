@@ -12,8 +12,11 @@ import { Button, Screen, useStoneTheme } from '../../design-theme/src/primitives
 import { createCommit } from '../data/commit';
 import type { Annotation, Chunk, Room } from '../data/models';
 import type { CommitError, CommitResult, OpKind } from '../data/operations';
-import { getChunk, getRoom, listChunks, listDueChunks, listRoomAnnotations } from '../data/queries';
+import { getChunk, getRoom, listChunks, listDueChunks, listRoomAnnotations, listRoomDueAnswers } from '../data/queries';
+import { planDueItems } from '../data/today';
 import { expoDriver } from '../db/expo-driver';
+import { MarkButtons } from '../features/review/MarkButtons';
+import { reviewMarkController } from '../features/review/mark-attempt';
 import { AnchoredChunkText, PinnedAnswer } from '../features/ask/AnchoredChunkText';
 import type { ChunkFocus } from '../features/ask/citations';
 import { watchRoomCaptureRefresh } from '../features/capture/commitSignal';
@@ -26,7 +29,8 @@ import { InkLassoActions } from '../features/ask/InkLassoActions';
 import { PencilToolbar, type PencilTool } from '../features/ask/PencilToolbar';
 import { RoomAskPanel, type AskMessage } from '../features/ask/RoomAskPanel';
 import { RoomSidePanel } from '../features/room/RoomSidePanel';
-import { createRoomLoadCoordinator, settleLatest } from '../features/room/roomLoadCoordinator';
+import { actionError, clearLoadError as dismissLoadError, loadError, type ShownError } from '../features/room/errorOrigin';
+import { createRoomReader } from '../features/room/roomLoadCoordinator';
 import { PhoneRoomActions, PhoneRoomHeader, RoomTabs, SubjectChips, roomSubjects, type RoomTab } from '../features/room/PhoneRoomChrome';
 import { Icon } from '../ui/Icon';
 import { stageName } from '../ui/StageGlyph';
@@ -119,7 +123,8 @@ export function RoomScreen() {
   const [annotationText, setAnnotationText] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [shownError, setShownError] = useState<ShownError>(null);
+  const error = shownError?.message ?? null;
   const [pasteNotice, setPasteNotice] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [belowId, setBelowId] = useState<string | null>(null);
@@ -142,10 +147,14 @@ export function RoomScreen() {
   // Deletes wait out an undo window; the commit runs after this render, so
   // the effect below keeps handing it the latest list and functions.
   const chunksRef = useRef<ChunkWithAnnotations[]>([]);
+  // A load failure is cleared by the next successful load, but an action error is not.
+  const setActionError = useCallback((value: string | null) => {
+    setShownError(actionError(value));
+  }, []);
   const [deletes] = useState(() => new PendingDeletes({
     commit: async () => ({ ok: true }),
     onChange: setPendingDelete,
-    onError: setError,
+    onError: setActionError,
   }));
   // Leaving the room commits a pending delete rather than dropping it.
   useEffect(() => () => { void deletes.flush(); }, [deletes]);
@@ -153,8 +162,9 @@ export function RoomScreen() {
 
   const load = useCallback(async () => {
     if (!id) return { room: null, chunks: [] as ChunkWithAnnotations[], due: 0 };
-    const [nextRoom, notes, annotations, due] = await Promise.all([
-      getRoom(db, id), listChunks(db, id), listRoomAnnotations(db, id), listDueChunks(db, Date.now()),
+    const now = Date.now();
+    const [nextRoom, notes, annotations, chunksDue, answersDue] = await Promise.all([
+      getRoom(db, id), listChunks(db, id), listRoomAnnotations(db, id), listDueChunks(db, now), listRoomDueAnswers(db, id, now),
     ]);
     const byChunk = new Map<string, Annotation[]>();
     for (const annotation of annotations) {
@@ -162,24 +172,17 @@ export function RoomScreen() {
       group.push(annotation);
       byChunk.set(annotation.chunkId, group);
     }
-    return { room: nextRoom, due: due.filter((d) => d.chunk.roomId === id).length, chunks: notes.map((chunk) => ({
+    const roomChunksDue = chunksDue.filter((d) => d.chunk.roomId === id);
+    const due = planDueItems([...roomChunksDue, ...answersDue]).length;
+    return { room: nextRoom, due, chunks: notes.map((chunk) => ({
       ...chunk, annotations: byChunk.get(chunk.id) ?? [],
     })) };
   }, [db, id]);
-  // Focus loads, saves and quick-capture refreshes all read the same room.
-  // Only the newest started read may apply, so an older one cannot restore stale chunks.
-  const loads = useRef(createRoomLoadCoordinator()).current;
-  // A load failure is cleared by the next successful load, but an action error is not.
-  const loadError = useRef<string | null>(null);
   const reportLoadError = useCallback((message: string) => {
-    loadError.current = message;
-    setError(message);
+    setShownError(loadError(message));
   }, []);
   const clearLoadError = useCallback(() => {
-    const message = loadError.current;
-    if (message === null) return;
-    loadError.current = null;
-    setError((current) => current === message ? null : current);
+    setShownError(dismissLoadError);
   }, []);
   const applyRoom = useCallback((next: Awaited<ReturnType<typeof load>>) => {
     setRoom(next.room);
@@ -188,45 +191,29 @@ export function RoomScreen() {
     setLoading(false);
     clearLoadError();
   }, [clearLoadError]);
-  const refresh = useCallback(async () => {
-    const plan = loads.startRefresh();
-    if (!plan.run) return;
-    await settleLatest(loads, plan.token, load, applyRoom, (message) => {
-      reportLoadError(message);
-      setLoading(false);
-    });
-  }, [applyRoom, load, loads, reportLoadError]);
+  // Focus loads, saves and quick-capture refreshes all read the same room.
+  // The reader serialises refreshes and applies only the newest read, so a
+  // later failure cannot discard an earlier successful capture refresh.
+  const reader = useMemo(() => createRoomReader({
+    read: load,
+    apply: applyRoom,
+    onError: (message) => { reportLoadError(message); setLoading(false); },
+  }), [applyRoom, load, reportLoadError]);
+  const refresh = reader.refresh;
   useFocusEffect(useCallback(() => {
-    let active = true;
-    const token = loads.startFocus();
-    void settleLatest(
-      loads,
-      token,
-      load,
-      (next) => { if (active) applyRoom(next); },
-      (message) => {
-        if (!active) return;
-        loads.focusFailed();
-        reportLoadError(message);
-        setLoading(false);
-      },
-    ).then((outcome) => {
-      if (!active || outcome !== 'applied') return;
-      // A capture landed while this focus load was running; refresh now that
-      // the room has rendered, instead of invalidating a successful read.
-      if (loads.focusSucceeded()) void refresh();
-    });
+    void reader.focus();
     // A capture from the global panel commits outside this screen; reload so the
     // note list and the Ask chunk selection see it without a reload. It is scoped
     // to focus so a retained, unfocused room does not keep reading the database.
-    const stop = watchRoomCaptureRefresh(id ?? null, refresh);
+    const stop = watchRoomCaptureRefresh(id ?? null, reader.refresh);
+    const unsubscribe = reviewMarkController.subscribe(() => { void reader.refresh(); });
     return () => {
-      active = false;
       stop();
-      // Blur invalidates reads still in flight so they cannot apply after leaving.
-      loads.invalidate();
+      unsubscribe();
+      // Blur drops reads and queued refreshes so they cannot apply after leaving.
+      reader.blur();
     };
-  }, [applyRoom, id, loads, load, refresh, reportLoadError]));
+  }, [id, reader]));
   const openCitation = useCallback((next: ChunkFocus) => {
     setFocus(next);
   }, []);
@@ -260,10 +247,10 @@ export function RoomScreen() {
   async function action(run: () => Promise<void>) {
     if (busy) return;
     setBusy(true);
-    setError(null);
+    setActionError(null);
     try { await run(); await refresh(); }
     catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Could not save');
+      setActionError(reason instanceof Error ? reason.message : 'Could not save');
       await refresh().catch(() => undefined);
     } finally { setBusy(false); }
   }
@@ -382,7 +369,7 @@ export function RoomScreen() {
     if (!updated.ok) return updated;
     const removed = await commit({ opId: randomUUID(), kind: 'chunk.delete', ...human, expectedRevision: following.revision, payload: { chunkId: following.id } });
     await refresh().catch(() => undefined);
-    if (!removed.ok) setError(`The notes were joined, but the next note could not be removed: ${readable(removed.error)}`);
+    if (!removed.ok) setActionError(`The notes were joined, but the next note could not be removed: ${readable(removed.error)}`);
     return updated;
   }
 
@@ -399,7 +386,7 @@ export function RoomScreen() {
     if (!latest) return;
     const result = await commit({ opId: randomUUID(), kind: 'chunk.update', ...human, expectedRevision: latest.revision,
       payload: { chunkId: latest.id, body: entry.restoreBody } });
-    if (!result.ok) setError(readable(result.error));
+    if (!result.ok) setActionError(readable(result.error));
     await refresh().catch(() => undefined);
   }
 
@@ -435,6 +422,7 @@ export function RoomScreen() {
                 { text: 'Review this room', onPress: () => router.push(`/rooms/${room.id}/review`) },
                 { text: 'Slides', onPress: () => router.push(`/rooms/${room.id}/slides`) },
                 { text: 'Whiteboard', onPress: () => router.push(`/rooms/${room.id}/whiteboard`) },
+                { text: 'Import notes', onPress: () => router.push({ pathname: '/import', params: { roomId: room.id } }) },
                 { text: 'Cancel', style: 'cancel' },
               ])} />
             <RoomTabs value={tab} onChange={setTab} />
@@ -443,6 +431,7 @@ export function RoomScreen() {
             <RoomHeader room={room} chunkCount={chunks.length}
               onBack={() => router.replace('/')}
               onAsk={() => listRef.current?.scrollToEnd({ animated: true })}
+              onImport={() => router.push({ pathname: '/import', params: { roomId: room.id } })}
               onNewNote={() => { listRef.current?.scrollToOffset({ offset: 0, animated: true }); composerRef.current?.focus(); }} />
           </>}
           {phone && tab !== 'notes' ? null : <View style={{ gap: theme.space.xl, backgroundColor: theme.color.bg.surface, borderRadius: theme.radius.float, borderWidth: 1, borderColor: theme.color.border.hairline, padding: theme.space.base, ...theme.shadow.card }}>
@@ -495,7 +484,7 @@ export function RoomScreen() {
           const index = chunks.indexOf(item);
           const cited = focus?.chunkId === item.id ? focus : null;
           const next = chunks[index + 1];
-          return <ChunkEditor chunk={item} index={index} count={chunks.length} onError={setError}
+          return <ChunkEditor chunk={item} index={index} count={chunks.length} onError={setActionError}
             reorderDisabled={searching || Boolean(activeSubject && phone)}
             onAddBelow={() => { setBelowId(item.id); setBelowText(''); }}
             onSplit={(head, tail, rev) => splitNote(item, head, tail, rev)}
@@ -556,6 +545,12 @@ export function RoomScreen() {
               <Button label="Cancel" size="compact" variant="ghost" onPress={() => setAnnotating(null)} />
             </View>
           </View> : <View style={{ alignSelf: 'flex-start' }}><Button label="Annotate" size="compact" variant="outline" onPress={() => setAnnotating(item.id)} /></View>}
+          <MarkButtons
+            chunkId={item.id}
+            expectedRevision={item.revision}
+            commit={commit}
+            testID={`room-mark-${item.id}`}
+          />
         </ChunkEditor>;
         }}
       />
@@ -575,7 +570,7 @@ export function RoomScreen() {
 
   // iPad: the room beside an ask column, with a floating pencil tool bar.
   // The ask backend is not wired to this panel yet; questions stay local.
-  if (wide) return <View style={{ flex: 1, flexDirection: 'row' }} testID="room-wide-view">
+  if (wide) return <View style={{ flex: 1, flexDirection: 'row', backgroundColor: theme.color.bg.canvas }} testID="room-wide-view">
     <View style={{ flex: 1, minWidth: 0 }}>{roomList}</View>
     <View style={{ paddingTop: theme.space.page, paddingRight: theme.space.page }}>
       <RoomSidePanel roomId={room.id} subjects={subjects} chunks={chunks} dueToday={dueToday}
@@ -583,7 +578,7 @@ export function RoomScreen() {
     </View>
   </View>;
   if (!splitView) return roomList;
-  return <View style={{ flex: 1, flexDirection: 'row' }} testID="room-split-view">
+  return <View style={{ flex: 1, flexDirection: 'row', backgroundColor: theme.color.bg.canvas }} testID="room-split-view">
     <View style={{ flex: 1, minWidth: 0 }}>
       {roomList}
       {penTool === 'lasso' && inkSelected ? <InkLassoActions

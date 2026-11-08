@@ -17,7 +17,7 @@ export interface TabBarProps {
 
 function RoomsGlyph({ color }: { color: string }) {
   return (
-    <Svg width={26} height={18} viewBox="0 0 72 48" accessibilityElementsHidden importantForAccessibility="no">
+    <Svg width={26} height={18} viewBox="0 0 72 48" aria-hidden>
       <Rect x={4} y={2} width={64} height={11} rx={2} fill={color} />
       <Rect x={9} y={16} width={16} height={32} rx={2} fill={color} />
       <Rect x={47} y={16} width={16} height={32} rx={2} fill={color} />

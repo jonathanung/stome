@@ -17,6 +17,7 @@ import {
 import {
   MOCK_SCENARIOS,
   chunkViewFromFoundation,
+  isAnnotationProposal,
   isEditProposal,
   type MockScenario,
   type StoredProposal,
@@ -284,8 +285,10 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
     busy || !database || !session || pending || (session.state !== 'failed' && session.state !== 'cancelled' && session.state !== 'completed');
   const confirmDisabled = busy || !session?.pendingOperationId;
 
+  // Study drafts are confirmed through the study path, never this panel;
+  // the annotation guard keeps the answer-only components well-typed.
   const sheetCitations =
-    proposal && !isEditProposal(proposal)
+    proposal && isAnnotationProposal(proposal)
       ? citationsForProposal(session?.selectedChunkIds ?? [], chunks, proposal)
       : null;
   const includedLabels = (session?.selectedChunkIds?.length ? session.selectedChunkIds : selectedIds)
@@ -319,7 +322,9 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
             proposal
               ? isEditProposal(proposal)
                 ? { kind: 'edit', body: proposal.body, previousBody: proposal.previousBody }
-                : { kind: 'answer', body: proposal.body }
+                : isAnnotationProposal(proposal)
+                    ? { kind: 'answer', body: proposal.body }
+                    : null
               : null
           }
           question={askedPrompt}
@@ -491,7 +496,7 @@ export function HarnessPanel({ roomId, chunks, appDb, onSaved, onOpenCitation }:
           <Text style={styles.secondaryText}>Continue</Text>
         </Pressable>
       </View>
-      {proposal && !isEditProposal(proposal) ? (
+      {proposal && isAnnotationProposal(proposal) ? (
         <AskProposalCard
           body={proposal.body}
           busy={busy}

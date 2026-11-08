@@ -1,6 +1,7 @@
 import { Platform, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 
 import { createStyles, useStoneTheme } from '../../../design-theme/src/primitives';
+import { MAX_IMPORT_BATCH } from '../../import/batch';
 import { Icon } from '../../ui/Icon';
 
 export interface ChooseFileRow {
@@ -71,8 +72,10 @@ function Sources() {
 }
 
 export function ImportChooseFiles({
-  collection, onCollection, rows, onPath, onRemove, onChoose, onCancel, onPreview, busy,
+  collection, onCollection, rows, onPath, onRemove, onChoose, onCancel, onPreview, busy, targetRoom,
 }: {
+  /** Name of the room every picked note goes into, when import was opened from a room. */
+  targetRoom?: string;
   collection: string;
   onCollection(value: string): void;
   rows: readonly ChooseFileRow[];
@@ -98,7 +101,11 @@ export function ImportChooseFiles({
       <View style={styles.header}>
         <View style={styles.headerText}>
           <Text accessibilityRole="header" style={styles.title}>bring your notes</Text>
-          <Text style={styles.sub}>nothing is saved until you pick rooms and confirm. imports don&apos;t award stones.</Text>
+          <Text style={styles.sub}>
+            {targetRoom
+              ? `importing into ${targetRoom}. you can still change any note's room before you confirm. imports don't award stones.`
+              : 'nothing is saved until you pick rooms and confirm. imports don\'t award stones.'}
+          </Text>
         </View>
         <ImportSteps current={1} />
       </View>
@@ -118,13 +125,14 @@ export function ImportChooseFiles({
         </View>
 
         <View style={styles.drop}>
-          <View style={styles.dropText}>
+          {/* The whole zone opens the picker; the button below stays the one focusable control. */}
+          <Pressable accessible={false} focusable={false} disabled={busy} onPress={onChoose} style={[styles.dropText, { flex: 1 }]}>
             <Icon name="upload" size={24} color={theme.color.text.primary} />
             <View style={{ flexShrink: 1 }}>
               <Text style={styles.dropTitle}>{Platform.OS === 'web' ? 'drop .md files or choose them' : 'choose .md files'}</Text>
-              <Text style={styles.meta}>up to 20 at a time · {rows.length} chosen</Text>
+              <Text style={styles.meta}>up to {MAX_IMPORT_BATCH} per import · {rows.length} chosen</Text>
             </View>
-          </View>
+          </Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel="choose files" accessibilityState={{ disabled: busy }} disabled={busy} onPress={onChoose} style={[styles.btn, styles.btnSec, busy && styles.disabled]}>
             <Text style={styles.btnSecText}>{rows.length ? 'choose more files' : 'choose files'}</Text>
           </Pressable>

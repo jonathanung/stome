@@ -102,7 +102,10 @@ async function runLane(browser, width, height, label) {
     await waitForText(page, 'No notes in this room yet');
     assert((await chunkCards(page)).length === 0, 'empty room should start with no chunks');
 
-    await clickVisible(page, '[data-testid="quick-capture-button"]');
+    // The shell opens the panel; the shortcut is the same path on both viewports.
+    await page.keyboard.down('Alt');
+    await page.keyboard.press('KeyN');
+    await page.keyboard.up('Alt');
     await page.waitForSelector('[data-testid="quick-capture-input"]', { timeout: 10000 });
     await page.click('[data-testid="quick-capture-input"]');
     await page.type('[data-testid="quick-capture-input"]', body);
