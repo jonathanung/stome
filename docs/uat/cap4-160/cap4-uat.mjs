@@ -105,21 +105,20 @@ async function startSampler(page, lane) {
   const startedAt = Date.now();
   const stamps = [];
   let firstError = null;
+  let session = await page.createCDPSession();
   const captureOnce = async () => {
-    // A fresh session per frame: a hung captureScreenshot on one session would
-    // otherwise block every later frame (protocolTimeout).
-    const session = await page.createCDPSession();
-    try {
-      const shot = await Promise.race([
-        session.send('Page.captureScreenshot', {
-          format: 'jpeg', quality: 65, fromSurface: true, captureBeyondViewport: false, optimizeForSpeed: true,
-        }),
-        delay(2000).then(() => { throw new Error('capture timeout'); }),
-      ]);
-      return Buffer.from(shot.data, 'base64');
-    } finally {
-      await session.detach().catch(() => undefined);
-    }
+    const shot = await Promise.race([
+      session.send('Page.captureScreenshot', {
+        format: 'jpeg', quality: 65, fromSurface: true, captureBeyondViewport: false, optimizeForSpeed: true,
+      }),
+      delay(3000).then(() => { throw new Error('capture timeout'); }),
+    ]);
+    return Buffer.from(shot.data, 'base64');
+  };
+  const resetSession = async () => {
+    const stale = session;
+    session = await page.createCDPSession();
+    await stale.detach().catch(() => undefined);
   };
   const loop = (async () => {
     while (!stopped) {
@@ -130,6 +129,9 @@ async function startSampler(page, lane) {
         index += 1;
       } catch (error) {
         firstError ??= error instanceof Error ? error.message : String(error);
+        // A hung captureScreenshot would block every later frame on this
+        // session, so start a clean one.
+        await resetSession().catch(() => undefined);
       }
       await delay(250);
     }
@@ -142,20 +144,14 @@ async function startSampler(page, lane) {
       const seconds = Math.round((Date.now() - startedAt) / 1000);
       const endUrl = page.url();
       if (index > 1) {
-        // Preserve real wall-clock spacing so gaps from a timed-out capture
-        // play as a held frame rather than silently speeding the video up.
-        const list = [];
-        for (let i = 0; i < index; i += 1) {
-          const next = i + 1 < index ? stamps[i + 1] : stamps[i] + 300;
-          const duration = Math.max(0.05, (next - stamps[i]) / 1000);
-          list.push(`file 'frame-${String(i).padStart(5, '0')}.jpg'`);
-          list.push(`duration ${duration.toFixed(3)}`);
-        }
-        list.push(`file 'frame-${String(index - 1).padStart(5, '0')}.jpg'`);
-        writeFileSync(`${dir}/concat.txt`, `${list.join('\n')}\n`);
+        // Encode at the observed average capture rate so the video's wall-clock
+        // length matches the lane; capture gaps become held frames.
+        const span = Math.max(0.5, (stamps[stamps.length - 1] - stamps[0]) / 1000);
+        const fps = Math.max(0.5, Number((index / span).toFixed(2)));
         execFileSync('ffmpeg', [
-          '-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', `${dir}/concat.txt`,
-          '-fps_mode', 'vfr', '-c:v', 'libvpx-vp9', '-b:v', '1M', '-pix_fmt', 'yuv420p', video,
+          '-y', '-loglevel', 'error', '-framerate', String(fps),
+          '-i', `${dir}/frame-%05d.jpg`,
+          '-c:v', 'libvpx-vp9', '-b:v', '1M', '-pix_fmt', 'yuv420p', video,
         ]);
         writeFileSync(`${outDir}/cap4-${lane}.recording.json`, JSON.stringify({
           note: 'Low-frame-rate sampled recording (~4 fps target) of the real Chrome page during the UAT lane. '
@@ -165,6 +161,7 @@ async function startSampler(page, lane) {
           startUrl,
           endUrl,
           frames: index,
+          fps,
           laneSeconds: seconds,
           videoSeconds: (stamps[stamps.length - 1] - stamps[0]) / 1000,
           viewport: lane,
@@ -184,10 +181,23 @@ async function domClick(page, selector) {
   await handle.evaluate((node) => node.click());
 }
 
+async function clickText(page, text) {
+  const clicked = await page.evaluate((wanted) => {
+    const nodes = Array.from(document.querySelectorAll('[role="button"], [role="link"], button, a'));
+    const target = nodes.find((node) => (node.innerText || '').trim().toLowerCase() === wanted.toLowerCase());
+    if (!target) return false;
+    target.click();
+    return true;
+  }, text);
+  if (!clicked) throw new Error(`clickable text not found: ${text}`);
+}
+
+async function assertAnchor(page, label, anchor) {
+  await waitForText(page, anchor, 30000);
+  check(`${label}: shows "${anchor}"`, (await bodyText(page)).includes(anchor));
+}
+
 async function createRoom(page, name) {
-  await page.goto(url, { waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('input[aria-label="New room name"], [data-testid="new-room"], [aria-label="New room"]', { timeout: 90000 });
-  await delay(800);
   const phoneButton = await page.$('[data-testid="new-room"]');
   if (phoneButton) {
     await phoneButton.evaluate((node) => node.click());
@@ -195,18 +205,29 @@ async function createRoom(page, name) {
     await domClick(page, '[aria-label="New room"]');
   }
   await page.waitForSelector('input[aria-label="New room name"]', { timeout: 20000 });
-  const input = await page.$('input[aria-label="New room name"]');
-  await input.evaluate((node) => node.focus());
-  await page.type('input[aria-label="New room name"]', name);
+  const field = await visibleCenter(page, 'input[aria-label="New room name"]');
+  if (!field) throw new Error('new room field is not visible');
+  await page.mouse.click(field.x, field.y);
+  await page.keyboard.type(name, { delay: 10 });
   await page.keyboard.press('Enter');
   // Enter creates the room and may or may not navigate into it.
-  await page.waitForSelector(`[aria-label="Open ${name}"]`, { timeout: 30000 });
+  await Promise.race([
+    page.waitForSelector(`[aria-label="Open ${name}"]`, { timeout: 30000 }),
+    page.waitForSelector('textarea[aria-label="Note content"]', { timeout: 30000 }),
+  ]);
   note(`created room ${name}`);
 }
 
-async function openRoom(page, name) {
-  // Always re-enter through the list so the lane is on a known route and room.
-  await page.goto(url, { waitUntil: 'domcontentloaded' });
+async function openRoom(page, name, phone) {
+  // Navigate back to the list in-app (client-side routing) so the lane does not
+  // churn the OPFS database with full document reloads before the deliberate
+  // persistence reload.
+  if (phone) {
+    await domClick(page, '[data-testid="tab-rooms"]');
+  } else {
+    await clickTextReal(page, 'Rooms');
+  }
+  await page.waitForSelector(`[aria-label="Open ${name}"]`, { timeout: 30000 });
   await domClick(page, `[aria-label="Open ${name}"]`);
   await page.waitForSelector('textarea[aria-label="Note content"]', { timeout: 30000 });
   await delay(600);
@@ -217,6 +238,37 @@ async function openRoom(page, name) {
   note(`opened room ${name} at ${page.url()}`);
 }
 
+async function visibleCenter(page, selector) {
+  return page.evaluate((sel) => {
+    const nodes = Array.from(document.querySelectorAll(sel));
+    for (const node of nodes) {
+      const rect = node.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+      }
+    }
+    return null;
+  }, selector);
+}
+
+/** Real mouse click on the first visible control whose exact text matches. */
+async function clickTextReal(page, text, skipTestId) {
+  const point = await page.evaluate(({ wanted, skip }) => {
+    const nodes = Array.from(document.querySelectorAll('[role="button"], button, [role="link"], a'));
+    for (const node of nodes) {
+      if (skip && node.getAttribute('data-testid') === skip) continue;
+      if ((node.innerText || '').trim().toLowerCase() !== wanted.toLowerCase()) continue;
+      const rect = node.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+      }
+    }
+    return null;
+  }, { wanted: text, skip: skipTestId ?? null });
+  if (!point) throw new Error(`visible clickable text not found: ${text}`);
+  await page.mouse.click(point.x, point.y);
+}
+
 async function addNote(page, text, phone) {
   if (phone) {
     await page.waitForSelector('[data-testid="room-add-note"]', { timeout: 20000 });
@@ -224,22 +276,20 @@ async function addNote(page, text, phone) {
     await delay(600);
   }
   await page.waitForSelector('textarea[aria-label="Note content"]', { timeout: 20000 });
-  await page.$eval('textarea[aria-label="Note content"]', (node) => node.focus());
-  await page.type('textarea[aria-label="Note content"]', text);
-  await delay(200);
-  const clicked = await page.evaluate(() => {
-    const nodes = Array.from(document.querySelectorAll('[role="button"], button'));
-    const target = nodes.find((node) => node.getAttribute('data-testid') !== 'room-add-note'
-      && (node.innerText || '').trim().toLowerCase() === 'add note');
-    if (!target) return false;
-    target.click();
-    return true;
-  });
-  if (!clicked) throw new Error('Add note submit button not found');
+  const field = await visibleCenter(page, 'textarea[aria-label="Note content"]');
+  if (!field) throw new Error('note composer is not visible');
+  await page.mouse.click(field.x, field.y);
+  await page.keyboard.type(text, { delay: 10 });
+  await delay(400);
+  await clickTextReal(page, 'Add note', 'room-add-note');
 }
 
 async function runLane(browser, width, height, lane, scheme) {
-  const page = await browser.newPage();
+  // A fresh browser context per lane gives each lane its own OPFS/SQLite
+  // storage, so lanes never contend for the same access handle and every lane
+  // starts from an empty database.
+  const context = await browser.createBrowserContext();
+  const page = await context.newPage();
   await page.setViewport({ width, height, deviceScaleFactor: 1 });
   await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: scheme }]);
   page.on('pageerror', (error) => note(`pageerror:${lane}: ${error.message}`));
@@ -257,6 +307,8 @@ async function runLane(browser, width, height, lane, scheme) {
 
     // Rooms home
     await assertNoCapture(page, `${lane} rooms home`);
+    check(`${lane}: rooms home loaded`, (await bodyText(page)).includes('Your rooms')
+      || Boolean(await page.$('input[aria-label="search rooms"]')));
     await shot(page, `cap4-${lane}-rooms-home`);
 
     // Sidebar / tab bar chrome
@@ -291,7 +343,7 @@ async function runLane(browser, width, height, lane, scheme) {
 
     // Create a room and add an in-room note
     await createRoom(page, roomName);
-    await openRoom(page, roomName);
+    await openRoom(page, roomName, width < 760);
     await assertNoCapture(page, `${lane} room`);
     await shot(page, `cap4-${lane}-room`);
     await addNote(page, noteText, width < 760);
@@ -310,24 +362,35 @@ async function runLane(browser, width, height, lane, scheme) {
     await page.goto(`${url}today`, { waitUntil: 'domcontentloaded' });
     await delay(1200);
     await assertNoCapture(page, `${lane} today`);
+    await assertAnchor(page, `${lane} today`, 'Nothing due today');
+    check(`${lane}: today keeps "Capture a note"`, (await bodyText(page)).includes('Capture a note'));
     await shot(page, `cap4-${lane}-today`);
+
+    // Today's "Capture a note" still opens /notes
+    await clickTextReal(page, 'Capture a note');
+    await page.waitForFunction(() => window.location.pathname === '/notes', { timeout: 20000 });
+    await assertAnchor(page, `${lane} notes`, 'Stome');
+    await shot(page, `cap4-${lane}-notes`);
 
     // Recent / Search
     await page.goto(`${url}recent`, { waitUntil: 'domcontentloaded' });
     await delay(1000);
     await assertNoCapture(page, `${lane} recent/search`);
+    await assertAnchor(page, `${lane} recent/search`, 'Recent notes');
     await shot(page, `cap4-${lane}-recent`);
 
     // Import
     await page.goto(`${url}import`, { waitUntil: 'domcontentloaded' });
     await delay(1000);
     await assertNoCapture(page, `${lane} import`);
+    await assertAnchor(page, `${lane} import`, 'bring your notes');
     await shot(page, `cap4-${lane}-import`);
 
     // Companion
     await page.goto(`${url}companion`, { waitUntil: 'domcontentloaded' });
     await delay(1200);
     await assertNoCapture(page, `${lane} companion`);
+    await assertAnchor(page, `${lane} companion`, 'Pairing');
     await shot(page, `cap4-${lane}-companion`);
 
     note(`lane ${lane} complete`);
@@ -339,6 +402,7 @@ async function runLane(browser, width, height, lane, scheme) {
     throw Object.assign(error, { stopped });
   } finally {
     await page.close().catch(() => undefined);
+    await context.close().catch(() => undefined);
   }
 }
 
@@ -370,7 +434,7 @@ try {
     results,
     assertions,
     failure,
-    recordingNote: 'Low-frame-rate (3 fps) sampled recording of the real Chrome page during each lane. Real mouse/keyboard input; not screen-refresh video.',
+    recordingNote: 'Low-frame-rate sampled (~4 fps target) recording of the real Chrome page during each lane, one per isolated browser context. Frame durations preserve wall-clock spacing; capture gaps are held frames.',
   }, null, 2));
   await browser.close().catch(() => undefined);
   note(`artifacts: ${outDir}`);

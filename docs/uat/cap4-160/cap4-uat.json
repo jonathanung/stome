@@ -1,33 +1,33 @@
 {
   "issue": 160,
-  "commit": "7572dba4040cdfe44effcdba0ce4241d5ec3e4bc",
+  "commit": "146d87c6fbc7fd0380281881cdc1623f3d03a736",
   "branch": "chore/remove-quick-capture",
   "url": "http://127.0.0.1:8091/",
   "chrome": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-  "startedAt": "2026-11-08T01:09:29.148Z",
+  "startedAt": "2026-11-08T01:37:35.965Z",
   "results": [
     {
       "lane": "phone-390x844-dark",
-      "roomName": "UAT phone-390x844-dark cap4mw74vnc8",
-      "noteText": "photosynthesis cap4mw74vnc8 phone-390x844-dark",
+      "roomName": "UAT phone-390x844-dark cap4mw75w3jn",
+      "noteText": "photosynthesis cap4mw75w3jn phone-390x844-dark",
       "video": "/tmp/stome-browser/artifacts/cap4/cap4-phone-390x844-dark.webm"
     },
     {
       "lane": "desktop-1280x900-dark",
-      "roomName": "UAT desktop-1280x900-dark cap4mw74vnc8",
-      "noteText": "photosynthesis cap4mw74vnc8 desktop-1280x900-dark",
+      "roomName": "UAT desktop-1280x900-dark cap4mw75w3jn",
+      "noteText": "photosynthesis cap4mw75w3jn desktop-1280x900-dark",
       "video": "/tmp/stome-browser/artifacts/cap4/cap4-desktop-1280x900-dark.webm"
     },
     {
       "lane": "phone-390x844-light",
-      "roomName": "UAT phone-390x844-light cap4mw74vnc8",
-      "noteText": "photosynthesis cap4mw74vnc8 phone-390x844-light",
+      "roomName": "UAT phone-390x844-light cap4mw75w3jn",
+      "noteText": "photosynthesis cap4mw75w3jn phone-390x844-light",
       "video": "/tmp/stome-browser/artifacts/cap4/cap4-phone-390x844-light.webm"
     },
     {
       "lane": "desktop-1280x900-light",
-      "roomName": "UAT desktop-1280x900-light cap4mw74vnc8",
-      "noteText": "photosynthesis cap4mw74vnc8 desktop-1280x900-light",
+      "roomName": "UAT desktop-1280x900-light cap4mw75w3jn",
+      "noteText": "photosynthesis cap4mw75w3jn desktop-1280x900-light",
       "video": "/tmp/stome-browser/artifacts/cap4/cap4-desktop-1280x900-light.webm"
     }
   ],
@@ -44,6 +44,11 @@
     },
     {
       "name": "phone-390x844-dark rooms home: no Alt+N hint",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "phone-390x844-dark: rooms home loaded",
       "ok": true,
       "detail": ""
     },
@@ -133,6 +138,21 @@
       "detail": ""
     },
     {
+      "name": "phone-390x844-dark today: shows \"Nothing due today\"",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "phone-390x844-dark: today keeps \"Capture a note\"",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "phone-390x844-dark notes: shows \"Stome\"",
+      "ok": true,
+      "detail": ""
+    },
+    {
       "name": "phone-390x844-dark recent/search: no capture testIDs",
       "ok": true,
       "detail": ""
@@ -144,6 +164,11 @@
     },
     {
       "name": "phone-390x844-dark recent/search: no Alt+N hint",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "phone-390x844-dark recent/search: shows \"Recent notes\"",
       "ok": true,
       "detail": ""
     },
@@ -163,6 +188,11 @@
       "detail": ""
     },
     {
+      "name": "phone-390x844-dark import: shows \"bring your notes\"",
+      "ok": true,
+      "detail": ""
+    },
+    {
       "name": "phone-390x844-dark companion: no capture testIDs",
       "ok": true,
       "detail": ""
@@ -178,6 +208,11 @@
       "detail": ""
     },
     {
+      "name": "phone-390x844-dark companion: shows \"Pairing\"",
+      "ok": true,
+      "detail": ""
+    },
+    {
       "name": "desktop-1280x900-dark rooms home: no capture testIDs",
       "ok": true,
       "detail": ""
@@ -189,6 +224,11 @@
     },
     {
       "name": "desktop-1280x900-dark rooms home: no Alt+N hint",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "desktop-1280x900-dark: rooms home loaded",
       "ok": true,
       "detail": ""
     },
@@ -263,6 +303,21 @@
       "detail": ""
     },
     {
+      "name": "desktop-1280x900-dark today: shows \"Nothing due today\"",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "desktop-1280x900-dark: today keeps \"Capture a note\"",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "desktop-1280x900-dark notes: shows \"Stome\"",
+      "ok": true,
+      "detail": ""
+    },
+    {
       "name": "desktop-1280x900-dark recent/search: no capture testIDs",
       "ok": true,
       "detail": ""
@@ -274,6 +329,11 @@
     },
     {
       "name": "desktop-1280x900-dark recent/search: no Alt+N hint",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "desktop-1280x900-dark recent/search: shows \"Recent notes\"",
       "ok": true,
       "detail": ""
     },
@@ -293,6 +353,11 @@
       "detail": ""
     },
     {
+      "name": "desktop-1280x900-dark import: shows \"bring your notes\"",
+      "ok": true,
+      "detail": ""
+    },
+    {
       "name": "desktop-1280x900-dark companion: no capture testIDs",
       "ok": true,
       "detail": ""
@@ -308,6 +373,11 @@
       "detail": ""
     },
     {
+      "name": "desktop-1280x900-dark companion: shows \"Pairing\"",
+      "ok": true,
+      "detail": ""
+    },
+    {
       "name": "phone-390x844-light rooms home: no capture testIDs",
       "ok": true,
       "detail": ""
@@ -319,6 +389,11 @@
     },
     {
       "name": "phone-390x844-light rooms home: no Alt+N hint",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "phone-390x844-light: rooms home loaded",
       "ok": true,
       "detail": ""
     },
@@ -408,6 +483,21 @@
       "detail": ""
     },
     {
+      "name": "phone-390x844-light today: shows \"Nothing due today\"",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "phone-390x844-light: today keeps \"Capture a note\"",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "phone-390x844-light notes: shows \"Stome\"",
+      "ok": true,
+      "detail": ""
+    },
+    {
       "name": "phone-390x844-light recent/search: no capture testIDs",
       "ok": true,
       "detail": ""
@@ -419,6 +509,11 @@
     },
     {
       "name": "phone-390x844-light recent/search: no Alt+N hint",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "phone-390x844-light recent/search: shows \"Recent notes\"",
       "ok": true,
       "detail": ""
     },
@@ -438,6 +533,11 @@
       "detail": ""
     },
     {
+      "name": "phone-390x844-light import: shows \"bring your notes\"",
+      "ok": true,
+      "detail": ""
+    },
+    {
       "name": "phone-390x844-light companion: no capture testIDs",
       "ok": true,
       "detail": ""
@@ -453,6 +553,11 @@
       "detail": ""
     },
     {
+      "name": "phone-390x844-light companion: shows \"Pairing\"",
+      "ok": true,
+      "detail": ""
+    },
+    {
       "name": "desktop-1280x900-light rooms home: no capture testIDs",
       "ok": true,
       "detail": ""
@@ -464,6 +569,11 @@
     },
     {
       "name": "desktop-1280x900-light rooms home: no Alt+N hint",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "desktop-1280x900-light: rooms home loaded",
       "ok": true,
       "detail": ""
     },
@@ -538,6 +648,21 @@
       "detail": ""
     },
     {
+      "name": "desktop-1280x900-light today: shows \"Nothing due today\"",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "desktop-1280x900-light: today keeps \"Capture a note\"",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "desktop-1280x900-light notes: shows \"Stome\"",
+      "ok": true,
+      "detail": ""
+    },
+    {
       "name": "desktop-1280x900-light recent/search: no capture testIDs",
       "ok": true,
       "detail": ""
@@ -549,6 +674,11 @@
     },
     {
       "name": "desktop-1280x900-light recent/search: no Alt+N hint",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "desktop-1280x900-light recent/search: shows \"Recent notes\"",
       "ok": true,
       "detail": ""
     },
@@ -568,6 +698,11 @@
       "detail": ""
     },
     {
+      "name": "desktop-1280x900-light import: shows \"bring your notes\"",
+      "ok": true,
+      "detail": ""
+    },
+    {
       "name": "desktop-1280x900-light companion: no capture testIDs",
       "ok": true,
       "detail": ""
@@ -581,8 +716,13 @@
       "name": "desktop-1280x900-light companion: no Alt+N hint",
       "ok": true,
       "detail": ""
+    },
+    {
+      "name": "desktop-1280x900-light companion: shows \"Pairing\"",
+      "ok": true,
+      "detail": ""
     }
   ],
   "failure": null,
-  "recordingNote": "Low-frame-rate (3 fps) sampled recording of the real Chrome page during each lane. Real mouse/keyboard input; not screen-refresh video."
+  "recordingNote": "Low-frame-rate sampled (~4 fps target) recording of the real Chrome page during each lane, one per isolated browser context. Frame durations preserve wall-clock spacing; capture gaps are held frames."
 }

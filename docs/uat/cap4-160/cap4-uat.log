@@ -3,6 +3,7 @@ console:phone-390x844-dark: React does not recognize the `%s` prop on a DOM elem
 PASS phone-390x844-dark rooms home: no capture testIDs
 PASS phone-390x844-dark rooms home: no "Quick capture" copy
 PASS phone-390x844-dark rooms home: no Alt+N hint
+PASS phone-390x844-dark: rooms home loaded
 PASS phone-390x844-dark: phone tab bar has no centre + button
 PASS phone-390x844-dark: tab-today present
 PASS phone-390x844-dark: tab-rooms present
@@ -11,21 +12,8 @@ PASS phone-390x844-dark: tab-search present
 PASS phone-390x844-dark: Alt+N opens nothing
 PASS phone-390x844-dark: Ctrl+Alt+N opens nothing
 PASS phone-390x844-dark: key presses do not change the page
-console:phone-390x844-dark: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. accessibilityElementsHidden accessibilityelemen
-console:phone-390x844-dark: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. importantForAccessibility importantforaccessibi
-created room UAT phone-390x844-dark cap4mw74vnc8
-console:phone-390x844-dark: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. accessibilityElementsHidden accessibilityelemen
-console:phone-390x844-dark: %o
-
-%s
-
-%s
- Error: Failed to execute 'createSyncAccessHandle' on 'FileSystemFileHandle': Access Handles cannot be created if there is another open Access Handle or Writable stream associated with the same file. The above error occurred in the <SQLiteProviderSuspense> component. React will try to rec
-console:phone-390x844-dark: DatabaseBoundary caught Error: Failed to execute 'createSyncAccessHandle' on 'FileSystemFileHandle': Access Handles cannot be created if there is another open Access Handle or Writable stream associated with the same file. 
-    at SQLiteProviderSuspense (http://127.0.0.1:8091/node_modules/expo-route
-console:phone-390x844-dark: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. accessibilityElementsHidden accessibilityelemen
-console:phone-390x844-dark: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. importantForAccessibility importantforaccessibi
-opened room UAT phone-390x844-dark cap4mw74vnc8 at http://127.0.0.1:8091/rooms/a9d71bfe-eb4b-4056-a914-2ba5985e6626
+created room UAT phone-390x844-dark cap4mw75w3jn
+opened room UAT phone-390x844-dark cap4mw75w3jn at http://127.0.0.1:8091/rooms/e1d98aab-25de-41b6-9ecd-859e401e20c0
 PASS phone-390x844-dark room: no capture testIDs
 PASS phone-390x844-dark room: no "Quick capture" copy
 PASS phone-390x844-dark room: no Alt+N hint
@@ -39,41 +27,39 @@ console:phone-390x844-dark: React does not recognize the `%s` prop on a DOM elem
 PASS phone-390x844-dark today: no capture testIDs
 PASS phone-390x844-dark today: no "Quick capture" copy
 PASS phone-390x844-dark today: no Alt+N hint
+PASS phone-390x844-dark today: shows "Nothing due today"
+PASS phone-390x844-dark: today keeps "Capture a note"
+PASS phone-390x844-dark notes: shows "Stome"
 console:phone-390x844-dark: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. accessibilityElementsHidden accessibilityelemen
 console:phone-390x844-dark: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. importantForAccessibility importantforaccessibi
 PASS phone-390x844-dark recent/search: no capture testIDs
 PASS phone-390x844-dark recent/search: no "Quick capture" copy
 PASS phone-390x844-dark recent/search: no Alt+N hint
+PASS phone-390x844-dark recent/search: shows "Recent notes"
 console:phone-390x844-dark: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. accessibilityElementsHidden accessibilityelemen
 console:phone-390x844-dark: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. importantForAccessibility importantforaccessibi
 PASS phone-390x844-dark import: no capture testIDs
 PASS phone-390x844-dark import: no "Quick capture" copy
 PASS phone-390x844-dark import: no Alt+N hint
+PASS phone-390x844-dark import: shows "bring your notes"
 console:phone-390x844-dark: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. accessibilityElementsHidden accessibilityelemen
 console:phone-390x844-dark: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. importantForAccessibility importantforaccessibi
 PASS phone-390x844-dark companion: no capture testIDs
 PASS phone-390x844-dark companion: no "Quick capture" copy
 PASS phone-390x844-dark companion: no Alt+N hint
+PASS phone-390x844-dark companion: shows "Pairing"
 lane phone-390x844-dark complete
 PASS desktop-1280x900-dark rooms home: no capture testIDs
 PASS desktop-1280x900-dark rooms home: no "Quick capture" copy
 PASS desktop-1280x900-dark rooms home: no Alt+N hint
+PASS desktop-1280x900-dark: rooms home loaded
 PASS desktop-1280x900-dark: sidebar has no Quick capture row
 PASS desktop-1280x900-dark: sidebar shows Companion
 PASS desktop-1280x900-dark: Alt+N opens nothing
 PASS desktop-1280x900-dark: Ctrl+Alt+N opens nothing
 PASS desktop-1280x900-dark: key presses do not change the page
-created room UAT desktop-1280x900-dark cap4mw74vnc8
-console:desktop-1280x900-dark: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. accessibilityElementsHidden accessibilityelemen
-console:desktop-1280x900-dark: %o
-
-%s
-
-%s
- Error: Failed to execute 'createSyncAccessHandle' on 'FileSystemFileHandle': Access Handles cannot be created if there is another open Access Handle or Writable stream associated with the same file. The above error occurred in the <SQLiteProviderSuspense> component. React will try to rec
-console:desktop-1280x900-dark: DatabaseBoundary caught Error: Failed to execute 'createSyncAccessHandle' on 'FileSystemFileHandle': Access Handles cannot be created if there is another open Access Handle or Writable stream associated with the same file. 
-    at SQLiteProviderSuspense (http://127.0.0.1:8091/node_modules/expo-route
-opened room UAT desktop-1280x900-dark cap4mw74vnc8 at http://127.0.0.1:8091/rooms/57270071-b197-4655-a4f9-37db3e58e8d3
+created room UAT desktop-1280x900-dark cap4mw75w3jn
+opened room UAT desktop-1280x900-dark cap4mw75w3jn at http://127.0.0.1:8091/rooms/08965b33-5b19-4181-ac05-c71e29eec460
 PASS desktop-1280x900-dark room: no capture testIDs
 PASS desktop-1280x900-dark room: no "Quick capture" copy
 PASS desktop-1280x900-dark room: no Alt+N hint
@@ -83,21 +69,28 @@ PASS desktop-1280x900-dark: in-room note persists across reload
 PASS desktop-1280x900-dark today: no capture testIDs
 PASS desktop-1280x900-dark today: no "Quick capture" copy
 PASS desktop-1280x900-dark today: no Alt+N hint
+PASS desktop-1280x900-dark today: shows "Nothing due today"
+PASS desktop-1280x900-dark: today keeps "Capture a note"
+PASS desktop-1280x900-dark notes: shows "Stome"
 PASS desktop-1280x900-dark recent/search: no capture testIDs
 PASS desktop-1280x900-dark recent/search: no "Quick capture" copy
 PASS desktop-1280x900-dark recent/search: no Alt+N hint
+PASS desktop-1280x900-dark recent/search: shows "Recent notes"
 PASS desktop-1280x900-dark import: no capture testIDs
 PASS desktop-1280x900-dark import: no "Quick capture" copy
 PASS desktop-1280x900-dark import: no Alt+N hint
+PASS desktop-1280x900-dark import: shows "bring your notes"
 PASS desktop-1280x900-dark companion: no capture testIDs
 PASS desktop-1280x900-dark companion: no "Quick capture" copy
 PASS desktop-1280x900-dark companion: no Alt+N hint
+PASS desktop-1280x900-dark companion: shows "Pairing"
 lane desktop-1280x900-dark complete
 console:phone-390x844-light: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. accessibilityElementsHidden accessibilityelemen
 console:phone-390x844-light: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. importantForAccessibility importantforaccessibi
 PASS phone-390x844-light rooms home: no capture testIDs
 PASS phone-390x844-light rooms home: no "Quick capture" copy
 PASS phone-390x844-light rooms home: no Alt+N hint
+PASS phone-390x844-light: rooms home loaded
 PASS phone-390x844-light: phone tab bar has no centre + button
 PASS phone-390x844-light: tab-today present
 PASS phone-390x844-light: tab-rooms present
@@ -106,12 +99,8 @@ PASS phone-390x844-light: tab-search present
 PASS phone-390x844-light: Alt+N opens nothing
 PASS phone-390x844-light: Ctrl+Alt+N opens nothing
 PASS phone-390x844-light: key presses do not change the page
-console:phone-390x844-light: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. accessibilityElementsHidden accessibilityelemen
-console:phone-390x844-light: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. importantForAccessibility importantforaccessibi
-created room UAT phone-390x844-light cap4mw74vnc8
-console:phone-390x844-light: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. accessibilityElementsHidden accessibilityelemen
-console:phone-390x844-light: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. importantForAccessibility importantforaccessibi
-opened room UAT phone-390x844-light cap4mw74vnc8 at http://127.0.0.1:8091/rooms/748ce423-3f69-4576-a403-4a9a3c33f5f9
+created room UAT phone-390x844-light cap4mw75w3jn
+opened room UAT phone-390x844-light cap4mw75w3jn at http://127.0.0.1:8091/rooms/16ab35b6-ab1f-4317-a5f4-9421402fcc89
 PASS phone-390x844-light room: no capture testIDs
 PASS phone-390x844-light room: no "Quick capture" copy
 PASS phone-390x844-light room: no Alt+N hint
@@ -125,41 +114,39 @@ console:phone-390x844-light: React does not recognize the `%s` prop on a DOM ele
 PASS phone-390x844-light today: no capture testIDs
 PASS phone-390x844-light today: no "Quick capture" copy
 PASS phone-390x844-light today: no Alt+N hint
+PASS phone-390x844-light today: shows "Nothing due today"
+PASS phone-390x844-light: today keeps "Capture a note"
+PASS phone-390x844-light notes: shows "Stome"
 console:phone-390x844-light: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. accessibilityElementsHidden accessibilityelemen
 console:phone-390x844-light: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. importantForAccessibility importantforaccessibi
 PASS phone-390x844-light recent/search: no capture testIDs
 PASS phone-390x844-light recent/search: no "Quick capture" copy
 PASS phone-390x844-light recent/search: no Alt+N hint
+PASS phone-390x844-light recent/search: shows "Recent notes"
 console:phone-390x844-light: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. accessibilityElementsHidden accessibilityelemen
 console:phone-390x844-light: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. importantForAccessibility importantforaccessibi
 PASS phone-390x844-light import: no capture testIDs
 PASS phone-390x844-light import: no "Quick capture" copy
 PASS phone-390x844-light import: no Alt+N hint
+PASS phone-390x844-light import: shows "bring your notes"
 console:phone-390x844-light: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. accessibilityElementsHidden accessibilityelemen
 console:phone-390x844-light: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. importantForAccessibility importantforaccessibi
 PASS phone-390x844-light companion: no capture testIDs
 PASS phone-390x844-light companion: no "Quick capture" copy
 PASS phone-390x844-light companion: no Alt+N hint
+PASS phone-390x844-light companion: shows "Pairing"
 lane phone-390x844-light complete
 PASS desktop-1280x900-light rooms home: no capture testIDs
 PASS desktop-1280x900-light rooms home: no "Quick capture" copy
 PASS desktop-1280x900-light rooms home: no Alt+N hint
+PASS desktop-1280x900-light: rooms home loaded
 PASS desktop-1280x900-light: sidebar has no Quick capture row
 PASS desktop-1280x900-light: sidebar shows Companion
 PASS desktop-1280x900-light: Alt+N opens nothing
 PASS desktop-1280x900-light: Ctrl+Alt+N opens nothing
 PASS desktop-1280x900-light: key presses do not change the page
-created room UAT desktop-1280x900-light cap4mw74vnc8
-console:desktop-1280x900-light: React does not recognize the `%s` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `%s` instead. If you accidentally passed it from a parent component, remove it from the DOM element. accessibilityElementsHidden accessibilityelemen
-console:desktop-1280x900-light: %o
-
-%s
-
-%s
- Error: Failed to execute 'createSyncAccessHandle' on 'FileSystemFileHandle': Access Handles cannot be created if there is another open Access Handle or Writable stream associated with the same file. The above error occurred in the <SQLiteProviderSuspense> component. React will try to rec
-console:desktop-1280x900-light: DatabaseBoundary caught Error: Failed to execute 'createSyncAccessHandle' on 'FileSystemFileHandle': Access Handles cannot be created if there is another open Access Handle or Writable stream associated with the same file. 
-    at SQLiteProviderSuspense (http://127.0.0.1:8091/node_modules/expo-route
-opened room UAT desktop-1280x900-light cap4mw74vnc8 at http://127.0.0.1:8091/rooms/8ec6d0e7-55b3-4da2-b869-03de28a9a070
+created room UAT desktop-1280x900-light cap4mw75w3jn
+opened room UAT desktop-1280x900-light cap4mw75w3jn at http://127.0.0.1:8091/rooms/6a54b07d-c6fc-47f2-9371-c4325bee13c7
 PASS desktop-1280x900-light room: no capture testIDs
 PASS desktop-1280x900-light room: no "Quick capture" copy
 PASS desktop-1280x900-light room: no Alt+N hint
@@ -169,13 +156,19 @@ PASS desktop-1280x900-light: in-room note persists across reload
 PASS desktop-1280x900-light today: no capture testIDs
 PASS desktop-1280x900-light today: no "Quick capture" copy
 PASS desktop-1280x900-light today: no Alt+N hint
+PASS desktop-1280x900-light today: shows "Nothing due today"
+PASS desktop-1280x900-light: today keeps "Capture a note"
+PASS desktop-1280x900-light notes: shows "Stome"
 PASS desktop-1280x900-light recent/search: no capture testIDs
 PASS desktop-1280x900-light recent/search: no "Quick capture" copy
 PASS desktop-1280x900-light recent/search: no Alt+N hint
+PASS desktop-1280x900-light recent/search: shows "Recent notes"
 PASS desktop-1280x900-light import: no capture testIDs
 PASS desktop-1280x900-light import: no "Quick capture" copy
 PASS desktop-1280x900-light import: no Alt+N hint
+PASS desktop-1280x900-light import: shows "bring your notes"
 PASS desktop-1280x900-light companion: no capture testIDs
 PASS desktop-1280x900-light companion: no "Quick capture" copy
 PASS desktop-1280x900-light companion: no Alt+N hint
+PASS desktop-1280x900-light companion: shows "Pairing"
 lane desktop-1280x900-light complete
