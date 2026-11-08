@@ -2,17 +2,36 @@ import {
   EDIT_TOOL_NAME,
   MOCK_SCENARIOS,
   PROVIDER_LIMITS,
+  STUDY_DECK_TOOL_NAME,
+  STUDY_OUTLINE_TOOL_NAME,
+  STUDY_QUIZ_TOOL_NAME,
   TOOL_NAME,
   HarnessError,
+  isStudyToolName,
   parseEditOutput,
   parseProposeInput,
   parseProposeOutput,
+  parseStudyDeckOutput,
+  parseStudyDraft,
+  parseStudyOutlineOutput,
+  parseStudyProposeInput,
+  parseStudyQuizOutput,
   requestCharCount,
   type EditProposeOutput,
   type MockScenario,
   type ProposeInput,
   type ProposeOutput,
+  type StudyDeckDraft,
+  type StudyQuizDraft,
+  type StudySlideOutlineDraft,
+  type StudyToolName,
 } from './contract';
+import {
+  StudyGeneratorError,
+  generateDeck,
+  generateQuiz,
+  generateSlideOutline,
+} from '../features/study/generator.ts';
 import { isReadTool, mockReadToolOutput, parseReadToolInput, parseReadToolOutput, type ReadToolName } from './tools';
 
 export type NoteToolName = typeof TOOL_NAME | typeof EDIT_TOOL_NAME;
@@ -21,6 +40,22 @@ export type ProviderRequest = {
   tool: NoteToolName | ReadToolName;
   input: unknown;
   scenario: MockScenario;
+};
+
+/**
+ * STUDY.5 (#135) request. Notes and read tools keep their request shape so
+ * the live companion dispatch is untouched; study proposals enter through
+ * the same `complete` method but only the mock provider answers them.
+ */
+export type StudyProviderRequest = {
+  tool: StudyToolName;
+  input: unknown;
+  scenario: MockScenario;
+};
+
+/** Anything that answers study proposals. The live providers do not implement this. */
+export type StudyProvider = {
+  complete(request: StudyProviderRequest, signal: AbortSignal): Promise<unknown>;
 };
 
 export type Provider = {
@@ -89,7 +124,76 @@ async function mockReadComplete(request: ProviderRequest & { tool: ReadToolName 
   return parseReadToolOutput(request.tool, mockReadToolOutput(request.tool, input), input);
 }
 
-export async function mockComplete(request: ProviderRequest, signal: AbortSignal): Promise<unknown> {
+/**
+ * STUDY.5 (#135) mock: deterministic STUDY.2 generator calls, no network.
+ * Generator failures map onto the shared harness codes: scope and shape stay
+ * invalid_shape/scope_rejected, corpus bounds become request_limit, and the
+ * error/timeout/oversize scenarios exercise the same paths as the notes tools.
+ */
+function mapStudyGeneratorError(error: StudyGeneratorError): HarnessError {
+  switch (error.code) {
+    case 'timeout':
+      return new HarnessError('timeout', error.message);
+    case 'provider_error':
+      return new HarnessError('provider_error', error.message);
+    case 'oversize':
+      return new HarnessError('output_limit', error.message);
+    case 'scope_rejected':
+      return new HarnessError('scope_rejected', error.message);
+    case 'too_many_chunks':
+    case 'input_too_large':
+      return new HarnessError('request_limit', error.message);
+    default:
+      return new HarnessError('invalid_shape', error.message);
+  }
+}
+
+export async function mockStudyComplete(request: StudyProviderRequest, signal: AbortSignal): Promise<unknown> {
+  if (!MOCK_SCENARIOS.includes(request.scenario)) {
+    throw new HarnessError('invalid_shape', 'The mock scenario is unknown');
+  }
+  if (signal.aborted) {
+    throw abortError(signal);
+  }
+  const input = parseStudyProposeInput(request.input);
+  if (request.scenario === 'cancel') {
+    return await waitForCancel(signal);
+  }
+  const scenario = request.scenario === 'success' ? undefined : request.scenario;
+  // The prompt and history travel with the request for parity with the notes
+  // tools (and count toward the request budget), but generation itself is a
+  // pure function of the selected chunks, so the mock stays deterministic.
+  const chunks = input.chunks.map((chunk) => ({
+    id: chunk.id,
+    roomId: chunk.roomId,
+    revision: chunk.revision,
+    text: chunk.text,
+  }));
+  const options = { ...input.options, ...(scenario === undefined ? {} : { scenario }) };
+  try {
+    switch (request.tool) {
+      case STUDY_DECK_TOOL_NAME:
+        return parseStudyDeckOutput(generateDeck(chunks, options));
+      case STUDY_QUIZ_TOOL_NAME:
+        return parseStudyQuizOutput(generateQuiz(chunks, options));
+      case STUDY_OUTLINE_TOOL_NAME:
+        return parseStudyOutlineOutput(generateSlideOutline(chunks, options));
+    }
+  } catch (error) {
+    if (error instanceof StudyGeneratorError) {
+      throw mapStudyGeneratorError(error);
+    }
+    throw error;
+  }
+}
+
+export async function mockComplete(
+  request: ProviderRequest | StudyProviderRequest,
+  signal: AbortSignal,
+): Promise<unknown> {
+  if (isStudyToolName(request.tool)) {
+    return mockStudyComplete(request as StudyProviderRequest, signal);
+  }
   if (isReadTool(request.tool)) {
     return mockReadComplete(request as ProviderRequest & { tool: ReadToolName }, signal);
   }
@@ -192,7 +296,7 @@ function abortError(signal: AbortSignal): HarnessError {
   return new HarnessError('cancelled', 'The provider call was cancelled');
 }
 
-export const mockProvider: Provider = {
+export const mockProvider: Provider & StudyProvider = {
   complete: mockComplete,
 };
 
@@ -278,4 +382,38 @@ export async function completeReadTool<T>(
     throw abortError(signal.aborted ? signal : timed.signal);
   }
   return parseReadToolOutput(request.tool, raw, input) as T;
+}
+
+/**
+ * STUDY.5 (#135): run one study proposal tool with the shared time limit and
+ * cancel, then validate the draft. Only the mock provider answers; the
+ * api-key stub has no study path and stays disabled.
+ */
+export async function completeStudyWithLimits(
+  provider: StudyProvider,
+  request: StudyProviderRequest,
+  signal: AbortSignal,
+  timeoutMs: number = PROVIDER_LIMITS.timeoutMs,
+): Promise<StudyDeckDraft | StudyQuizDraft | StudySlideOutlineDraft> {
+  const timed = combineSignals(signal, timeoutMs);
+  let raw: unknown;
+  try {
+    const pending = provider.complete(request, timed.signal);
+    void pending.catch(() => undefined);
+    raw = await Promise.race([pending, rejectWhenAborted(timed.signal)]);
+  } catch (error) {
+    if (error instanceof HarnessError) {
+      throw error;
+    }
+    if (timed.signal.aborted) {
+      throw abortError(timed.signal);
+    }
+    throw new HarnessError('provider_error', 'The study provider failed before answering');
+  } finally {
+    timed.stop();
+  }
+  if (signal.aborted || timed.signal.aborted) {
+    throw abortError(signal.aborted ? signal : timed.signal);
+  }
+  return parseStudyDraft(request.tool, raw);
 }
