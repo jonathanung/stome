@@ -16,6 +16,7 @@ import { getRoom, listChunks, listDueChunks, listRoomAnnotations } from '../data
 import { expoDriver } from '../db/expo-driver';
 import { AnchoredChunkText, PinnedAnswer } from '../features/ask/AnchoredChunkText';
 import type { ChunkFocus } from '../features/ask/citations';
+import { watchCaptureCommits } from '../features/capture/commitSignal';
 import { ChunkEditor, type EditResult } from '../features/chunks/ChunkEditor';
 import { pastedParagraphs } from '../features/chunks/paste';
 import { InkLassoActions } from '../features/ask/InkLassoActions';
@@ -161,6 +162,9 @@ export function RoomScreen() {
     });
     return () => { active = false; };
   }, [load]));
+  // A capture from the global panel commits outside this screen; reload so the
+  // note list and the Ask chunk selection see it without a reload.
+  useEffect(() => watchCaptureCommits(id ?? null, () => { void refresh(); }), [id, refresh]);
   const openCitation = useCallback((next: ChunkFocus) => {
     setFocus(next);
   }, []);
