@@ -133,10 +133,8 @@ export function ChunkEditor({
       () => revisionsRef.current?.expectedStructural(chunkRevision.current) ?? chunk.revision,
       onDelete,
     ).then((result) => {
-      if (!result.ok) {
-        onError(result.message);
-        setConfirmingId(null);
-      }
+      if (!result.ok) onError(result.message);
+      setConfirmingId(null);
     }).finally(() => {
       setDeleting(false);
     });
